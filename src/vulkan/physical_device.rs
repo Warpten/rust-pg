@@ -1,8 +1,6 @@
 use std::{collections::HashMap, ffi::CString};
 
-use anyhow::ensure;
-
-use super::{Instance, Queue, VirtualDevice};
+use super::{CommandPool, Instance, LogicalDevice, Queue};
 
 #[derive(Clone, Copy)]
 pub struct QueueFamily {
@@ -20,14 +18,15 @@ impl QueueFamily {
     /// * `queue_count` - The amount of queues to create. This can never be more than the actual number of queues in this family and will be clamped down.
     /// * `get_queue_priority` - A callable that will return a queue's priority given its index.
     /// * `extensions` - A set of device extensions to be enabled on the device.
-    pub fn create_virtual_device<'instance, 'device : 'instance>(
+    /// 
+    pub fn create_logical_device<'instance, 'device>(
         &self,
         instance : &'instance Instance,
         physical_device : &'device PhysicalDevice<'instance>,
         queue_count : usize,
         get_queue_priority : &dyn Fn(usize) -> f32,
         extensions : Vec<CString>,
-    ) -> VirtualDevice<'device, 'instance> {
+    ) -> LogicalDevice<'device, 'instance> {
         let queues = (0..queue_count).take(self.properties.queue_count as usize).collect::<Vec<_>>();
 
         let queue_priorities = queues
@@ -66,12 +65,37 @@ impl QueueFamily {
             }
         }).collect::<Vec<_>>();
 
-        VirtualDevice {
+        LogicalDevice {
             instance,
             handle : device,
             physical_device,
-            queues : queues_objs
+            queues : queues_objs,
         }
+    }
+
+    ///
+    /// Creates a command pool.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `device` - The device for which the command pool will be created.
+    /// 
+    pub fn create_command_pool<'device, 'instance>(
+        &self,
+        device : &'device LogicalDevice<'device, 'instance>
+    ) -> CommandPool<'device, 'instance> {
+        let command_pool = {
+            let command_pool_create_info = ash::vk::CommandPoolCreateInfo::default()
+                .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(self.index as u32);
+            unsafe {
+                device.handle
+                    .create_command_pool(&command_pool_create_info, None)
+                    .expect("Failed to create command pool")
+            }
+        };
+
+        CommandPool { handle : command_pool, device }
     }
 }
 
@@ -84,6 +108,11 @@ pub struct PhysicalDevice<'instance> {
 }
 
 impl<'instance> PhysicalDevice<'instance> {
+    /// Returns the extensions of this [`PhysicalDevice`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if calling `vkEnumerateDeviceExtensionProperties` fails.
     pub fn get_extensions(&self) -> Vec<ash::vk::ExtensionProperties> {
         unsafe {
             self.instance.handle.enumerate_device_extension_properties(self.handle)
@@ -91,6 +120,7 @@ impl<'instance> PhysicalDevice<'instance> {
         }
     }
 
+    /// Creates a new [`PhysicalDevice`].
     pub fn new(
         device : ash::vk::PhysicalDevice,
         instance : &'instance Instance

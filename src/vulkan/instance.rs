@@ -44,6 +44,11 @@ impl Instance {
         vk::FALSE
     }
 
+    /// Returns all physical devices of this Vulkan instance.
+    ///
+    /// # Panics
+    ///
+    /// Panics if .
     pub fn get_physical_devices(&self) -> Vec<PhysicalDevice> {
         let physical_devices = unsafe {
             self.handle.enumerate_physical_devices()
@@ -55,6 +60,11 @@ impl Instance {
         }).collect::<Vec<_>>()
     }
 
+    /// Creates a new [`Instance`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if .
     pub fn new(handle : &ash::Entry, app_name : CString, instance_extensions: &[CString]) -> Self {
         let mut debug_utils_messenger_create_info = {
             vk::DebugUtilsMessengerCreateInfoEXT::default()

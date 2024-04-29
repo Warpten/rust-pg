@@ -5,11 +5,11 @@ use egui_winit::winit::{event_loop::EventLoop, window::Window};
 
 use super::{Instance, PhysicalDevice, Surface};
 
-pub struct Renderer<'a> {
+pub struct Renderer<'instance> {
     pub handle : ash::Entry,
     pub instance : Instance,
-    pub surface : Surface,
-    pub device : PhysicalDevice<'a>,
+    pub surface : Surface<'instance>,
+    pub device : PhysicalDevice<'instance>,
 }
 
 impl Renderer<'_> {
