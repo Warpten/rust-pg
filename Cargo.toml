@@ -3,24 +3,18 @@ name = "wowedit"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-wgpu = ["eframe/wgpu"]
-
+# TODO: Clarify the whole dependency hell I have going on here.
 [dependencies]
 puffin_egui = "0.27.0"
-eframe = { version = "0.27.2", features = [
-  "default",
-  "puffin"
-] }
-egui = { version = "0.27.2", features = [
-  "callstack",
-  "default",
-  "extra_debug_asserts",
-  "log",
-] }
+egui = { version = "0.27.2", features = ["callstack", "default", "extra_debug_asserts", "log"] }
+egui-winit = "0.27.2"
 puffin = "0.19"
 bytes = "1.6.0"
 anyhow = "1.0.82"
 thiserror = "1.0.59"
 md5 = "0.7.0"
 enumflags2 = "0.7.9"
+gpu-allocator = { version = "0.25.0", default-features = false, features = ["vulkan"] }
+ash = { version = "0.38.0", default-features = false, features = ["linked", "debug"] }
+ash-window = "0.13.0"
+raw-window-handle = "0.6.1"

@@ -4,7 +4,10 @@ use application::{Application, debugging_state::DebuggingState};
 
 mod application;
 mod casc;
+mod vulkan;
 
+fn main() { }
+/*
 fn main() -> Result<(), eframe::Error> {
     #[cfg(debug_assertions)]
     let state = {
@@ -36,3 +39,4 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|cc| Box::new(Application::new(cc, state))),
     )
 }
+*/

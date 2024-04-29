@@ -1,4 +1,4 @@
-use eframe::{App, CreationContext, Frame};
+// use eframe::{App, CreationContext, Frame};
 use egui::{Context, Grid, TextEdit, Window};
 
 use self::{debugging_state::DebuggingState, window_state::WindowState};
@@ -14,7 +14,7 @@ pub struct Application {
     load_encoding_specs : bool,
 }
 
-impl Application {
+/*impl Application {
     pub fn new(_cc : &CreationContext<'_>, state : Option<DebuggingState>) -> Self {
         Self {
             windows : WindowState::new(state),
@@ -88,3 +88,4 @@ impl App for Application {
         });
     }
 }
+*/
