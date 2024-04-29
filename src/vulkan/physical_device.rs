@@ -68,6 +68,7 @@ impl QueueFamily {
 
         VirtualDevice {
             instance,
+            handle : device,
             physical_device,
             queues : queues_objs
         }

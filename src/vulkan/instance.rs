@@ -9,6 +9,15 @@ pub struct Instance {
     pub debug_messenger : ash::vk::DebugUtilsMessengerEXT,
 }
 
+impl Drop for Instance {
+    fn drop(&mut self) {
+        unsafe {
+            self.debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
+            self.handle.destroy_instance(None);
+        }
+    }
+}
+
 impl Instance {
     unsafe extern "system" fn vulkan_debug_utils_callback(
         message_severity : vk::DebugUtilsMessageSeverityFlagsEXT,
