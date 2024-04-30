@@ -1,11 +1,19 @@
+use std::{ops::Deref, sync::Arc};
+
 use super::LogicalDevice;
 
-pub struct CommandPool<'device, 'instance> {
+pub struct CommandPool {
     pub handle : ash::vk::CommandPool,
-    pub device : &'device LogicalDevice<'device, 'instance>,
+    pub device : Arc<LogicalDevice>,
 }
 
-impl Drop for CommandPool<'_, '_> {
+impl Deref for CommandPool {
+    type Target = ash::vk::CommandPool;
+
+    fn deref(&self) -> &Self::Target { &self.handle }
+}
+
+impl Drop for CommandPool {
     fn drop(&mut self) {
         unsafe {
             self.device.handle.destroy_command_pool(self.handle, None)

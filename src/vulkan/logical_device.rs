@@ -1,19 +1,22 @@
-use super::{Instance, PhysicalDevice};
+use std::sync::Arc;
+
+use super::{Instance, PhysicalDevice, QueueFamily};
 
 pub struct Queue {
     pub handle : ash::vk::Queue,
-    pub index : usize
+    pub index : u32,
+    pub family : QueueFamily,
 }
 
 /// A logical Vulkan device.
-pub struct LogicalDevice<'device, 'instance : 'device> {
-    pub instance : &'instance Instance,
+pub struct LogicalDevice {
+    pub instance : Arc<Instance>,
     pub handle : ash::Device,
-    pub physical_device : &'device PhysicalDevice<'instance>,
+    pub physical_device : Arc<PhysicalDevice>,
     pub queues : Vec<Queue>
 }
 
-impl Drop for LogicalDevice<'_, '_> {
+impl Drop for LogicalDevice {
     fn drop(&mut self) {
         unsafe {
             self.handle.destroy_device(None);

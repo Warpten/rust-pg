@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
-pub struct Swapchain<'instance, 'surface : 'device, 'device : 'instance> {
+pub struct Swapchain {
     pub handle : ash::vk::SwapchainKHR,
-    pub device : &'device LogicalDevice<'device, 'instance>,
-    pub surface : &'surface Surface<'instance>,
+    pub device : Arc<LogicalDevice>,
+    pub surface : Arc<Surface>,
     pub loader : ash::khr::swapchain::Device,
     pub extent : ash::vk::Extent2D,
     pub images : Vec<ash::vk::Image>,
@@ -40,7 +42,7 @@ pub trait SwapchainOptions {
     fn present_mode(&self) -> ash::vk::PresentModeKHR;
 }
 
-impl Drop for Swapchain<'_, '_, '_> {
+impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
             self.loader.destroy_swapchain(self.handle, None);
@@ -48,7 +50,7 @@ impl Drop for Swapchain<'_, '_, '_> {
     }
 }
 
-impl Swapchain<'_, '_, '_> {
+impl Swapchain {
     pub fn image_count(&self) -> usize {
         self.images.len()
     }
@@ -64,16 +66,16 @@ impl Swapchain<'_, '_, '_> {
     /// 
     /// # Panics
     ///
-    /// * Panics if `getPhysicalDeviceSurfaceFormats` fails.
-    /// * Panics if `getPhysicalDeviceSurfaceCapabilities` fails.
-    /// * Panics if `vkCreateSwapchainKHR` fails.
-    /// * Panics if `vkGetSwapchainImagesKHR` fails.
-    pub fn new<'device, 'instance, 'surface>(
-        instance : &Instance,
-        device : &LogicalDevice<'device, 'instance>,
-        surface : &'surface Surface<'instance>,
+    /// * Panics if [`vkGetPhysicalDeviceSurfaceFormats`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceFormatsKHR.html) fails.
+    /// * Panics if [`vkGetPhysicalDeviceSurfaceCapabilities`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceCapabilitiesKHR.html) fails.
+    /// * Panics if [`vkCreateSwapchainKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateSwapchainKHR.html) fails.
+    /// * Panics if [`vkGetSwapchainImagesKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetSwapchainImagesKHR.html) fails.
+    pub fn new(
+        instance : Arc<Instance>,
+        device : Arc<LogicalDevice>,
+        surface : Arc<Surface>,
         options : impl SwapchainOptions,
-    ) -> Self {
+    ) -> Arc<Self> {
         let surface_format = {
             let surface_formats = unsafe {
                 surface.loader
@@ -145,7 +147,7 @@ impl Swapchain<'_, '_, '_> {
                 .expect("Failed to get swapchain images")
         };
 
-        Self {
+        Arc::new(Self {
             device : device,
             extent : surface_extent,
             handle,
@@ -153,6 +155,6 @@ impl Swapchain<'_, '_, '_> {
             loader : swapchain_loader,
             images : swapchain_images,
             queue_families : options.queue_families().to_vec()
-        }
+        })
     }
 }

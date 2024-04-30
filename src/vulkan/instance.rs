@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, ffi::CString};
+use std::{cmp::Ordering, ffi::CString, ops::Deref, sync::Arc};
 use ash::vk;
 
 use super::PhysicalDevice;
@@ -7,6 +7,12 @@ pub struct Instance {
     pub handle : ash::Instance,
     pub debug_utils : ash::ext::debug_utils::Instance,
     pub debug_messenger : ash::vk::DebugUtilsMessengerEXT,
+}
+
+impl Deref for Instance {
+    type Target = ash::Instance;
+
+    fn deref(&self) -> &Self::Target { &self.handle }
 }
 
 impl Drop for Instance {
@@ -59,9 +65,9 @@ impl Instance {
     ///
     /// # Panics
     ///
-    /// Panics if `vkEnumeratePhysicalDevices`` fails.
-    pub fn get_physical_devices<F>(&self, cmp : F) -> Vec<PhysicalDevice>
-        where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
+    /// Panics if [`vkEnumeratePhysicalDevices`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumeratePhysicalDevices.html) fails.
+    pub fn get_physical_devices<F>(self : Arc<Instance>, cmp : F) -> Vec<Arc<PhysicalDevice>>
+        where F : FnMut(&Arc<PhysicalDevice>, &Arc<PhysicalDevice>) -> Ordering
     {
         let physical_devices = unsafe {
             self.handle.enumerate_physical_devices()
@@ -69,7 +75,7 @@ impl Instance {
         };
 
         let mut devices = physical_devices.iter().map(|physical_device| {
-            PhysicalDevice::new(physical_device.clone(), &self)
+            PhysicalDevice::new(physical_device.clone(), self)
         }).collect::<Vec<_>>();
         
         devices.sort_by(cmp);
@@ -78,11 +84,18 @@ impl Instance {
     }
 
     /// Creates a new [`Instance`].
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - The global Vulkan entry table.
+    /// * `app_name` - The name of the application.
+    /// * `instance_extensions` - An array of extensions to apply to this instance.
     ///
     /// # Panics
     ///
-    /// Panics if .
-    pub fn new(handle : &ash::Entry, app_name : CString, instance_extensions: &[CString]) -> Self {
+    /// * Panics if [`vkCreateInstance`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateInstance.html) failed.
+    /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
+    pub fn new(handle : Arc<ash::Entry>, app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
         let mut debug_utils_messenger_create_info = {
             vk::DebugUtilsMessengerCreateInfoEXT::default()
                 .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
@@ -133,10 +146,10 @@ impl Instance {
                 .expect("Failed to create debug utils messenger")
         };
 
-        Self {
+        Arc::new(Self {
             handle : instance,
             debug_utils : debug_utils_loader,
             debug_messenger,
-        }
+        })
     }
 }
