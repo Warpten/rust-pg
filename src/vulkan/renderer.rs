@@ -3,7 +3,7 @@ use std::{collections::HashSet, ffi::{self, c_char, CStr, CString}};
 use ash::{khr, vk, Device, Entry};
 use egui_winit::winit::{event_loop::EventLoop, window::Window};
 
-use super::{Instance, PhysicalDevice, Surface};
+use super::{logical_device, Instance, PhysicalDevice, Surface, Swapchain};
 
 pub struct Renderer<'instance> {
     pub handle : ash::Entry,
@@ -81,6 +81,23 @@ impl Renderer<'_> {
 
             is_device_extension_supported && is_swapchain_supported && present_queue_capable && graphics_family.is_some()
         }).expect("Unable to select a physical device");
+
+        let queue_family = physical_device.queue_families.iter().find(|(i, family)| {
+            family.properties.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+        }).map(|r| r.0).copied().filter(|family_index| {
+            unsafe {
+                surface.loader.get_physical_device_surface_support(
+                    physical_device.handle,
+                    *family_index as u32,
+                    surface.handle
+                ).expect("Failed to get physical device surface support")
+            }
+        }).and_then(|i| physical_device.queue_families.get(&i)).expect("Present queue family not found");
+
+        let logical_device = queue_family.create_logical_device(
+            &instance, physical_device, 1, &|_ : usize| 1.0_f32, vec![]);
+
+        let swapchain = Swapchain::new(&instance, &logical_device, &surface, queue_family, 1024, 768);
 
         Self {
             handle : entry,
