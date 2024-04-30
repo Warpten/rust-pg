@@ -5,6 +5,7 @@ pub struct Queue {
     pub index : usize
 }
 
+/// A logical Vulkan device.
 pub struct LogicalDevice<'device, 'instance : 'device> {
     pub instance : &'instance Instance,
     pub handle : ash::Device,

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ffi::CString};
 
-use super::{CommandPool, Instance, LogicalDevice, Queue};
+use super::{CommandPool, Instance, LogicalDevice, Queue, Surface};
 
 #[derive(Clone, Copy)]
 pub struct QueueFamily {
@@ -9,6 +9,26 @@ pub struct QueueFamily {
 }
 
 impl QueueFamily {
+    /// Returns true if this queue family can present to a given surface for a physical device.
+    ///
+    /// # Arguments
+    /// 
+    /// * `surface` - The [`Surface`] on which to present.
+    /// * `device` - The [`PhysicalDevice`] for which to present.
+    /// 
+    /// # Panics
+    ///
+    /// Panics if `vkGetPhysicalDeviceSurfaceSupport` fails.
+    pub fn can_present(&self, surface : &Surface, device : &PhysicalDevice) -> bool {
+        unsafe {
+            surface.loader.get_physical_device_surface_support(
+                device.handle,
+                self.index as u32,
+                surface.handle
+            ).expect("Failed to get physical device surface support")
+        }
+    }
+
     /// Creates a new physical device.
     /// 
     /// # Arguments
@@ -17,16 +37,17 @@ impl QueueFamily {
     /// * `physical_device` - The [`PhysicalDevice`] attached to this queue family.
     /// * `queue_count` - The amount of queues to create. This can never be more than the actual number of queues in this family and will be clamped down.
     /// * `get_queue_priority` - A callable that will return a queue's priority given its index.
-    /// * `extensions` - A set of device extensions to be enabled on the device.
-    /// 
-    pub fn create_logical_device<'instance, 'device>(
+    /// * `extensions` - A set of device extensions to be enabled on the device. 
+    pub fn create_logical_device<'instance, 'device, F>(
         &self,
         instance : &'instance Instance,
         physical_device : &'device PhysicalDevice<'instance>,
         queue_count : usize,
-        get_queue_priority : &dyn Fn(usize) -> f32,
+        get_queue_priority : F,
         extensions : Vec<CString>,
-    ) -> LogicalDevice<'device, 'instance> {
+    ) -> LogicalDevice<'device, 'instance> 
+        where F : Fn(usize) -> f32
+    {
         let queues = (0..queue_count).take(self.properties.queue_count as usize).collect::<Vec<_>>();
 
         let queue_priorities = queues
@@ -103,8 +124,9 @@ impl QueueFamily {
 pub struct PhysicalDevice<'instance> {
     pub instance : &'instance Instance,
     pub handle : ash::vk::PhysicalDevice,
-    pub properties : ash::vk::PhysicalDeviceMemoryProperties,
-    pub queue_families : HashMap<usize, QueueFamily>,
+    pub memory_properties : ash::vk::PhysicalDeviceMemoryProperties,
+    pub properties : ash::vk::PhysicalDeviceProperties,
+    pub queue_families : Vec<QueueFamily>,
 }
 
 impl<'instance> PhysicalDevice<'instance> {
@@ -129,16 +151,21 @@ impl<'instance> PhysicalDevice<'instance> {
             instance.handle.get_physical_device_memory_properties(device)
         };
 
+        let physical_device_properties = unsafe {
+            instance.handle.get_physical_device_properties(device)
+        };
+
         let queue_families = unsafe {
             instance.handle.get_physical_device_queue_family_properties(device)
-        }.iter().enumerate().map(|(index, properties)| {
-            (index, QueueFamily { index, properties : *properties })
-        }).collect::<HashMap<_, _>>();
+        }.iter().enumerate().map(|(index, &properties)| {
+            QueueFamily { index, properties }
+        }).collect::<Vec<_>>();
 
         Self {
             handle : device,
             instance,
-            properties : physical_device_memory_properties,
+            memory_properties : physical_device_memory_properties,
+            properties : physical_device_properties,
             queue_families
         }
     }

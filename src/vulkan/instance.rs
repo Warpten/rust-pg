@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::{cmp::Ordering, ffi::CString};
 use ash::vk;
 
 use super::PhysicalDevice;
@@ -44,20 +44,37 @@ impl Instance {
         vk::FALSE
     }
 
-    /// Returns all physical devices of this Vulkan instance.
+    /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted by device type,
+    /// in the following order:
+    /// 
+    /// 1. [`ash::vk::PhysicalDeviceType::DISCRETE_GPU`]
+    /// 2. [`ash::vk::PhysicalDeviceType::INTEGRATED_GPU`]
+    /// 3. [`ash::vk::PhysicalDeviceType::VIRTUAL_GPU`]
+    /// 4. [`ash::vk::PhysicalDeviceType::CPU`]
+    /// 5. [`ash::vk::PhysicalDeviceType::OTHER`]
+    /// 
+    /// # Arguments
+    /// 
+    /// * `cmp` A comparator function that returns an ordering.
     ///
     /// # Panics
     ///
-    /// Panics if .
-    pub fn get_physical_devices(&self) -> Vec<PhysicalDevice> {
+    /// Panics if `vkEnumeratePhysicalDevices`` fails.
+    pub fn get_physical_devices<F>(&self, cmp : F) -> Vec<PhysicalDevice>
+        where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
+    {
         let physical_devices = unsafe {
             self.handle.enumerate_physical_devices()
                 .expect("Failed to enumerate physical devices")
         };
 
-        physical_devices.iter().map(|physical_device| {
+        let mut devices = physical_devices.iter().map(|physical_device| {
             PhysicalDevice::new(physical_device.clone(), &self)
-        }).collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
+        
+        devices.sort_by(cmp);
+
+        devices
     }
 
     /// Creates a new [`Instance`].
