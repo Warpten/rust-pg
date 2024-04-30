@@ -3,13 +3,41 @@ use std::{collections::HashSet, ffi::{self, c_char, CStr, CString}};
 use ash::{khr, vk, Device, Entry};
 use egui_winit::winit::{event_loop::EventLoop, window::Window};
 
-use super::{logical_device, Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use crate::vulkan::SwapchainOptions;
+
+use super::{Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
 
 pub struct Renderer<'instance> {
     pub handle : ash::Entry,
     pub instance : Instance,
     pub surface : Surface<'instance>,
     pub device : PhysicalDevice<'instance>,
+}
+
+mod options {
+    use crate::vulkan::{QueueFamily, SwapchainOptions};
+
+    pub struct Swapchain {
+        pub queue_families : Vec<QueueFamily>,
+        pub width : u32,
+        pub height : u32
+    }
+
+    impl SwapchainOptions for Swapchain {
+        fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool {
+            format.format == ash::vk::Format::B8G8R8A8_UNORM || format.format == ash::vk::Format::R8G8B8A8_UNORM
+        }
+    
+        fn queue_families(&self) -> Vec<QueueFamily> { self.queue_families }
+    
+        fn width(&self) -> u32 { self.width }
+
+        fn height(&self) -> u32 { self.height }
+        
+        fn composite_alpha(&self) -> ash::vk::CompositeAlphaFlagsKHR { ash::vk::CompositeAlphaFlagsKHR::OPAQUE }
+
+        fn present_mode(&self) -> ash::vk::PresentModeKHR { ash::vk::PresentModeKHR::FIFO }
+    }
 }
 
 impl Renderer<'_> {
@@ -90,11 +118,12 @@ impl Renderer<'_> {
         // 3. With the requested extensions
         // 4. And swapchain capable.
         let (physical_device, queue_family) = instance.get_physical_devices(
-            |&left, &right| {
-                // TODO: Revisit this; DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
-                left.properties.device_type.cmp(&right.properties.device_type)
-            }
-        ).iter()
+                |&left, &right| {
+                    // TODO: Revisit this; DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
+                    left.properties.device_type.cmp(&right.properties.device_type)
+                }
+            )
+            .iter()
             .find_map(|&physical_device| -> Option<(&PhysicalDevice, &QueueFamily)> {
                 Self::get_capable_queue(&physical_device, &surface, extensions)
                     .map(|queue| (&physical_device, queue))
@@ -102,9 +131,19 @@ impl Renderer<'_> {
             .expect("Failed to select a physical device and an associated queue family");
 
         let logical_device = queue_family.create_logical_device(
-            &instance, physical_device, 1, |_ : usize| 1.0_f32, vec![]);
+            &instance, physical_device, 1, |_| 1.0_f32, vec![]);
 
-        let swapchain = Swapchain::new(&instance, &logical_device, &surface, queue_family, width, height);
+        let swapchain_options = options::Swapchain {
+            queue_families : vec![queue_family.clone()],
+            width,
+            height
+        };
+
+        let swapchain = Swapchain::new(
+            &instance,
+            &logical_device,
+            &surface,
+            swapchain_options);
 
         Self {
             handle : entry,

@@ -1,4 +1,4 @@
-use super::{Instance, LogicalDevice, Queue, QueueFamily, Surface};
+use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain<'instance, 'surface : 'device, 'device : 'instance> {
     pub handle : ash::vk::SwapchainKHR,
@@ -7,6 +7,37 @@ pub struct Swapchain<'instance, 'surface : 'device, 'device : 'instance> {
     pub loader : ash::khr::swapchain::Device,
     pub extent : ash::vk::Extent2D,
     pub images : Vec<ash::vk::Image>,
+    pub queue_families : Vec<QueueFamily>,
+}
+
+/// Options that are used when creating a [`Swapchain`].
+pub trait SwapchainOptions {
+    /// Determines if the provided surface_format is eligible for the swapchain.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `format` - The format to test.
+    /// 
+    /// # Returns
+    /// 
+    /// This function should return `true` in one exact case; if it doesn't, whatever format is tested
+    /// `true` first will be selected.
+    fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool;
+
+    /// Returns the [`QueueFamily`]ies that will have access to the swapchain's images.
+    fn queue_families(&self) -> Vec<QueueFamily>;
+
+    /// Returns the width of the swapchain's images.
+    fn width(&self) -> u32;
+
+    /// Returns the height of the swapchain's images.
+    fn height(&self) -> u32;
+
+    /// Returns the composite flags to be used by the swapchain's images.
+    fn composite_alpha(&self) -> ash::vk::CompositeAlphaFlagsKHR;
+
+    /// Returns the presentation mode of this swapchain.
+    fn present_mode(&self) -> ash::vk::PresentModeKHR;
 }
 
 impl Drop for Swapchain<'_, '_, '_> {
@@ -18,13 +49,30 @@ impl Drop for Swapchain<'_, '_, '_> {
 }
 
 impl Swapchain<'_, '_, '_> {
+    pub fn image_count(&self) -> usize {
+        self.images.len()
+    }
+
+    /// Creates a new swapchain.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `instance` - The global Vulkan instance.
+    /// * `device` - The [`LogicalDevice`] for which to create a swapchain.
+    /// * `surface` - The [`Surface`] for which to create a swapchain.
+    /// * `options` - An implementation of the [`SwapchainOptions`] trait that defines how the swapchain should be created.
+    /// 
+    /// # Panics
+    ///
+    /// * Panics if `getPhysicalDeviceSurfaceFormats` fails.
+    /// * Panics if `getPhysicalDeviceSurfaceCapabilities` fails.
+    /// * Panics if `vkCreateSwapchainKHR` fails.
+    /// * Panics if `vkGetSwapchainImagesKHR` fails.
     pub fn new<'device, 'instance, 'surface>(
         instance : &Instance,
         device : &LogicalDevice<'device, 'instance>,
         surface : &'surface Surface<'instance>,
-        queue_family : &QueueFamily,
-        width : u32,
-        height : u32
+        options : impl SwapchainOptions,
     ) -> Self {
         let surface_format = {
             let surface_formats = unsafe {
@@ -34,10 +82,7 @@ impl Swapchain<'_, '_, '_> {
             };
 
             surface_formats.iter()
-                .find(|format| {
-                    format.format == ash::vk::Format::B8G8R8A8_UNORM
-                        || format.format == ash::vk::Format::R8G8B8A8_UNORM
-                })
+                .find(|&v| options.select_surface_format(v))
                 .unwrap_or(&surface_formats[0])
                 .clone()
         };
@@ -51,10 +96,10 @@ impl Swapchain<'_, '_, '_> {
             surface_capabilities.current_extent
         } else {
             ash::vk::Extent2D {
-                width: width
+                width: options.width()
                     .max(surface_capabilities.min_image_extent.width)
                     .min(surface_capabilities.max_image_extent.width),
-                height: height
+                height: options.height()
                     .max(surface_capabilities.min_image_extent.height)
                     .min(surface_capabilities.max_image_extent.height),
             }
@@ -68,7 +113,9 @@ impl Swapchain<'_, '_, '_> {
         };
 
         let image_sharing_mode = ash::vk::SharingMode::EXCLUSIVE;
-        let queue_family_indices = [queue_family.index as u32];
+        let queue_family_indices = options.queue_families().iter()
+            .map(|q| q.index as u32)
+            .collect::<Vec<_>>();
 
         let swapchain_create_info = ash::vk::SwapchainCreateInfoKHR::default()
             .surface(surface.handle)
@@ -81,7 +128,7 @@ impl Swapchain<'_, '_, '_> {
             .image_sharing_mode(image_sharing_mode)
             .queue_family_indices(&queue_family_indices)
             .pre_transform(surface_capabilities.current_transform)
-            .composite_alpha(ash::vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .composite_alpha(options.composite_alpha())
             .present_mode(ash::vk::PresentModeKHR::FIFO)
             .clipped(true);
 
@@ -104,7 +151,8 @@ impl Swapchain<'_, '_, '_> {
             handle,
             surface,
             loader : swapchain_loader,
-            images : swapchain_images
+            images : swapchain_images,
+            queue_families : options.queue_families().to_vec()
         }
     }
 }
