@@ -71,11 +71,10 @@ impl Renderer {
             )
             .iter()
             .filter(|device| -> bool {
+                // 1. First, check for device extensions.
+                // We start by collecting a device's extensions and then remove them from the extensions
+                // we asked for. If no extension subside, we're good.
                 let extensions_supported = {
-                    // 3. Now, all that's left to do is check for extensions.
-                    // Normally, we would have a statically defined list of wanted extensions, but... alas.
-                    // We start by collecting a device's extensions and then remove them from the extensions
-                    // we asked for. If no extension subside, we're good.
                     let mut device_extensions_names = device.get_extensions().iter()
                         .map(|device_extension| {
                             unsafe {
@@ -93,8 +92,8 @@ impl Renderer {
                     required_extensions.is_empty()
                 };
 
+                // 2. Finally, check for swapchain support.
                 let supports_present = {
-                    // 4. Finally, check for swapchain support.
                     let surface_formats = unsafe {
                         surface.loader.get_physical_device_surface_formats(device.handle, surface.handle)
                             .expect("Failed to get physical device surface formats")
