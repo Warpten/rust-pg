@@ -41,14 +41,21 @@ mod options {
 }
 
 impl Renderer {
-    fn create_entry() -> Entry {
-        // If we link with vulkan, use linked(); use load().unwrap() otherwise
-        Entry::linked()
-    }
-
-    pub fn new(width : u32, height : u32, extensions : Vec<CString>) -> Self {
+    /// Creates a new [`Renderer`].
+    /// 
+    /// # Arguments
+    /// 
+    /// * `width` - Width of the viewport
+    /// * `height` - Height of the viewport
+    /// * `instance_extensions` - A set of instance level extension names.
+    /// * `device_extensions` - A set of device level extension names.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a ton of stuff goes wrong. Really, don't look.
+    pub fn new(width : u32, height : u32, instance_extensions : Vec<CString>, device_extensions : Vec<CString>) -> Self {
         let entry = Arc::new(Entry::linked());
-        let instance = Instance::new(entry, CString::new("World Editor").unwrap(), vec![]);
+        let instance = Instance::new(entry, CString::new("World Editor").unwrap(), instance_extensions);
         let surface = Surface::new(entry, instance, todo!("fixme, add a window parameter!"));
 
         // Select a physical device
@@ -76,7 +83,7 @@ impl Renderer {
                             }
                         }).collect::<Vec<_>>();
 
-                    let mut required_extensions = extensions.iter()
+                    let mut required_extensions = device_extensions.iter()
                         .map(|e| e.to_owned())
                         .collect::<HashSet<_>>();
                     for extension_name in device_extensions_names {
@@ -121,7 +128,7 @@ impl Renderer {
             .expect("Failed to select a physical device and an associated queue family");
 
         let logical_device = physical_device.create_logical_device(
-            instance, vec![(1, graphics_queue), (1, presentation_queue)], |_index, _family| 1.0_f32, vec![]);
+            instance, vec![(1, graphics_queue), (1, presentation_queue)], |_index, _family| 1.0_f32, device_extensions);
 
         let swapchain_options = options::Swapchain {
             queue_families : vec![*graphics_queue, *presentation_queue],
