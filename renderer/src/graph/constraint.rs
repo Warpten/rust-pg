@@ -1,0 +1,43 @@
+use super::{pass::Pass, Graph};
+
+/// Describes a synchronization condition that ensures all identified [`Pass`]es are done before
+/// continuing. The scheduler will try to execute these passes on different queues.
+pub struct Synchronization {
+    pass_indices : Vec<usize>,
+    stages : ash::vk::PipelineStageFlags2,
+}
+
+impl Synchronization {
+    pub fn new(stages : ash::vk::PipelineStageFlags2, passes : &[Pass]) -> Self {
+        Self {
+            pass_indices : passes.iter().map(Pass::index).collect::<Vec<_>>(),
+            stages
+        }
+    }
+
+    pub fn stages(&self) -> ash::vk::PipelineStageFlags2 { self.stages }
+
+    pub fn affects(&self, pass : &Pass) -> bool {
+        self.pass_indices.contains(&pass.index())
+    }
+}
+
+/// A sequencing condition that ensures a pass is finished before another executes. This only works
+/// if both passes execute on the same queue.
+pub struct Sequencing {
+    first : usize,
+    second : usize,
+    stages : ash::vk::PipelineStageFlags2
+}
+
+impl Sequencing {
+    pub fn new(stages : ash::vk::PipelineStageFlags2, first_pass : &Pass, second_pass : &Pass) -> Self {
+        Self {
+            first : first_pass.index(),
+            second : second_pass.index(),
+            stages
+        }
+    }
+    
+    pub fn stages(&self) -> ash::vk::PipelineStageFlags2 { self.stages }
+}

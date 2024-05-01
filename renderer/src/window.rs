@@ -1,4 +1,5 @@
 use egui_winit::winit::{self, event_loop::EventLoop, window::WindowBuilder};
+use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
 pub struct Window {
     handle : winit::window::Window,
@@ -20,6 +21,19 @@ impl Window {
         Self {
             handle : window
         }
+    }
+
+    pub fn surface_extensions(&self) -> Vec<*const i8> {
+        let raw_display_handle : RawDisplayHandle = self.handle().display_handle()
+            .map(Into::into)
+            .expect("Unable to retrieve display handle");
+
+        let mut surface_extension_names : Vec<*const i8> = ash_window::enumerate_required_extensions(raw_display_handle)
+            .expect("Failed to enumerate required display extensions")
+            .to_vec();
+
+        surface_extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
+        surface_extension_names
     }
 
     pub fn handle(&self) -> &winit::window::Window { &self.handle }

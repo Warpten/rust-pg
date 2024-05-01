@@ -10,6 +10,8 @@ mod semaphore_pool;
 mod swapchain;
 mod renderer;
 
+pub mod graph;
+
 pub use renderer::*;
 pub use swapchain::*;
 pub use semaphore_pool::*;

@@ -1,19 +1,31 @@
-use std::{collections::HashSet, ffi::{CStr, CString}, sync::Arc};
+use std::{collections::HashSet, ffi::{CStr, CString}, mem::ManuallyDrop, sync::{Arc, Mutex}};
 
-use crate::{traits::Handle, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-pub struct Renderer {
+use crate::{traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+
+pub struct Renderer<'a> {
     pub entry : Arc<ash::Entry>,
     pub instance : Arc<Instance>,
     pub logical_device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
     pub swapchain : Arc<Swapchain>,
+    pub window : &'a Window,
+    pub allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 }
 
-impl Renderer {
-    pub fn new<T : SwapchainOptions>(window : &Window, instance_extensions : Vec<CString>, device_extensions : Vec<CString>, options : T) -> Self {
+impl<'a> Renderer<'a> {
+    pub fn new<T : SwapchainOptions>(window : &'a Window, instance_extensions : Vec<CString>, device_extensions : Vec<CString>, options : T) -> Self {
         let entry = Arc::new(ash::Entry::linked());
-        let instance = Instance::new(&entry, CString::new("World Editor").unwrap(), instance_extensions);
+        let instance = unsafe {
+            // TODO: This could probably use some cleaning up.
+            let mut all_extensions = instance_extensions;
+            for extension in window.surface_extensions() {
+                all_extensions.push(CStr::from_ptr(extension).to_owned());
+            }
+
+            Instance::new(&entry, CString::new("World Editor").unwrap(), all_extensions)
+        };
         let surface = Surface::new(&entry, instance.clone(), window);
         
         // Select a physical device
@@ -103,12 +115,25 @@ impl Renderer {
             options
         );
 
+        let allocator = Allocator::new(&AllocatorCreateDesc{
+            instance: instance.handle().clone(),
+            device: logical_device.handle().clone(),
+            physical_device: physical_device.handle().clone(),
+
+            // TODO: All these may need tweaking and fixing
+            debug_settings: AllocatorDebugSettings::default(),
+            allocation_sizes : AllocationSizes::default(),
+            buffer_device_address: false,
+        }).unwrap();
+
         Self {
             entry,
             instance,
             logical_device,
             surface,
-            swapchain
+            swapchain,
+            window,
+            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }
 }
