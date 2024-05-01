@@ -1,25 +1,24 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::traits::BorrowHandle;
+use crate::traits::Handle;
 use crate::Window;
 use crate::Instance;
 
 pub struct Surface {
     pub instance : Arc<Instance>,
-    pub handle : ash::vk::SurfaceKHR,
+    handle : ash::vk::SurfaceKHR,
     pub loader : ash::khr::surface::Instance,
     // pub format : vk::SurfaceFormatKHR,
     // pub resolution : vk::Extent2D,
 }
 
-impl Deref for Surface {
-    type Target = ash::khr::surface::Instance;
+impl Handle for Surface {
+    type Target = ash::vk::SurfaceKHR;
 
-    fn deref(&self) -> &Self::Target {
-        &self.loader
-    }
+    fn handle(&self) -> Self::Target { self.handle }
 }
 
 impl Drop for Surface {

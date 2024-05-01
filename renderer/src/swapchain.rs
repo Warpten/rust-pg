@@ -81,7 +81,7 @@ impl Swapchain {
         let surface_format = {
             let surface_formats = unsafe {
                 surface.loader
-                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle)
+                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle())
                     .expect("Failed to get physical device surface formats")
             };
 
@@ -93,7 +93,7 @@ impl Swapchain {
 
         let surface_capabilities = unsafe {
             surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle)
+                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle())
                 .expect("Failed to get physical device surface capabilities")
         };
         let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
@@ -120,7 +120,7 @@ impl Swapchain {
             .collect::<Vec<_>>();
 
         let swapchain_create_info = ash::vk::SwapchainCreateInfoKHR::default()
-            .surface(surface.handle)
+            .surface(surface.handle())
             .min_image_count(image_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)

@@ -89,7 +89,7 @@ impl QueueFamily {
             surface.loader.get_physical_device_surface_support(
                 device.handle(),
                 self.index as u32,
-                surface.handle
+                surface.handle()
             ).expect("Failed to get physical device surface support")
         }
     }

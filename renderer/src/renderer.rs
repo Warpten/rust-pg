@@ -33,7 +33,7 @@ impl Renderer {
                 // We start by collecting a device's extensions and then remove them from the extensions
                 // we asked for. If no extension subside, we're good.
                 let extensions_supported = {
-                    let device_extensions_names = device.get_extensions().iter()
+                    let device_extensions_names = device.get_extensions().into_iter()
                         .map(|device_extension| {
                             unsafe {
                                 CStr::from_ptr(device_extension.extension_name.as_ptr()).to_owned()
@@ -53,12 +53,12 @@ impl Renderer {
                 // 2. Finally, check for swapchain support.
                 let supports_present = {
                     let surface_formats = unsafe {
-                        surface.loader.get_physical_device_surface_formats(device.handle(), surface.handle)
+                        surface.loader.get_physical_device_surface_formats(device.handle(), surface.handle())
                             .expect("Failed to get physical device surface formats")
                     };
 
                     let surface_present_modes = unsafe {
-                        surface.loader.get_physical_device_surface_present_modes(device.handle(), surface.handle)
+                        surface.loader.get_physical_device_surface_present_modes(device.handle(), surface.handle())
                             .expect("Failed to get physical device surface present modes")
                     };
 
@@ -83,7 +83,6 @@ impl Renderer {
                     }
                 }
 
-                // Early return
                 match (graphics_queue, present_queue) {
                     (Some(g), Some(p)) => Some((device, g, p)),
                     _ => None
