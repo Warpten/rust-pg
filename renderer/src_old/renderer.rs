@@ -1,15 +1,16 @@
-use std::{collections::HashSet, ffi::{self, c_char, CStr, CString}, sync::Arc};
+use std::{collections::HashSet, ffi::{self, c_char, CStr, CString}, sync::{Arc, Mutex}};
 
 use ash::{khr, vk, Device, Entry};
 use egui_winit::winit::{event_loop::EventLoop, window::Window};
+use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 
 use crate::vulkan::SwapchainOptions;
 
-use super::{Instance, PhysicalDevice, QueueFamily, Surface, Swapchain};
+use super::{Context, PhysicalDevice, QueueFamily, Surface, Swapchain};
 
 pub struct Renderer{
     pub handle : Arc<ash::Entry>,
-    pub instance : Arc<Instance>,
+    pub instance : Arc<Context>,
     pub surface : Arc<Surface>,
     pub device : Arc<PhysicalDevice>,
 }
@@ -53,9 +54,9 @@ impl Renderer {
     /// # Panics
     ///
     /// Panics if a ton of stuff goes wrong. Really, don't look.
-    pub fn new(width : u32, height : u32, instance_extensions : Vec<CString>, device_extensions : Vec<CString>) -> Self {
+    pub fn new(cc : egui::CreationContext, instance_extensions : Vec<CString>, device_extensions : Vec<CString>) -> Self {
         let entry = Arc::new(Entry::linked());
-        let instance = Instance::new(entry, CString::new("World Editor").unwrap(), instance_extensions);
+        let instance = Context::new(entry, CString::new("World Editor").unwrap(), instance_extensions);
         let surface = Surface::new(entry, instance, todo!("fixme, add a window parameter!"));
 
         // Select a physical device
@@ -140,6 +141,20 @@ impl Renderer {
             logical_device,
             surface,
             swapchain_options);
+
+            
+        let allocator = {
+            let allocator = Allocator::new(&AllocatorCreateDesc {
+                instance             : instance.clone(),
+                device               : logical_device.handle.clone(),
+                physical_device      : physical_device.handle.clone(),
+                debug_settings       : Default::default(),
+                buffer_device_address: false,
+                allocation_sizes     : Default::default(),
+            }).expect("GPU allocator initialization failed");
+
+            Arc::new(Mutex::new(allocator))
+        };
 
         Self {
             handle : entry,

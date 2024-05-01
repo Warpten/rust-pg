@@ -1,6 +1,7 @@
 mod surface;
+mod buffer;
 mod renderer;
-mod instance;
+mod context;
 mod physical_device;
 mod logical_device;
 mod command_pool;
@@ -8,11 +9,12 @@ mod swapchain;
 mod r#trait;
 mod queue;
 
+pub use buffer::*;
 pub use command_pool::*;
 pub use surface::*;
 pub use swapchain::*;
 pub use renderer::*;
-pub use instance::*;
+pub use context::*;
 pub use physical_device::*;
 pub use logical_device::*;
 pub use r#trait::*;

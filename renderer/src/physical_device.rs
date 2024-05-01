@@ -1,35 +1,40 @@
-use std::{collections::HashMap, ffi::CString, ops::Deref, sync::Arc};
+use std::{collections::HashMap, ffi::CString, ops::Range, sync::{Arc, Weak}};
+
+use crate::traits::{BorrowHandle, Handle};
 
 use super::{QueueFamily, Instance, LogicalDevice, Queue};
 
 #[derive(Clone)]
 pub struct PhysicalDevice {
-    pub instance : Arc<Instance>,
-    pub handle : ash::vk::PhysicalDevice,
+    handle : ash::vk::PhysicalDevice,
+    pub instance : Weak<Instance>,
     pub memory_properties : ash::vk::PhysicalDeviceMemoryProperties,
     pub properties : ash::vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
 }
 
-impl Deref for PhysicalDevice {
+impl Handle for PhysicalDevice {
     type Target = ash::vk::PhysicalDevice;
 
-    fn deref(&self) -> &Self::Target { &self.handle }
+    fn handle(&self) -> ash::vk::PhysicalDevice { self.handle }
 }
 
 impl PhysicalDevice {
-    /// Returns the extensions of this [`PhysicalDevice`].
+    /// Returns the extensions available on this [`PhysicalDevice`].
     ///
     /// # Panics
     ///
     /// Panics if [`vkEnumerateDeviceExtensionProperties`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumerateDeviceExtensionProperties.html) fails.
     pub fn get_extensions(&self) -> Vec<ash::vk::ExtensionProperties> {
         unsafe {
-            self.instance.handle.enumerate_device_extension_properties(self.handle)
+            self.instance.upgrade()
+                .expect("Instance released too early")
+                .handle()
+                .enumerate_device_extension_properties(self.handle)
                 .expect("Failed to enumerate device extensions")
         }
     }
-    
+
     /// Creates a new physical device.
     /// 
     /// # Arguments
@@ -44,9 +49,9 @@ impl PhysicalDevice {
     /// 
     /// * Panics if [`vkCreateDevice`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDevice.html) fails.
     pub fn create_logical_device<F>(
-        self : Arc<PhysicalDevice>,
+        &self,
         instance : Arc<Instance>,
-        queue_families : Vec<(u32, &QueueFamily)>,
+        queue_families : Vec<(u32, QueueFamily)>,
         get_queue_priority : F,
         extensions : Vec<CString>,
     ) -> Arc<LogicalDevice>
@@ -56,28 +61,48 @@ impl PhysicalDevice {
         // deduplicate them.
         // That implies we must sum up the queue counts - we'll limit them later
         let queue_families = {
-            let mut work_buffer = HashMap::<QueueFamily, u32>::new();
-            for (count, &family) in queue_families {
+            let mut work_buffer = HashMap::<QueueFamily, u32>::with_capacity(queue_families.len());
+            for (count, family) in queue_families {
                 work_buffer.entry(family).and_modify(|v| { *v += count; }).or_insert(count);
             }
-
-            work_buffer.iter().map(|e| (*e.1, *e.0)).collect::<Vec<_>>()
+            // Short lived, don't shrink_to_fit
+            work_buffer
         };
 
-        let queue_create_infos = queue_families.iter().map(|&(count, family)| {
-            let queues = (0..count).take(family.properties.queue_count as usize).collect::<Vec<_>>();
+        // Store queue priorities in a flattened buffer; each queue family will index into
+        // that buffer to slice out the amount of queue families.
+        let mut queue_create_infos = Vec::with_capacity(queue_families.len());
+        let mut flat_queue_priorities = vec![];
 
-            let queue_priorities = queues
-                .iter()
-                .map(|&i| get_queue_priority(i, family))
-                .collect::<Vec<_>>();
+        // Unfortunately has to happen in two loops because one borrow is immutable
+        // and the other is mutable...
+        for (&key, &value) in &queue_families {
+            for queue_index in 0..value.min(key.properties.queue_count) {
+                flat_queue_priorities.push(get_queue_priority(queue_index, key));
+            }
+        }
+        
+        for (&key, &value) in &queue_families {
+            let priority_index = flat_queue_priorities.len();
+            // Sacrificing brevity for readability (thank me later)
+            let queue_priorities_range = Range {
+                start : priority_index,
+                end : priority_index + (value.min(key.properties.queue_count) as usize)
+            };
+            
+            queue_create_infos.push(ash::vk::DeviceQueueCreateInfo::default()
+                .queue_family_index(key.index)
+                .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
+        }
 
-            ash::vk::DeviceQueueCreateInfo::default()
-                .queue_family_index(family.index as u32)
-                .queue_priorities(&queue_priorities)
-        }).collect::<Vec<_>>();
-
+        // TODO: Start requesting features.
         let physical_device_features = ash::vk::PhysicalDeviceFeatures::default();
+        // let physical_device_features = unsafe {
+        //     self.instance.upgrade()
+        //         .expect("Instance released too soon")
+        //         .handle()
+        //         .get_physical_device_features(*self.handle())
+        // };
 
         let enabled_extension_names = extensions
             .iter()
@@ -90,27 +115,16 @@ impl PhysicalDevice {
             .enabled_extension_names(&enabled_extension_names);
 
         let device = unsafe {
-            instance.create_device(self.handle, &device_create_info, None)
+            instance.handle().create_device(self.handle, &device_create_info, None)
                 .expect("Failed to create a virtual device")
         };
 
         // Now, get all the queues
-        let queues_objs = queue_families.iter().flat_map(|&(count, family)| {
-            (0..count).map(|index| {
-                Queue {
-                    family,
-                    index,
-                    handle : unsafe { device.get_device_queue(family.index as u32, index) }
-                }
-            })
+        let queues_objs = queue_families.iter().flat_map(|(family, count)| {
+            (0..*count).map(|index| Queue::new(*family, index, &device))
         }).collect::<Vec<_>>();
 
-        Arc::new(LogicalDevice {
-            instance,
-            handle : device,
-            physical_device : self,
-            queues : queues_objs,
-        })
+        Arc::new(LogicalDevice::new(instance, device, self.clone(), queues_objs))
     }
 
     /// Creates a new [`PhysicalDevice`].
@@ -121,28 +135,28 @@ impl PhysicalDevice {
     /// * `instance` - The global Vulkan instance.
     pub fn new(
         device : ash::vk::PhysicalDevice,
-        instance : Arc<Instance>
-    ) -> Arc<Self> {
+        instance : &Arc<Instance>
+    ) -> Self {
         let physical_device_memory_properties = unsafe {
-            instance.handle.get_physical_device_memory_properties(device)
+            instance.handle().get_physical_device_memory_properties(device)
         };
 
         let physical_device_properties = unsafe {
-            instance.handle.get_physical_device_properties(device)
+            instance.handle().get_physical_device_properties(device)
         };
 
         let queue_families = unsafe {
-            instance.handle.get_physical_device_queue_family_properties(device)
+            instance.handle().get_physical_device_queue_family_properties(device)
         }.iter().enumerate().map(|(index, &properties)| {
-            QueueFamily { index, properties }
+            QueueFamily {  index: index as u32, properties }
         }).collect::<Vec<_>>();
 
-        Arc::new(Self {
+        Self {
             handle : device,
-            instance,
+            instance : Arc::downgrade(&instance),
             memory_properties : physical_device_memory_properties,
             properties : physical_device_properties,
             queue_families
-        })
+        }
     }
 }

@@ -2,7 +2,9 @@ use std::{ops::Deref, sync::Arc};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use super::Instance;
+use crate::traits::BorrowHandle;
+use crate::Window;
+use crate::Instance;
 
 pub struct Surface {
     pub instance : Arc<Instance>,
@@ -34,7 +36,7 @@ impl Surface {
     /// # Arguments
     /// 
     /// * `entry` - Holds Vulkan functions independant of Device or Instance.
-    /// * `instance` - The main vulkan objet.
+    /// * `instance` - The main Vulkan [`Instance`].
     /// * `window` - An object providing a display handle and a window handle.
     /// 
     /// # Panics
@@ -42,19 +44,19 @@ impl Surface {
     /// * Panics if [`ash_window::create_surface`] fails.
     /// * Panics if [`HasDisplayHandle::display_handle`] fails.
     /// * Panics if [`HasWindowHandle::window_handle`] fails.
-    pub fn new<T : HasDisplayHandle + HasWindowHandle>(
-        entry : Arc<ash::Entry>,
+    pub fn new(
+        entry : &Arc<ash::Entry>,
         instance : Arc<Instance>, 
-        window : &T
+        window : &Window
     ) -> Arc<Self> {
-        let loader = ash::khr::surface::Instance::new(&entry, &instance.handle);
+        let loader = ash::khr::surface::Instance::new(&entry, instance.handle());
         let surface = unsafe {
             ash_window::create_surface(
                 &*entry,
-                &instance.handle,
-                window.display_handle().unwrap().into(),
-                window.window_handle().unwrap().into(), None)
-                .expect("Failed to create surface")
+                instance.handle(),
+                window.handle().display_handle().unwrap().into(),
+                window.handle().window_handle().unwrap().into(), None
+            ).expect("Failed to create surface")
         };
 
         Arc::new(Self { handle : surface, loader, instance })

@@ -2,9 +2,25 @@ use std::{hash::Hash, sync::Arc};
 
 use super::{CommandPool, LogicalDevice, PhysicalDevice, Surface};
 
+/// A queue family.
+/// 
+/// This structure associates, for a particular physical device, a queue family's properties with its index.
+///
+/// # Properties
+/// 
+/// * `queueFlags` - Indicates capabilities of the queues in this queue family.
+/// * `queueCount` - Amount of queues in this queue family. All families **must** support at least one queue.
+/// * `timestampValidBits` - This is the amount of meaningful bits in the timestamp written via
+///   [`vkCmdWriteTimestamp2`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCmdWriteTimestamp2.html)
+///   or [`vkCmdWriteTimestamp`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCmdWriteTimestamp.html).
+///   The valid range for the count is 36 to 64 bits, or a value of 0, indicating no support for timestamps. Bits outside
+///   the valid range are guaranteed to be zeros.
+/// * `minImageTransferGranularity` is the minimum granularity supported for image transfer operations on the queues in this queue family.
 #[derive(Clone, Copy)]
 pub struct QueueFamily {
+    /// The index of this queue family.
     pub index : usize,
+    /// An object describing properties of this queue family.
     pub properties : ash::vk::QueueFamilyProperties,
 }
 
@@ -60,6 +76,9 @@ impl QueueFamily {
     /// 
     /// * `device` - The device for which the command pool will be created.
     /// 
+    /// # Panics
+    /// 
+    /// * Panics if [`vkCreateCommandPool`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateCommandPool.html) fails.
     pub fn create_command_pool(
         &self,
         device : Arc<LogicalDevice>
@@ -69,8 +88,7 @@ impl QueueFamily {
                 .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
                 .queue_family_index(self.index as u32);
             unsafe {
-                device.handle
-                    .create_command_pool(&command_pool_create_info, None)
+                device.create_command_pool(&command_pool_create_info, None)
                     .expect("Failed to create command pool")
             }
         };

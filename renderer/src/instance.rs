@@ -1,18 +1,20 @@
-use std::{cmp::Ordering, ffi::CString, ops::Deref, sync::Arc};
-use ash::vk;
+use std::{cmp::Ordering, ffi::CString, sync::Arc};
+
+use crate::traits::BorrowHandle;
 
 use super::PhysicalDevice;
 
 pub struct Instance {
-    pub handle : ash::Instance,
+    pub entry : Arc<ash::Entry>,
+    handle : ash::Instance,
     pub debug_utils : ash::ext::debug_utils::Instance,
     pub debug_messenger : ash::vk::DebugUtilsMessengerEXT,
 }
 
-impl Deref for Instance {
+impl BorrowHandle for Instance {
     type Target = ash::Instance;
 
-    fn deref(&self) -> &Self::Target { &self.handle }
+    fn handle(&self) -> &ash::Instance { &self.handle }
 }
 
 impl Drop for Instance {
@@ -26,28 +28,28 @@ impl Drop for Instance {
 
 impl Instance {
     unsafe extern "system" fn vulkan_debug_utils_callback(
-        message_severity : vk::DebugUtilsMessageSeverityFlagsEXT,
-        message_types : vk::DebugUtilsMessageTypeFlagsEXT,
-        p_callback_data : *const vk::DebugUtilsMessengerCallbackDataEXT,
+        message_severity : ash::vk::DebugUtilsMessageSeverityFlagsEXT,
+        message_types : ash::vk::DebugUtilsMessageTypeFlagsEXT,
+        p_callback_data : *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
         _p_user_data : *mut std::ffi::c_void,
-    ) -> vk::Bool32 {
+    ) -> ash::vk::Bool32 {
         let severity = match message_severity {
-            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
-            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
-            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
-            vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
+            ash::vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
+            ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
+            ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
+            ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
             _ => panic!("[UNKNOWN]"),
         };
         let types = match message_types {
-            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
-            vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
-            vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
+            ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
+            ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
+            ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
             _ => panic!("[UNKNOWN]"),
         };
         let message = std::ffi::CStr::from_ptr((*p_callback_data).p_message);
         println!("[DEBUG]{}{}{:?}", severity, types, message);
 
-        vk::FALSE
+        ash::vk::FALSE
     }
 
     /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted by device type,
@@ -66,8 +68,8 @@ impl Instance {
     /// # Panics
     ///
     /// Panics if [`vkEnumeratePhysicalDevices`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumeratePhysicalDevices.html) fails.
-    pub fn get_physical_devices<F>(self : Arc<Instance>, cmp : F) -> Vec<Arc<PhysicalDevice>>
-        where F : FnMut(&Arc<PhysicalDevice>, &Arc<PhysicalDevice>) -> Ordering
+    pub fn get_physical_devices<F>(self : &Arc<Instance>, cmp : F) -> Vec<PhysicalDevice>
+        where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
     {
         let physical_devices = unsafe {
             self.handle.enumerate_physical_devices()
@@ -75,7 +77,7 @@ impl Instance {
         };
 
         let mut devices = physical_devices.iter().map(|physical_device| {
-            PhysicalDevice::new(physical_device.clone(), self)
+            PhysicalDevice::new(physical_device.clone(), &self)
         }).collect::<Vec<_>>();
         
         devices.sort_by(cmp);
@@ -83,11 +85,11 @@ impl Instance {
         devices
     }
 
-    /// Creates a new [`Instance`].
+    /// Creates a new [`Context`].
     /// 
     /// # Arguments
     /// 
-    /// * `handle` - The global Vulkan entry table.
+    /// * `entry` - The global Vulkan entry table.
     /// * `app_name` - The name of the application.
     /// * `instance_extensions` - An array of extensions to apply to this instance.
     ///
@@ -95,27 +97,25 @@ impl Instance {
     ///
     /// * Panics if [`vkCreateInstance`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateInstance.html) failed.
     /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
-    pub fn new(handle : Arc<ash::Entry>, app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
-        let mut debug_utils_messenger_create_info = {
-            vk::DebugUtilsMessengerCreateInfoEXT::default()
-                .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                )
-                .message_type(
-                    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                        | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                        | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                )
-                .pfn_user_callback(Some(Self::vulkan_debug_utils_callback))
-        };
+    pub fn new(entry : &Arc<ash::Entry>, app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
+        let mut debug_utils_messenger_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
+            .flags(ash::vk::DebugUtilsMessengerCreateFlagsEXT::empty())
+            .message_severity(
+                ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+            )
+            .message_type(
+                ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+            )
+            .pfn_user_callback(Some(Self::vulkan_debug_utils_callback));
 
         let app_info =
-            vk::ApplicationInfo::default()
+        ash::vk::ApplicationInfo::default()
                 .application_name(&app_name)
-                .application_version(vk::make_api_version(1, 0, 0, 0))
-                .api_version(vk::API_VERSION_1_3);
+                .application_version(ash::vk::make_api_version(1, 0, 0, 0))
+                .api_version(ash::vk::API_VERSION_1_3);
 
         const VALIDATION: [&'static str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
@@ -127,19 +127,19 @@ impl Instance {
             .map(|l| l.as_ptr())
             .collect::<Vec<_>>();
         
-        let instance_create_info = vk::InstanceCreateInfo::default()
+        let instance_create_info = ash::vk::InstanceCreateInfo::default()
             .push_next(&mut debug_utils_messenger_create_info)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)
             .enabled_layer_names(&layer_names);
 
         let instance = unsafe {
-            handle.create_instance(&instance_create_info, None)
+            entry.create_instance(&instance_create_info, None)
                 .expect("Failed to create instance")
         };
 
         // setup debug utils
-        let debug_utils_loader = ash::ext::debug_utils::Instance::new(&handle, &instance);
+        let debug_utils_loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
         let debug_messenger = unsafe {
             debug_utils_loader
                 .create_debug_utils_messenger(&debug_utils_messenger_create_info, None)
@@ -147,6 +147,7 @@ impl Instance {
         };
 
         Arc::new(Self {
+            entry : entry.clone(),
             handle : instance,
             debug_utils : debug_utils_loader,
             debug_messenger,

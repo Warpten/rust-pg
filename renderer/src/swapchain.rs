@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::traits::{BorrowHandle, Handle};
+
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain {
@@ -59,7 +61,7 @@ impl Swapchain {
     /// 
     /// # Arguments
     /// 
-    /// * `instance` - The global Vulkan instance.
+    /// * `instance` - The global Vulkan [`Instance`].
     /// * `device` - The [`LogicalDevice`] for which to create a swapchain.
     /// * `surface` - The [`Surface`] for which to create a swapchain.
     /// * `options` - An implementation of the [`SwapchainOptions`] trait that defines how the swapchain should be created.
@@ -79,7 +81,7 @@ impl Swapchain {
         let surface_format = {
             let surface_formats = unsafe {
                 surface.loader
-                    .get_physical_device_surface_formats(device.physical_device.handle, surface.handle)
+                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle)
                     .expect("Failed to get physical device surface formats")
             };
 
@@ -91,7 +93,7 @@ impl Swapchain {
 
         let surface_capabilities = unsafe {
             surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device.handle, surface.handle)
+                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle)
                 .expect("Failed to get physical device surface capabilities")
         };
         let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
@@ -99,11 +101,9 @@ impl Swapchain {
         } else {
             ash::vk::Extent2D {
                 width: options.width()
-                    .max(surface_capabilities.min_image_extent.width)
-                    .min(surface_capabilities.max_image_extent.width),
+                    .clamp(surface_capabilities.min_image_extent.width, surface_capabilities.max_image_extent.width),
                 height: options.height()
-                    .max(surface_capabilities.min_image_extent.height)
-                    .min(surface_capabilities.max_image_extent.height),
+                    .clamp(surface_capabilities.max_image_extent.height, surface_capabilities.min_image_extent.height),
             }
         };
 
@@ -134,7 +134,7 @@ impl Swapchain {
             .present_mode(ash::vk::PresentModeKHR::FIFO)
             .clipped(true);
 
-        let swapchain_loader = ash::khr::swapchain::Device::new(&instance.handle, &device.handle);
+        let swapchain_loader = ash::khr::swapchain::Device::new(instance.handle(), device.handle());
         let handle = unsafe {
             swapchain_loader
                 .create_swapchain(&swapchain_create_info, None)
