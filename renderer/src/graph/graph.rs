@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, slice::{Iter, IterMut}};
 
 use super::{pass::Pass, resource::{Buffer, Resource, Texture}, Sequencing, Synchronization};
 
@@ -13,9 +13,18 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn build() {
-        // Builds the entire command buffer.
-        todo!();
+    pub fn build(&mut self) {
+        self.passes.iter_mut().for_each(Pass::update_dependencies);
+
+        // Panic if the graph is insane
+        self.validate();
+
+        // 1. Find the backbuffer.
+        //    Make sure at least one pass writes to it.
+
+        // 2. Traverse the tree bottom-up
+        //    It's too late for my brain to function so here goes.
+        //    https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
     }
 
     pub fn invalidate() {
@@ -117,6 +126,14 @@ struct ObjectManager<T> {
 }
 
 impl<T> ObjectManager<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        self.instances.iter_mut()
+    }
+
+    pub fn iter(&self) -> Iter<'_, T> {
+        self.instances.iter()
+    }
+
     pub fn register_instance(&mut self, name : &'static str, instance : T) -> &T {
         let index = self.index_map.get(name);
         assert!(index.is_none(), "An object with this name already exists");

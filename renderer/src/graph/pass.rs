@@ -26,6 +26,10 @@ impl Pass {
         }
     }
 
+    pub fn update_dependencies(&mut self) {
+        
+    }
+
     pub fn name(&self) -> &'static str { &self.name }
     pub fn index(&self) -> usize { self.index }
 
