@@ -14,8 +14,9 @@ pub struct Pass {
     sequenced_from : Vec<usize>,
     sequences_to: Vec<usize>,
 
-    // Index of all inputs for this pass in the associated graph's resources
+    // Index of all inputs and outputs for this pass in the associated graph's resources
     inputs : Vec<usize>,
+    outputs : Vec<usize>
 }
 
 impl Pass {
@@ -31,15 +32,35 @@ impl Pass {
             owner,
             name,
             index,
+
             sequenced_from : vec![],
             sequences_to : vec![],
 
             inputs : vec![],
+            outputs : vec![],
         }
+    }
+
+    /// Returns all passes that are explicitely sequenced before this pass.
+    pub fn dependencies(&self) -> impl Iterator<Item = &Pass> {
+        self.sequenced_from.iter()
+            .filter_map(|&index| self.owner.find_pass_by_id(index))
+    }
+
+    /// Returns all passes that are explicitely sequenced after this pass.
+    pub fn dependants(&self) -> impl Iterator<Item = &Pass> {
+        self.sequenced_from.iter()
+            .filter_map(|&index| self.owner.find_pass_by_id(index))
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Resource> {
         self.inputs.iter().filter_map(|&index| {
+            self.owner.get_resource_by_id(index)
+        })
+    }
+
+    pub fn outputs(&self) -> impl Iterator<Item = &Resource> {
+        self.outputs.iter().filter_map(|&index| {
             self.owner.get_resource_by_id(index)
         })
     }

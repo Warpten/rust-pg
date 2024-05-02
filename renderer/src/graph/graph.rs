@@ -14,13 +14,16 @@ pub struct Graph {
 
 impl Graph {
     /// Creates a new render graph.
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Rc<Self> {
+        let this = Rc::new(Self {
             passes : ObjectManager::new(),
             ressources : ObjectManager::new(),
             synchronizations : ObjectManager::new(),
             sequences : ObjectManager::new()
-        }
+        });
+
+        this.register_texture("builtin://backbuffer");
+        this
     }
 
     pub fn build(&mut self) {
@@ -36,7 +39,8 @@ impl Graph {
         //    https://blog.traverseresearch.nl/render-graph-101-f42646255636
         let backbuffer : &Texture = self.get_texture("builtin://backbuffer").unwrap();
 
-        let backbuffer_writers = backbuffer.writers().collect::<Vec<_>>();
+        // Begin by looking at all passes that write to the backbuffer
+        let backbuffer_writers = backbuffer.writers(false).collect::<Vec<_>>();
         assert_eq!(backbuffer_writers.is_empty(), false, "No pass writes to the backbuffer");
 
         backbuffer_writers.iter()
@@ -44,7 +48,14 @@ impl Graph {
 
     }
 
-    fn traverse_dependencies(&self, pass : &Pass, depth : u32) {
+    fn traverse_dependencies(&self, pass : &Pass, depth : usize) {
+        let pass_inputs = pass.inputs().collect::<Vec<_>>();
+        let pass_outputs = pass.outputs().collect::<Vec<_>>();
+
+        assert!(depth < self.passes.len(), "Cyclic graph detected late");
+
+        let previous_passes = pass.dependencies().collect::<Vec<_>>();
+        let next_passes = pass.dependants().collect::<Vec<_>>();
         
     }
 
@@ -90,6 +101,21 @@ impl Graph {
             name,
             |id, name| Pass::new(Rc::clone(self), id, name)
         )
+    }
+
+    /// Registers a new texture.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - A unique name identifying this texture.
+    pub fn register_texture(self : &Rc<Graph>, name : &'static str) -> &Texture {
+        match self.ressources.register(
+            name,
+            |id, name| Resource::Texture { id, value : Texture::new(Rc::clone(self), id) }
+        ) {
+            Resource::Texture { id, value } => value,
+            _ => panic!()
+        }
     }
 
     /// Finds a rendering pass.
@@ -237,6 +263,8 @@ impl<T> ObjectManager<T> {
     > {
         self.instances.borrow().iter().map(Rc::as_ref)
     }
+
+    pub fn len(&self) -> usize { self.instances.borrow().len() }
 
     pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &T
         where Factory : Fn(usize, &'static str) -> T

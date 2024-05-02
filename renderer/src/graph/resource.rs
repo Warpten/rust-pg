@@ -1,12 +1,12 @@
-use std::{collections::HashMap, rc::Rc, slice::Iter};
+use std::{collections::HashMap, rc::Rc};
 
 use super::{pass::{Pass, ResourceAccessFlags}, Graph};
 
-/// A texture buffer.
+/// Models a texture resource.
 pub struct Texture {
     owner : Rc<Graph>,
     /// ID of this texture in the owner [`Graph`].
-    index : u32,
+    index : usize,
     usage : ash::vk::ImageUsageFlags,
     /// Associative map of all the passes using this texture.
     ///   Key is the unique identifier of that pass in the graph
@@ -16,7 +16,7 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(owner : Rc<Graph>, index : u32) -> Self {
+    pub fn new(owner : Rc<Graph>, index : usize) -> Self {
         Self {
             owner,
             index,
@@ -26,13 +26,35 @@ impl Texture {
     }
 
     /// Returns all passes that write to this resource in any order.
-    pub fn writers(&self) -> impl Iterator<Item = &Pass>{
-        self.accessors(ResourceAccessFlags::Write)
+    /// 
+    /// # Arguments
+    /// 
+    /// * `only` - If set to `true`, will only return [`Pass`]es that
+    ///   don't read from this texture.
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Pass>{
+        self.accessors(move |i| {
+            if only {
+                (i & ResourceAccessFlags::Write) == ResourceAccessFlags::Write
+            } else {
+                (i & ResourceAccessFlags::Write) != 0
+            }
+        })
     }
 
     /// Returns all passes that read from this resource in any order.
-    pub fn readers(&self) -> impl Iterator<Item = &Pass> {
-        self.accessors(ResourceAccessFlags::Read)
+    /// 
+    /// # Arguments
+    /// 
+    /// * `only` - If set to `true`, will only return [`Pass`]es that
+    ///   don't write to this texture.
+    pub fn readers(&self, only : bool) -> impl Iterator<Item = &Pass> {
+        self.accessors(move |i| {
+            if only {
+                (i & ResourceAccessFlags::Read) == ResourceAccessFlags::Read
+            } else {
+                (i & ResourceAccessFlags::Read) != 0
+            }
+        })
     }
 
     /// Returns all passes that access this resource with any of the flag combination provided.
@@ -40,9 +62,11 @@ impl Texture {
     /// # Arguments
     /// 
     /// * `flags` - A combination of access flags.
-    pub fn accessors(&self, flags : ResourceAccessFlags) -> impl Iterator<Item = &Pass> {
+    pub fn accessors<F>(&self, filter : F) -> impl Iterator<Item = &Pass>
+        where F : Fn(ResourceAccessFlags) -> bool
+    {
         self.passes.iter()
-            .filter(move |&(_, v)| (*v & flags) != 0)
+            .filter(move |&(_, v)| filter(*v))
             .filter_map(|(k, _)| self.owner.find_pass_by_id(*k))
     }
 
@@ -52,7 +76,7 @@ impl Texture {
     }
 
     /// Returns this texture's ID in the owning graph.
-    pub fn id(&self) -> u32 { self.index }
+    pub fn id(&self) -> usize { self.index }
 
     /// Returns the combined usages of this texture.
     pub fn usage(&self) -> ash::vk::ImageUsageFlags { self.usage }
@@ -83,6 +107,7 @@ impl Texture {
     }
 }
 
+/// Models a buffer resource.
 pub struct Buffer {
 
 }
