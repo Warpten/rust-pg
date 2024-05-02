@@ -118,6 +118,15 @@ pub enum Resource {
     None
 }
 
+impl Resource {
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Pass> {
+        match &self {
+            Self::Texture { id : _, value } => value.writers(only),
+            _ => unimplemented!()
+        }
+    }
+}
+
 impl Default for Resource {
     fn default() -> Self {
         Self::None

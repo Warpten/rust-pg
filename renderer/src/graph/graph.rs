@@ -37,7 +37,7 @@ impl Graph {
         //    It's too late for my brain to function so here goes.
         //    https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
         //    https://blog.traverseresearch.nl/render-graph-101-f42646255636
-        let backbuffer : &Texture = self.get_texture("builtin://backbuffer").unwrap();
+        let backbuffer = self.get_texture("builtin://backbuffer").unwrap();
 
         // Begin by looking at all passes that write to the backbuffer
         let backbuffer_writers = backbuffer.writers(false).collect::<Vec<_>>();
@@ -49,13 +49,17 @@ impl Graph {
     }
 
     fn traverse_dependencies(&self, pass : &Pass, depth : usize) {
-        let pass_inputs = pass.inputs().collect::<Vec<_>>();
-        let pass_outputs = pass.outputs().collect::<Vec<_>>();
-
         assert!(depth < self.passes.len(), "Cyclic graph detected late");
 
-        let previous_passes = pass.dependencies().collect::<Vec<_>>();
-        let next_passes = pass.dependants().collect::<Vec<_>>();
+        // TODO: Use this if we keep explicit dependencies
+        // let previous_passes = pass.dependencies().collect::<Vec<_>>();
+        // let next_passes = pass.dependants().collect::<Vec<_>>();
+
+        // 1. For each input to the current pass
+        for input in pass.inputs() {
+            // 1.1. Get the passes that write to this input; RO and RW.
+            let writers = input.writers(false);
+        }
         
     }
 
