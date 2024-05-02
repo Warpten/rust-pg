@@ -1,4 +1,4 @@
-use super::{pass::Pass, Graph};
+use super::pass::Pass;
 
 /// Describes a synchronization condition that ensures all identified [`Pass`]es are done before
 /// continuing. The scheduler will try to execute these passes on different queues.
@@ -32,11 +32,17 @@ pub struct Sequencing {
 
 impl Sequencing {
     pub fn new(stages : ash::vk::PipelineStageFlags2, first_pass : &Pass, second_pass : &Pass) -> Self {
-        Self {
+        assert!(first_pass.index() < second_pass.index(), "Cyclic graph detected");
+
+        let this = Self {
             first : first_pass.index(),
             second : second_pass.index(),
             stages
-        }
+        };
+
+        first_pass.sequence_to(second_pass);
+        second_pass.sequence_from(first_pass);
+        this
     }
     
     pub fn stages(&self) -> ash::vk::PipelineStageFlags2 { self.stages }
