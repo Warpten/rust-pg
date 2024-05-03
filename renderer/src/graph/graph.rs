@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{borrow::BorrowMut, cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::{pass::Pass, resource::{Buffer, Resource, Texture}, Sequencing, Synchronization};
 
@@ -46,21 +46,15 @@ impl Graph {
         backbuffer_writers.iter()
             .for_each(|&pass| self.traverse_dependencies(pass, 0));
 
+        // For now all our passes are in an array; we now want to group them into strands
+        // (because of constraint::Sequencing) (where a strand is a sequence of passes in
+        // a fixed order). We will then add external synchronization to individual passes
+        // (because of constraint::Synchronization), possibly delaying to the next passes
+        // in the strand to reduce the time spent explicitely waiting.
     }
 
     fn traverse_dependencies(&self, pass : &Pass, depth : usize) {
         assert!(depth < self.passes.len(), "Cyclic graph detected late");
-
-        // TODO: Use this if we keep explicit dependencies
-        // let previous_passes = pass.dependencies().collect::<Vec<_>>();
-        // let next_passes = pass.dependants().collect::<Vec<_>>();
-
-        // 1. For each input to the current pass
-        for input in pass.inputs() {
-            // 1.1. Get the passes that write to this input; RO and RW.
-            let writers = input.writers(false);
-        }
-        
     }
 
     /// Registers a synchronization directive between two render passes.
@@ -270,21 +264,19 @@ impl<T> ObjectManager<T> {
 
     pub fn len(&self) -> usize { self.instances.borrow().len() }
 
-    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &T
+    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &mut T
         where Factory : Fn(usize, &'static str) -> T
     {
+        let mut instances = self.instances.borrow_mut();
         match self.index_map.get(name) {
             Some(&index) => {
-                let instances = self.instances.borrow();
-                &instances[index].as_ref()
+                instances[index].borrow_mut()
             },
             None => {
-                let mut instances = self.instances.borrow_mut();
                 let index = instances.len();
                 
-                let instance = Rc::new(instancer(index, name));
-                instances.push(instance);
-                &instance.as_ref()
+                instances.push(Rc::new(instancer(index, name)));
+                instances[index].borrow_mut()
             }
         }
     }

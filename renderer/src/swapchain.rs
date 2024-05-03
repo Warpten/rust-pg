@@ -1,16 +1,18 @@
-use std::sync::Arc;
+use std::{ops::Range, slice::Iter, sync::Arc};
 
 use crate::traits::{BorrowHandle, Handle};
 
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain {
-    pub handle : ash::vk::SwapchainKHR,
+    handle : ash::vk::SwapchainKHR,
     pub device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
     pub loader : ash::khr::swapchain::Device,
     pub extent : ash::vk::Extent2D,
     pub images : Vec<ash::vk::Image>,
+    pub image_views : Vec<ash::vk::ImageView>,
+    layer_count : u32,
     pub queue_families : Vec<QueueFamily>,
 }
 
@@ -42,21 +44,33 @@ pub trait SwapchainOptions {
 
     /// Returns the presentation mode of this swapchain.
     fn present_mode(&self) -> ash::vk::PresentModeKHR;
+
+    /// Returns the amount of layers of each texture of this swapchain.
+    /// By default, there is only one layer.
+    fn layers(&self) -> Range<u32> {
+        return Range { start : 0, end : 1 }
+    }
+
+    /// Returns the swapchain's mip layout range.
+    /// By default, there is only one layer.
+    fn mip_range(&self) -> Range<u32> {
+        return Range { start : 0, end : 1 }
+    }
 }
 
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            self.image_views.into_iter().for_each(|view| {
+                self.device.handle().destroy_image_view(view, None);
+            });
+
             self.loader.destroy_swapchain(self.handle, None);
         }
     }
 }
 
 impl Swapchain {
-    pub fn image_count(&self) -> usize {
-        self.images.len()
-    }
-
     /// Creates a new swapchain.
     /// 
     /// # Arguments
@@ -125,13 +139,21 @@ impl Swapchain {
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)
             .image_extent(surface_extent)
+            // Number of views in a multiview/stereo surface. For non-stereoscopic-3D applications, this value is 1.
             .image_array_layers(1)
+            // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
             .image_usage(ash::vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
             .queue_family_indices(&queue_family_indices)
             .pre_transform(surface_capabilities.current_transform)
+            // Indicates the alpha compositing mode to use when this surface is composited together with other
+            // surfaces on certain window systems.
             .composite_alpha(options.composite_alpha())
+            // Presentation mode the swapchain will use. A swapchain’s present mode determines how incoming present
+            // requests will be processed and queued internally.
             .present_mode(ash::vk::PresentModeKHR::FIFO)
+            // Specifies whether the Vulkan implementation is allowed to discard rendering operations that affect
+            // regions of the surface that are not visible.
             .clipped(true);
 
         let swapchain_loader = ash::khr::swapchain::Device::new(instance.handle(), device.handle());
@@ -147,14 +169,52 @@ impl Swapchain {
                 .expect("Failed to get swapchain images")
         };
 
+        let swapchain_image_views = swapchain_images.iter().map(|&image| {
+            let image_view_create_info = ash::vk::ImageViewCreateInfo::default()
+                .image(image)
+                .view_type(ash::vk::ImageViewType::TYPE_2D)
+                .format(surface_format.format)
+                .components(ash::vk::ComponentMapping::default()
+                    .a(ash::vk::ComponentSwizzle::IDENTITY)
+                    .r(ash::vk::ComponentSwizzle::IDENTITY)
+                    .g(ash::vk::ComponentSwizzle::IDENTITY)
+                    .b(ash::vk::ComponentSwizzle::IDENTITY))
+                .subresource_range(ash::vk::ImageSubresourceRange::default()
+                    // Aspects of the image that will be included in the view.
+                    .aspect_mask(ash::vk::ImageAspectFlags::COLOR)
+                    // The first mipmap level accessible to the view.
+                    .base_mip_level(options.mip_range().start)
+                    // The number of mipmap levels accessible to the view.
+                    .level_count(options.mip_range().len() as _)
+                    // The first array layer accessible to the view.
+                    .base_array_layer(options.layers().start)
+                    // The number of array layers (starting from base_array_layer) accessible to the view.
+                    .layer_count(options.layers().len() as _));
+
+            unsafe {   
+                device.handle().create_image_view(&image_view_create_info, None)
+                    .expect("Failed creating an image view to swapchain image")
+            }
+        }).collect::<Vec<_>>();
+
         Arc::new(Self {
             device : device,
             extent : surface_extent,
             handle,
             surface,
+            layer_count : options.layers().len() as _,
             loader : swapchain_loader,
             images : swapchain_images,
+            image_views : swapchain_image_views,
             queue_families : options.queue_families().to_vec()
         })
+    }
+
+    pub fn layer_count(&self) -> u32 { self.layer_count }
+
+    pub fn image_count(&self) -> usize { self.images.len() }
+
+    pub fn images<'a>(&'a self) -> impl Iterator<Item = (ash::vk::Image, ash::vk::ImageView)> + 'a {
+        self.images.iter().cloned().zip(self.image_views.iter().cloned())
     }
 }

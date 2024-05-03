@@ -95,22 +95,33 @@ impl PhysicalDevice {
                 .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
         }
 
-        // TODO: Start requesting features.
-        let physical_device_features = ash::vk::PhysicalDeviceFeatures::default();
-        // let physical_device_features = unsafe {
-        //     self.instance.upgrade()
-        //         .expect("Instance released too soon")
-        //         .handle()
-        //         .get_physical_device_features(*self.handle())
-        // };
+        let physical_device_features = unsafe {
+            instance.handle().get_physical_device_features(self.handle)
+        };
 
         let enabled_extension_names = extensions
             .iter()
             .map(|s| s.as_ptr())
             .collect::<Vec<_>>();
 
+        let mut physical_device_descriptor_indexing_features = ash::vk::PhysicalDeviceDescriptorIndexingFeatures::default();
+
+        let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default();
+        physical_device_features2.push_next(&mut physical_device_descriptor_indexing_features);
+        unsafe {
+            instance.handle().get_physical_device_features2(self.handle, &mut physical_device_features2);
+        }
+
+        assert_ne!(physical_device_descriptor_indexing_features.shader_sampled_image_array_non_uniform_indexing, 0);
+        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_sampled_image_update_after_bind, 0);
+        assert_ne!(physical_device_descriptor_indexing_features.shader_uniform_buffer_array_non_uniform_indexing, 0);
+        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind, 0);
+        assert_ne!(physical_device_descriptor_indexing_features.shader_storage_buffer_array_non_uniform_indexing, 0);
+        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind, 0);
+
         let device_create_info = ash::vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
+            .push_next(&mut physical_device_features2)
             .enabled_features(&physical_device_features)
             .enabled_extension_names(&enabled_extension_names);
 

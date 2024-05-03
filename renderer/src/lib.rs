@@ -9,9 +9,11 @@ mod window;
 mod semaphore_pool;
 mod swapchain;
 mod renderer;
+mod framebuffer;
 
 pub mod graph;
 
+pub use framebuffer::*;
 pub use renderer::*;
 pub use swapchain::*;
 pub use semaphore_pool::*;
