@@ -31,14 +31,16 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't read from this texture.
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>>{
-        self.accessors(move |i| {
-            if only {
-                (i & ResourceAccessFlags::Write) == ResourceAccessFlags::Write
-            } else {
-                (i & ResourceAccessFlags::Write) != 0
-            }
-        })
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
+        self.passes.iter()
+            .filter(move |&(_, v)| {
+                if only {
+                    (*v & ResourceAccessFlags::Write) == ResourceAccessFlags::Write
+                } else {
+                    (*v & ResourceAccessFlags::Write) != 0
+                }
+            })
+            .filter_map(move |(k, _)| self.owner.find_pass_by_id(*k))
     }
 
     /// Returns all passes that read from this resource in any order.
@@ -47,27 +49,16 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't write to this texture.
-    pub fn readers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>> {
-        self.accessors(move |i| {
-            if only {
-                (i & ResourceAccessFlags::Read) == ResourceAccessFlags::Read
-            } else {
-                (i & ResourceAccessFlags::Read) != 0
-            }
-        })
-    }
-
-    /// Returns all passes that access this resource with any of the flag combination provided.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `flags` - A combination of access flags.
-    pub fn accessors<F>(&self, filter : F) -> impl Iterator<Item = &Rc<Pass>>
-        where F : Fn(ResourceAccessFlags) -> bool
-    {
+    pub fn readers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
         self.passes.iter()
-            .filter(move |&(_, v)| filter(*v))
-            .filter_map(|(k, _)| self.owner.find_pass_by_id(*k))
+            .filter(move |&(_, v)| {
+                if only {
+                    (*v & ResourceAccessFlags::Read) == ResourceAccessFlags::Read
+                } else {
+                    (*v & ResourceAccessFlags::Read) != 0
+                }
+            })
+            .filter_map(move |(k, _)| self.owner.find_pass_by_id(*k))
     }
 
     /// Returns the graph owning this texture.
@@ -119,7 +110,7 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>> {
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
         match &self {
             Self::Texture { id : _, value } => value.writers(only),
             _ => unimplemented!()

@@ -44,7 +44,7 @@ impl Graph {
         assert_eq!(backbuffer_writers.is_empty(), false, "No pass writes to the backbuffer");
 
         backbuffer_writers.iter()
-            .for_each(|&pass| self.traverse_dependencies(pass, 0));
+            .for_each(|&pass| self.traverse_dependencies(&pass, 0));
 
         // For now all our passes are in an array; we now want to group them into strands
         // (because of constraint::Sequencing) (where a strand is a sequence of passes in
@@ -94,7 +94,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying this pass.
-    pub fn register_pass(self : &Rc<Graph>, name : &'static str) -> &Pass {
+    pub fn register_pass(self : &Rc<Graph>, name : &'static str) -> Rc<Pass> {
         self.passes.register(
             name,
             |id, name| Pass::new(Rc::clone(self), id, name)
@@ -109,7 +109,7 @@ impl Graph {
     pub fn register_texture(self : &Rc<Graph>, name : &'static str) -> &Texture {
         let resource = self.ressources.register(name,
             |id, name| Resource::Texture { id, value : Texture::new(Rc::clone(self), id) });
-        match Rc::as_ref(resource) {
+        match Rc::as_ref(&resource) {
             Resource::Texture { id, value } => value,
             _ => panic!()
         }
@@ -120,7 +120,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying the pass to find.
-    pub fn find_pass(&self, name : &'static str) -> Option<&Rc<Pass>> {
+    pub fn find_pass(&self, name : &'static str) -> Option<Rc<Pass>> {
         self.passes.find(name)
     }
 
@@ -129,7 +129,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The pass's identifier.
-    pub fn find_pass_by_id(&self, id : usize) -> Option<&Rc<Pass>> { self.passes.find_by_id(id) }
+    pub fn find_pass_by_id(&self, id : usize) -> Option<Rc<Pass>> { self.passes.find_by_id(id) }
 
     pub fn get_resources_manager(&self) -> &ObjectManager<Resource> {
         &self.ressources
@@ -141,7 +141,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that resource.
-    pub fn get_resource(&self, name : &'static str) -> Option<&Rc<Resource>> {
+    pub fn get_resource(&self, name : &'static str) -> Option<Rc<Resource>> {
         self.ressources.find(name)
     }
 
@@ -151,7 +151,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The ID of that texture.
-    pub fn get_resource_by_id(&self, id : usize) -> Option<&Rc<Resource>> {
+    pub fn get_resource_by_id(&self, id : usize) -> Option<Rc<Resource>> {
         self.ressources.find_by_id(id)
     }
 
@@ -176,11 +176,11 @@ impl Graph {
     }
 
     fn get_texture_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Texture>
-        where F : Fn(&Self, Arg) -> Option<&Rc<Resource>>
+        where F : Fn(&Self, Arg) -> Option<Rc<Resource>>
     {
         match resource_supplier(self, arg) {
             Some(resource) => {
-                match Rc::as_ref(resource) {
+                match Rc::as_ref(&resource) {
                     Resource::Texture { id, value } => Some(value),
                     _ => None
                 }
@@ -210,11 +210,11 @@ impl Graph {
     }
 
     fn get_buffer_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Buffer>
-        where F : Fn(&Self, Arg) -> Option<&Rc<Resource>>
+        where F : Fn(&Self, Arg) -> Option<Rc<Resource>>
     {
         match resource_supplier(self, arg) {
             Some(resource) => {
-                match resource.as_ref() {
+                match Rc::as_ref(&resource) {
                     Resource::Buffer { id, value } => Some(value),
                     _ => None
                 }
@@ -260,31 +260,31 @@ impl<T> ObjectManager<T> {
 
     pub fn len(&self) -> usize { self.instances.borrow().len() }
 
-    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &Rc<T>
+    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> Rc<T>
         where Factory : Fn(usize, &'static str) -> T
     {
         let mut instances = self.instances.borrow_mut();
         match self.index_map.get(name) {
             Some(&index) => {
-                &instances[index]
+                Rc::clone(&instances[index])
             },
             None => {
                 let index = instances.len();
                 
                 instances.push(Rc::new(instancer(index, name)));
-                &instances[index]
+                Rc::clone(&instances[index])
             }
         }
     }
 
-    pub fn find(&self, name : &'static str) -> Option<&Rc<T>> {
+    pub fn find(&self, name : &'static str) -> Option<Rc<T>> {
         self.index_map.get(name).and_then(|&index| {
             self.find_by_id(index)
         })
     }
 
-    pub fn find_by_id(&self, id : usize) -> Option<&Rc<T>> {
-        self.instances.borrow().get(id)
+    pub fn find_by_id(&self, id : usize) -> Option<Rc<T>> {
+        self.instances.borrow().get(id).map(Rc::clone)
     }
 
     pub fn reset(&mut self) {
