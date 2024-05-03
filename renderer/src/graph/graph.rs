@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::{pass::Pass, resource::{Buffer, Resource, Texture}, Sequencing, Synchronization};
 
@@ -28,7 +28,7 @@ impl Graph {
 
     pub fn build(&mut self) {
         // Panic if the graph is insane
-        self.passes.iter().for_each(Pass::validate);
+        self.passes.iter().for_each(|pass| pass.validate());
 
         // 1. Find the backbuffer.
         //    Make sure at least one pass writes to it.
@@ -107,10 +107,9 @@ impl Graph {
     /// 
     /// * `name` - A unique name identifying this texture.
     pub fn register_texture(self : &Rc<Graph>, name : &'static str) -> &Texture {
-        match self.ressources.register(
-            name,
-            |id, name| Resource::Texture { id, value : Texture::new(Rc::clone(self), id) }
-        ) {
+        let resource = self.ressources.register(name,
+            |id, name| Resource::Texture { id, value : Texture::new(Rc::clone(self), id) });
+        match Rc::as_ref(resource) {
             Resource::Texture { id, value } => value,
             _ => panic!()
         }
@@ -121,7 +120,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying the pass to find.
-    pub fn find_pass(&self, name : &'static str) -> Option<&Pass> {
+    pub fn find_pass(&self, name : &'static str) -> Option<&Rc<Pass>> {
         self.passes.find(name)
     }
 
@@ -130,7 +129,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The pass's identifier.
-    pub fn find_pass_by_id(&self, id : usize) -> Option<&Pass> { self.passes.find_by_id(id) }
+    pub fn find_pass_by_id(&self, id : usize) -> Option<&Rc<Pass>> { self.passes.find_by_id(id) }
 
     pub fn get_resources_manager(&self) -> &ObjectManager<Resource> {
         &self.ressources
@@ -142,7 +141,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that resource.
-    pub fn get_resource(&self, name : &'static str) -> Option<&Resource> {
+    pub fn get_resource(&self, name : &'static str) -> Option<&Rc<Resource>> {
         self.ressources.find(name)
     }
 
@@ -152,7 +151,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The ID of that texture.
-    pub fn get_resource_by_id(&self, id : usize) -> Option<&Resource> {
+    pub fn get_resource_by_id(&self, id : usize) -> Option<&Rc<Resource>> {
         self.ressources.find_by_id(id)
     }
 
@@ -177,11 +176,11 @@ impl Graph {
     }
 
     fn get_texture_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Texture>
-        where F : Fn(&Self, Arg) -> Option<&Resource>
+        where F : Fn(&Self, Arg) -> Option<&Rc<Resource>>
     {
         match resource_supplier(self, arg) {
             Some(resource) => {
-                match resource {
+                match Rc::as_ref(resource) {
                     Resource::Texture { id, value } => Some(value),
                     _ => None
                 }
@@ -211,11 +210,11 @@ impl Graph {
     }
 
     fn get_buffer_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Buffer>
-        where F : Fn(&Self, Arg) -> Option<&Resource>
+        where F : Fn(&Self, Arg) -> Option<&Rc<Resource>>
     {
         match resource_supplier(self, arg) {
             Some(resource) => {
-                match resource {
+                match resource.as_ref() {
                     Resource::Buffer { id, value } => Some(value),
                     _ => None
                 }
@@ -232,7 +231,7 @@ impl Graph {
     pub fn get_buffer_resource(&self, name : &'static str) -> Option<&Buffer> {
         match self.ressources.find(name) {
             Some(resource) => {
-                match resource {
+                match resource.as_ref() {
                     Resource::Buffer { id, value } => Some(value),
                     _ => None,
                 }
@@ -255,40 +254,37 @@ impl<T> ObjectManager<T> {
         Self { instances : RefCell::new(vec![]), index_map : HashMap::new() }
     }
 
-    pub fn iter(&self) -> std::iter::Map<
-        std::slice::Iter<'_, Rc<T>>,
-        for<'b> fn(&'b Rc<T>) -> &'b T
-    > {
-        self.instances.borrow().iter().map(Rc::as_ref)
+    pub fn iter(&self) -> std::slice::Iter<'_, Rc<T>> {
+        self.instances.borrow().iter()
     }
 
     pub fn len(&self) -> usize { self.instances.borrow().len() }
 
-    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &mut T
+    pub fn register<Factory>(&mut self, name : &'static str, instancer : Factory) -> &Rc<T>
         where Factory : Fn(usize, &'static str) -> T
     {
         let mut instances = self.instances.borrow_mut();
         match self.index_map.get(name) {
             Some(&index) => {
-                instances[index].borrow_mut()
+                &instances[index]
             },
             None => {
                 let index = instances.len();
                 
                 instances.push(Rc::new(instancer(index, name)));
-                instances[index].borrow_mut()
+                &instances[index]
             }
         }
     }
 
-    pub fn find(&self, name : &'static str) -> Option<&T> {
+    pub fn find(&self, name : &'static str) -> Option<&Rc<T>> {
         self.index_map.get(name).and_then(|&index| {
             self.find_by_id(index)
         })
     }
 
-    pub fn find_by_id(&self, id : usize) -> Option<&T> {
-        self.instances.borrow().get(id).map(Rc::as_ref)
+    pub fn find_by_id(&self, id : usize) -> Option<&Rc<T>> {
+        self.instances.borrow().get(id)
     }
 
     pub fn reset(&mut self) {

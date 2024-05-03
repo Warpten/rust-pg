@@ -1,4 +1,4 @@
-use std::{ops::Range, slice::Iter, sync::Arc};
+use std::{ops::Range, sync::Arc};
 
 use crate::traits::{BorrowHandle, Handle};
 

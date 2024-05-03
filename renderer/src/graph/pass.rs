@@ -42,24 +42,24 @@ impl Pass {
     }
 
     /// Returns all passes that are explicitely sequenced before this pass.
-    pub fn dependencies(&self) -> impl Iterator<Item = &Pass> {
+    pub fn dependencies(&self) -> impl Iterator<Item = &Rc<Pass>> {
         self.sequenced_from.iter()
             .filter_map(|&index| self.owner.find_pass_by_id(index))
     }
 
     /// Returns all passes that are explicitely sequenced after this pass.
-    pub fn dependants(&self) -> impl Iterator<Item = &Pass> {
+    pub fn dependants(&self) -> impl Iterator<Item = &Rc<Pass>> {
         self.sequenced_from.iter()
             .filter_map(|&index| self.owner.find_pass_by_id(index))
     }
 
-    pub fn inputs(&self) -> impl Iterator<Item = &Resource> {
+    pub fn inputs(&self) -> impl Iterator<Item = &Rc<Resource>> {
         self.inputs.iter().filter_map(|&index| {
             self.owner.get_resource_by_id(index)
         })
     }
 
-    pub fn outputs(&self) -> impl Iterator<Item = &Resource> {
+    pub fn outputs(&self) -> impl Iterator<Item = &Rc<Resource>> {
         self.outputs.iter().filter_map(|&index| {
             self.owner.get_resource_by_id(index)
         })

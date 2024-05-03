@@ -31,7 +31,7 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't read from this texture.
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Pass>{
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>>{
         self.accessors(move |i| {
             if only {
                 (i & ResourceAccessFlags::Write) == ResourceAccessFlags::Write
@@ -47,7 +47,7 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't write to this texture.
-    pub fn readers(&self, only : bool) -> impl Iterator<Item = &Pass> {
+    pub fn readers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>> {
         self.accessors(move |i| {
             if only {
                 (i & ResourceAccessFlags::Read) == ResourceAccessFlags::Read
@@ -62,7 +62,7 @@ impl Texture {
     /// # Arguments
     /// 
     /// * `flags` - A combination of access flags.
-    pub fn accessors<F>(&self, filter : F) -> impl Iterator<Item = &Pass>
+    pub fn accessors<F>(&self, filter : F) -> impl Iterator<Item = &Rc<Pass>>
         where F : Fn(ResourceAccessFlags) -> bool
     {
         self.passes.iter()
@@ -119,7 +119,7 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Pass> {
+    pub fn writers(&self, only : bool) -> impl Iterator<Item = &Rc<Pass>> {
         match &self {
             Self::Texture { id : _, value } => value.writers(only),
             _ => unimplemented!()
