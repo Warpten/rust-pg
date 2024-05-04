@@ -1,3 +1,5 @@
+use std::{borrow::BorrowMut, rc::Rc};
+
 use super::pass::Pass;
 
 /// Describes a synchronization condition that ensures all identified [`Pass`]es are done before
@@ -31,7 +33,7 @@ pub struct Sequencing {
 }
 
 impl Sequencing {
-    pub fn new(stages : ash::vk::PipelineStageFlags2, first_pass : &Pass, second_pass : &Pass) -> Self {
+    pub fn new(stages : ash::vk::PipelineStageFlags2, first_pass : &mut Rc<Pass>, second_pass : &mut Rc<Pass>) -> Self {
         assert!(first_pass.index() < second_pass.index(), "Cyclic graph detected");
 
         let this = Self {
@@ -40,8 +42,7 @@ impl Sequencing {
             stages
         };
 
-        first_pass.sequence_to(second_pass);
-        second_pass.sequence_from(first_pass);
+        Pass::link(first_pass, second_pass);
         this
     }
     

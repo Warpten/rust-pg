@@ -1,13 +1,13 @@
 
 
-use std::{marker::PhantomData, rc::Rc};
+use std::{borrow::{Borrow, BorrowMut}, marker::PhantomData, rc::{Rc, Weak}};
 
 use bitmask_enum::bitmask;
 
 use super::{resource::{Resource, Texture}, Graph};
 
 pub struct Pass {
-    owner : Rc<Graph>,
+    owner : Weak<Graph>,
     name : &'static str,
     // Index of this pass in the graph. Unrelated to execution order.
     index : usize,
@@ -20,6 +20,15 @@ pub struct Pass {
 }
 
 impl Pass {
+    pub fn link(before : &mut Rc<Pass>, after : &mut Rc<Pass>) {
+        //  before.borrow_mut().sequences_to.push(after.index());
+        //  after.borrow_mut().sequenced_from.push(before.index());
+    }
+
+    pub fn owner(&self) -> Rc<Graph> {
+        self.owner.upgrade().expect("Accessing pass while graph got released")
+    }
+
     /// Creates a new render pass.
     /// 
     /// # Arguments
@@ -27,7 +36,7 @@ impl Pass {
     /// * `owner` - The graph owning this render pass.
     /// * `index` - The unique identifier of this pass.
     /// * `name` - The name of this render pass.
-    pub fn new(owner : Rc<Graph>, index : usize, name : &'static str) -> Self {
+    pub fn new(owner : Weak<Graph>, index : usize, name : &'static str) -> Self {
         Self {
             owner,
             name,
@@ -44,32 +53,32 @@ impl Pass {
     /// Returns all passes that are explicitely sequenced before this pass.
     pub fn dependencies(&self) -> impl Iterator<Item = Rc<Pass>> + '_ {
         self.sequenced_from.iter()
-            .filter_map(|&index| self.owner.find_pass_by_id(index))
+            .filter_map(|&index| self.owner().find_pass_by_id(index))
     }
 
     /// Returns all passes that are explicitely sequenced after this pass.
     pub fn dependants(&self) -> impl Iterator<Item = Rc<Pass>> + '_ {
         self.sequenced_from.iter()
-            .filter_map(|&index| self.owner.find_pass_by_id(index))
+            .filter_map(|&index| self.owner().find_pass_by_id(index))
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = Rc<Resource>> + '_ {
         self.inputs.iter().filter_map(|&index| {
-            self.owner.get_resource_by_id(index)
+            self.owner().get_resource_by_id(index)
         })
     }
 
     pub fn outputs(&self) -> impl Iterator<Item = Rc<Resource>> + '_ {
         self.outputs.iter().filter_map(|&index| {
-            self.owner.get_resource_by_id(index)
+            self.owner().get_resource_by_id(index)
         })
     }
 
-    pub fn sequence_to(&mut self, next : &Pass) {
+    pub fn sequence_to(&mut self, next : Rc<Pass>) {
         self.sequences_to.push(next.index());
     }
 
-    pub fn sequence_from(&mut self, previous : &Pass) {
+    pub fn sequence_from(&mut self, previous : Rc<Pass>) {
         self.sequenced_from.push(previous.index());
     }
 
@@ -141,11 +150,11 @@ impl Pass {
         resource.add_usage(self, access_flags, ash::vk::ImageUsageFlags::COLOR_ATTACHMENT);
 
         // Register how this texture is used in this pass.
-        self.color.add(access_flags, resource.id(), AttachmentDescription {
+        /*self.color.add(access_flags, resource.id(), AttachmentDescription {
             load : load_op,
             store : store_op,
             layout : ash::vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        });
+        });*/
         self
     }
 
@@ -160,11 +169,11 @@ impl Pass {
         // Inform the resource it's used as a texture attachment
         resource.add_usage(self, access_flags, ash::vk::ImageUsageFlags::SAMPLED);
 
-        self.textures.add(access_flags, resource.id(), AttachmentDescription {
+        /*self.textures.add(access_flags, resource.id(), AttachmentDescription {
             load : load_op,
             store : store_op,
             layout : ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL 
-        });
+        });*/
         self
     }
 }

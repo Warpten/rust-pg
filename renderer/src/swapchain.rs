@@ -61,9 +61,9 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
-            self.image_views.into_iter().for_each(|view| {
+            /*self.image_views.into_iter().for_each(|view| {
                 self.device.handle().destroy_image_view(view, None);
-            });
+            });*/
 
             self.loader.destroy_swapchain(self.handle, None);
         }

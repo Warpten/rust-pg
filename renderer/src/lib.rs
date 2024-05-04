@@ -11,6 +11,7 @@ mod swapchain;
 mod renderer;
 mod framebuffer;
 
+pub mod utils;
 pub mod graph;
 
 pub use framebuffer::*;
