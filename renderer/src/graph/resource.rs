@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bitmask_enum::bitmask;
 
-use super::{manager::Identifiable, pass::Pass, Graph};
+use super::{manager::{Identifiable, Identifier}, pass::Pass, Graph};
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
@@ -13,14 +13,16 @@ pub enum ResourceAccessFlags {
 /// Models a texture resource.
 pub struct Texture {
     name : &'static str,
+    id : usize,
     usage : ash::vk::ImageUsageFlags,
     passes : HashMap<usize, ResourceAccessFlags>
 }
 
 impl Texture {
-    pub fn new(name : &'static str) -> Self {
+    pub fn new(name : &'static str , id : usize) -> Self {
         Self {
             name,
+            id,
             usage : Default::default(),
             passes : HashMap::new()
         }
@@ -32,8 +34,8 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't read from this texture.
-    pub fn writers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
-        self.accessors(owner, ResourceAccessFlags::Write, only)
+    pub fn writers(&self, only : bool) -> Vec<Identifier<Pass>> {
+        self.accessors(ResourceAccessFlags::Write, only)
     }
 
     /// Returns all passes that read from this resource in any order.
@@ -42,11 +44,11 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't write to this texture.
-    pub fn readers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
-        self.accessors(owner, ResourceAccessFlags::Read, only)
+    pub fn readers(&self, only : bool) -> Vec<Identifier<Pass>> {
+        self.accessors(ResourceAccessFlags::Read, only)
     }
 
-    pub fn accessors(&self, owner : &Graph, flags : ResourceAccessFlags, only : bool) -> Vec<&Pass> {
+    pub fn accessors(&self, flags : ResourceAccessFlags, only : bool) -> Vec<Identifier<Pass>> {
         self.passes.iter()
             .filter(move |&(_, v)| {
                 if only {
@@ -55,8 +57,8 @@ impl Texture {
                     (*v & flags) != 0
                 }
             })
-            .filter_map(move |(&k, _)| owner.find_pass_by_id(k))
-            .collect::<Vec<_>>()
+            .map(move |(&k, _)| k.into())
+            .collect::<Vec<Identifier<Pass>>>() // TODO: drop this collect
     }
 
     /// Returns the combined usages of this texture.
@@ -89,9 +91,8 @@ impl Texture {
 }
 
 impl Identifiable for Texture {
-    fn name(&self) -> &'static str {
-        self.name()
-    }
+    fn name(&self) -> &'static str { self.name }
+    fn id(&self) -> usize { self.id }
 }
 
 /// Models a buffer resource.
@@ -100,9 +101,8 @@ pub struct Buffer {
 }
 
 impl Identifiable for Buffer {
-    fn name(&self) -> &'static str {
-        todo!()
-    }
+    fn name(&self) -> &'static str { todo!() }
+    fn id(&self) -> usize { todo!() }
 }
 
 
@@ -118,12 +118,19 @@ impl Identifiable for Resource {
             Self::Buffer(value) => value.name(),
         }
     }
+
+    fn id(&self) -> usize {
+        match self {
+            Resource::Texture(value) => value.id(),
+            Resource::Buffer(value) => value.id(),
+        }
+    }
 }
 
 impl Resource {
-    pub fn writers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
+    pub fn writers(&self, only : bool) -> Vec<Identifier<Pass>> {
         match &self {
-            Self::Texture(value) => value.writers(owner, only),
+            Self::Texture(value) => value.writers(only),
             _ => unimplemented!()
         }
     }

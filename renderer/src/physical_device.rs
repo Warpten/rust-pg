@@ -107,7 +107,7 @@ impl PhysicalDevice {
         let mut physical_device_descriptor_indexing_features = ash::vk::PhysicalDeviceDescriptorIndexingFeatures::default();
 
         let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default();
-        physical_device_features2.push_next(&mut physical_device_descriptor_indexing_features);
+        _ = physical_device_features2.push_next(&mut physical_device_descriptor_indexing_features);
         unsafe {
             instance.handle().get_physical_device_features2(self.handle, &mut physical_device_features2);
         }
