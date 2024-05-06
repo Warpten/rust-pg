@@ -1,36 +1,31 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::utils::Manager;
-
-use super::{pass::Pass, resource::{Buffer, Resource, Texture}, Sequencing, Synchronization};
+use super::{manager::Manager, pass::Pass, resource::{Buffer, Resource, Texture}};
 
 /// A rendering graph.
 /// 
 /// A rendering graph declares a set of passes and resources. Each pass can refer to the 
 pub struct Graph {
-    passes : Rc<Manager<Pass, Rc<Graph>>>,
-    ressources : Rc<Manager<Resource, Rc<Graph>>>,
-    synchronizations : Rc<Manager<Synchronization, Rc<Graph>>>,
-    sequences : Rc<Manager<Sequencing, Rc<Graph>>>,
+    passes : Manager<Pass>,
+    ressources : Manager<Resource>,
+    // synchronizations : Manager<Synchronization>,
+    // sequences : Manager<Sequencing>,
 }
 
 impl Graph {
     /// Creates a new render graph.
-    pub fn new() -> Rc<Self> {
-        let this = Rc::new(Self {
-            passes : Manager::new(|_, name, id, graph| Pass::new(Rc::downgrade(graph), id, name)),
-            ressources : Manager::new(|this, name, id, graph| todo!()),
-            synchronizations : Manager::new(|this, name, id, graph| todo!()),
-            sequences : Manager::new(|this, name, id, graph| todo!())
-        });
+    pub fn new() -> Self {
+        let mut this = Self {
+            passes : Manager::new(),
+            ressources : Manager::new(),
+        };
 
-        this.register_texture("builtin://backbuffer");
+        // this.register_texture("builtin://backbuffer");
         this
     }
 
     pub fn build(&mut self) {
         // Panic if the graph is insane
-        self.passes.for_each(|pass| pass.validate());
+        // self.passes.for_each(|pass| pass.validate());
 
         // 1. Find the backbuffer.
         //    Make sure at least one pass writes to it.
@@ -42,7 +37,7 @@ impl Graph {
         let backbuffer = self.get_texture("builtin://backbuffer").unwrap();
 
         // Begin by looking at all passes that write to the backbuffer
-        let backbuffer_writers = backbuffer.writers(false).collect::<Vec<_>>();
+        let backbuffer_writers = backbuffer.writers(self, false);
         assert_eq!(backbuffer_writers.is_empty(), false, "No pass writes to the backbuffer");
 
         // backbuffer_writers.iter()
@@ -54,54 +49,14 @@ impl Graph {
         // (because of constraint::Synchronization), possibly delaying to the next passes
         // in the strand to reduce the time spent explicitely waiting.
     }
-
-    fn traverse_dependencies(&self, pass : &Pass, depth : usize) {
-        assert!(depth < self.passes.len(), "Cyclic graph detected late");
-    }
-
-    /// Registers a synchronization directive between two render passes.
-    /// Either pass will wait for the other before continuing.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `name` - The name of the synchronization barrier.
-    /// * `stags` - A bitmask of all the pipeline stages on which the passes should synchronize.
-    /// * `passes` - The passes that should be externally synchronized.
-    pub fn synchronize(
-        &mut self,
-        name : &'static str,
-        stages : ash::vk::PipelineStageFlags2,
-        passes : &[Pass])
-    {
-        // self.synchronizations.register(name, |_, _| Synchronization::new(stages, passes));
-    }
-
-    /// Registers a sequencing directive between two render passes.
-    /// The second pass will not execute before the first one is done.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `name` - The name of the synchronization barrier.
-    /// * `stags` - A bitmask of all the pipeline stages on which the passes should synchronize.
-    /// * `first` - The pass that must execute first.
-    /// * `second` - The pass that must execute last.
-    pub fn sequence(&mut self, name : &'static str, stages : ash::vk::PipelineStageFlags2, first : &Pass, second: &Pass) {
-        // self.sequences.register(name, |_, _| Sequencing::new(stages, first, second));
-    }
-
-    // ^^^ Synchronization / Render passes vvv
-
+    
     /// Registers a new rendering pass.
     /// 
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying this pass.
-    pub fn register_pass(self : &mut Rc<Graph>, name : &'static str) -> Rc<Pass> {
-        /*self.passes.register(
-            name,
-            |id, name| Pass::new(Rc::clone(self), id, name)
-        )*/
-        todo!()
+    pub fn register_pass(&mut self, instance : Pass) {
+        self.passes.register(instance);
     }
 
     /// Registers a new texture.
@@ -109,14 +64,8 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying this texture.
-    pub fn register_texture(self : &Rc<Graph>, name : &'static str) -> &Texture {
-        /*let resource = self.ressources.register(name,
-            |id, name| Resource::Texture { id, value : Texture::new(Rc::clone(self), id) });
-        match Rc::as_ref(&resource) {
-            Resource::Texture { id, value } => value,
-            _ => panic!()
-        }*/
-        todo!()
+    pub fn register_texture(&mut self, texture : Texture) {
+        self.ressources.register(Resource::Texture(texture));
     }
 
     /// Finds a rendering pass.
@@ -124,7 +73,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying the pass to find.
-    pub fn find_pass(&self, name : &'static str) -> Option<Rc<Pass>> {
+    pub fn find_pass(&self, name : &'static str) -> Option<&Pass> {
         self.passes.find(name)
     }
 
@@ -133,7 +82,9 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The pass's identifier.
-    pub fn find_pass_by_id(&self, id : usize) -> Option<Rc<Pass>> { self.passes.find_by_id(id) }
+    pub fn find_pass_by_id(&self, id : usize) -> Option<&Pass> {
+        self.passes.find_by_id(id)
+    }
 
     /// Returns a registered resource, given an uniquely identifying name.
     /// If no resource with that name exists, returns an empty Option.
@@ -141,7 +92,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that resource.
-    pub fn get_resource(&self, name : &'static str) -> Option<Rc<Resource>> {
+    pub fn get_resource(&self, name : &'static str) -> Option<&Resource> {
         self.ressources.find(name)
     }
 
@@ -151,7 +102,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `id` - The ID of that texture.
-    pub fn get_resource_by_id(&self, id : usize) -> Option<Rc<Resource>> {
+    pub fn get_resource_by_id(&self, id : usize) -> Option<&Resource> {
         self.ressources.find_by_id(id)
     }
 
@@ -176,18 +127,17 @@ impl Graph {
     }
 
     fn get_texture_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Texture>
-        where F : Fn(&Self, Arg) -> Option<Rc<Resource>>
+        where F : Fn(&Self, Arg) -> Option<&Resource>
     {
-        /*match resource_supplier(self, arg) {
+        match resource_supplier(self, arg) {
             Some(resource) => {
-                match Rc::as_ref(&resource) {
-                    Resource::Texture { id, value } => Some(value),
+                match resource {
+                    Resource::Texture(value) => Some(value),
                     _ => None
                 }
             },
             None => None
-        }*/
-        todo!()
+        }
     }
 
     /// Returns a registered resource, given its ID.
@@ -211,18 +161,17 @@ impl Graph {
     }
 
     fn get_buffer_impl<F, Arg>(&self, resource_supplier : F, arg : Arg) -> Option<&Buffer>
-        where F : Fn(&Self, Arg) -> Option<Rc<Resource>>
+        where F : Fn(&Self, Arg) -> Option<&Resource>
     {
-        /*match resource_supplier(self, arg) {
+        match resource_supplier(self, arg) {
             Some(resource) => {
-                match Rc::as_ref(&resource) {
-                    Resource::Buffer { id, value } => Some(value),
+                match resource {
+                    Resource::Buffer(value) => Some(value),
                     _ => None
                 }
             },
             None => None
-        }*/
-        todo!()
+        }
     }
 
     /// Returns a registered buffer, given an uniquely identifying name.
@@ -231,15 +180,14 @@ impl Graph {
     /// 
     /// * `name` - The name of that buffer.
     pub fn get_buffer_resource(&self, name : &'static str) -> Option<&Buffer> {
-        /*match self.ressources.find(name) {
+        match self.ressources.find(name) {
             Some(resource) => {
-                match resource.as_ref() {
-                    Resource::Buffer { id, value } => Some(value),
+                match resource {
+                    Resource::Buffer(value) => Some(value),
                     _ => None,
                 }
             }
             None => None
-        }*/
-        todo!()
+        }
     }
 }

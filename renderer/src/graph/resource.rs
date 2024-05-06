@@ -1,25 +1,26 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
-use super::{pass::{Pass, ResourceAccessFlags}, Graph};
+use bitmask_enum::bitmask;
+
+use super::{manager::Identifiable, pass::Pass, Graph};
+
+#[bitmask(u8)]
+pub enum ResourceAccessFlags {
+    Read = 0x01,
+    Write = 0x02
+}
 
 /// Models a texture resource.
 pub struct Texture {
-    owner : Rc<Graph>,
-    /// ID of this texture in the owner [`Graph`].
-    index : usize,
+    name : &'static str,
     usage : ash::vk::ImageUsageFlags,
-    /// Associative map of all the passes using this texture.
-    ///   Key is the unique identifier of that pass in the graph
-    ///       (and just so happens to be its index)
-    ///   Value is the combined acces flags on that texture by the pass.
-    passes : HashMap<usize, ResourceAccessFlags>,
+    passes : HashMap<usize, ResourceAccessFlags>
 }
 
 impl Texture {
-    pub fn new(owner : Rc<Graph>, index : usize) -> Self {
+    pub fn new(name : &'static str) -> Self {
         Self {
-            owner,
-            index,
+            name,
             usage : Default::default(),
             passes : HashMap::new()
         }
@@ -31,16 +32,8 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't read from this texture.
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
-        self.passes.iter()
-            .filter(move |&(_, v)| {
-                if only {
-                    (*v & ResourceAccessFlags::Write) == ResourceAccessFlags::Write
-                } else {
-                    (*v & ResourceAccessFlags::Write) != 0
-                }
-            })
-            .filter_map(move |(k, _)| self.owner.find_pass_by_id(*k))
+    pub fn writers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
+        self.accessors(owner, ResourceAccessFlags::Write, only)
     }
 
     /// Returns all passes that read from this resource in any order.
@@ -49,25 +42,22 @@ impl Texture {
     /// 
     /// * `only` - If set to `true`, will only return [`Pass`]es that
     ///   don't write to this texture.
-    pub fn readers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
+    pub fn readers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
+        self.accessors(owner, ResourceAccessFlags::Read, only)
+    }
+
+    pub fn accessors(&self, owner : &Graph, flags : ResourceAccessFlags, only : bool) -> Vec<&Pass> {
         self.passes.iter()
             .filter(move |&(_, v)| {
                 if only {
-                    (*v & ResourceAccessFlags::Read) == ResourceAccessFlags::Read
+                    (*v & flags) == flags
                 } else {
-                    (*v & ResourceAccessFlags::Read) != 0
+                    (*v & flags) != 0
                 }
             })
-            .filter_map(move |(k, _)| self.owner.find_pass_by_id(*k))
+            .filter_map(move |(&k, _)| owner.find_pass_by_id(k))
+            .collect::<Vec<_>>()
     }
-
-    /// Returns the graph owning this texture.
-    pub fn graph(&self) -> &Graph {
-        &self.owner.as_ref()
-    }
-
-    /// Returns this texture's ID in the owning graph.
-    pub fn id(&self) -> usize { self.index }
 
     /// Returns the combined usages of this texture.
     pub fn usage(&self) -> ash::vk::ImageUsageFlags { self.usage }
@@ -88,13 +78,19 @@ impl Texture {
     pub(super) fn add_usage(
         &mut self,
         pass : &Pass,
-        access_flags : ResourceAccessFlags,
+        // access_flags : ResourceAccessFlags,
         usage : ash::vk::ImageUsageFlags
     ) {
         self.usage |= usage;
-        self.passes.entry(pass.index())
+        /*self.passes.entry(pass.index())
             .and_modify(|value| *value |= access_flags)
-            .or_insert(access_flags);
+            .or_insert(access_flags);*/
+    }
+}
+
+impl Identifiable for Texture {
+    fn name(&self) -> &'static str {
+        self.name()
     }
 }
 
@@ -103,23 +99,32 @@ pub struct Buffer {
 
 }
 
-pub enum Resource {
-    Texture { value: Texture, id : usize },
-    Buffer { value : Buffer, id : usize },
-    None
+impl Identifiable for Buffer {
+    fn name(&self) -> &'static str {
+        todo!()
+    }
 }
 
-impl Resource {
-    pub fn writers(&self, only : bool) -> impl Iterator<Item = Rc<Pass>> + '_ {
-        match &self {
-            Self::Texture { id : _, value } => value.writers(only),
-            _ => unimplemented!()
+
+pub enum Resource {
+    Texture(Texture),
+    Buffer(Buffer),
+}
+
+impl Identifiable for Resource {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Texture(value) => value.name(),
+            Self::Buffer(value) => value.name(),
         }
     }
 }
 
-impl Default for Resource {
-    fn default() -> Self {
-        Self::None
+impl Resource {
+    pub fn writers(&self, owner : &Graph, only : bool) -> Vec<&Pass> {
+        match &self {
+            Self::Texture(value) => value.writers(owner, only),
+            _ => unimplemented!()
+        }
     }
 }
