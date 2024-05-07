@@ -134,7 +134,9 @@ impl<T : Identifiable> Manager<T> {
     /// 
     /// * `name` - An uniquely identifying name for the new instance.
     /// * `factory` - A callable returning a new instance of the managed type.
-    pub fn register_deferred(&mut self, name : &'static str, factory : Factory<T>) -> &mut T {
+    pub fn register_deferred<F>(&mut self, name : &'static str, factory : F) -> &mut T
+        where F : Fn(&'static str, usize) -> T
+    {
         let index = self.entries.len();
         let instance = factory(name, index);
 
@@ -142,5 +144,10 @@ impl<T : Identifiable> Manager<T> {
         self.entries.push(instance);
 
         &mut self.entries[index]
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.index_map.clear();
     }
 }

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, hint};
 
-use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceAccessFlags}};
+use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceUsage, TextureUsage}};
 
 pub struct Pass {
     name : &'static str,
@@ -30,12 +30,44 @@ impl Pass {
     /// # Arguments
     /// 
     /// * `resource` - The resource this pass may potentially use.
-    pub fn uses(&self, resource : &Resource) -> Option<ResourceAccessFlags> {
-        self.resources.get(&resource.id()).copied()
+    pub fn resource_usage(&self, resource : &impl Identifiable) -> Option<&ResourceUsage> {
+        self.resources.get(&resource.id())
     }
 
-    pub fn resources(&self) -> &HashMap<usize, ResourceAccessFlags> {
-        &self.resources
+    pub unsafe fn texture_usage(&self, resource : &impl Identifiable) -> Option<&TextureUsage> {
+        self.resource_usage(resource).map(|resource_usage| {
+            match resource_usage {
+                ResourceUsage::Texture(val) => val,
+                _ => unsafe { hint::unreachable_unchecked() },
+            }
+        })
+    }
+
+    pub fn used_resources(&self) -> Vec<Identifier<Resource>> {
+        self.resources.keys()
+            .map(|&id| id.into())
+            .collect::<Vec<_>>()
+    }
+
+    /// Adds a resource used as either an input or an output to this pass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `resource` - The resource being used.
+    pub fn use_resource(&mut self, resource : &mut Resource, usage : ResourceUsage) -> &mut Self {
+        let id = resource.id();
+
+        match (resource, &usage) {
+            (Resource::Texture(texture), ResourceUsage::Texture(usage)) => {
+                texture.add_user(self.id(), usage.access_flags);
+            },
+            (Resource::Buffer(buffer), ResourceUsage::Buffer(usage)) => {
+                ();
+            },
+            (_, _) => panic!("Usage and resource types do not match")
+        };
+        self.resources.insert(id, usage);
+        self
     }
 
     /// Links two passes together.

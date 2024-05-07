@@ -1,10 +1,10 @@
-use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::Graph, traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
-pub struct Renderer<'a> {
+pub struct Application<'a> {
     pub entry : Arc<ash::Entry>,
     pub instance : Arc<Instance>,
     pub logical_device : Arc<LogicalDevice>,
@@ -12,9 +12,11 @@ pub struct Renderer<'a> {
     pub swapchain : Arc<Swapchain>,
     pub window : &'a Window,
     pub allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+
+    graph : Graph,
 }
 
-impl<'a> Renderer<'a> {
+impl<'a> Application<'a> {
     pub fn new<T : SwapchainOptions>(window : &'a Window, instance_extensions : Vec<CString>, device_extensions : Vec<CString>, options : T) -> Self {
         let entry = Arc::new(ash::Entry::linked());
         let instance = unsafe {
@@ -35,9 +37,6 @@ impl<'a> Renderer<'a> {
         // 4. And swapchain capable.
         let (physical_device, graphics_queue, presentation_queue) = instance.get_physical_devices(
                 |left, right| {
-                    let left_device_type = left.properties.device_type;
-                    let right_device_type = right.properties.device_type;
-
                     // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
                     match (right.properties.device_type, left.properties.device_type) {
                         // Base equality case
@@ -62,7 +61,10 @@ impl<'a> Renderer<'a> {
                         (ash::vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
 
                         // ALL > OTHER
-                        (ash::vk::PhysicalDeviceType::OTHER, _) => Ordering::Less
+                        (ash::vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
+
+                        // Default case for branch solver
+                        (_, _) => unsafe { hint::unreachable_unchecked() },
                     }
                 }
             )
@@ -153,6 +155,8 @@ impl<'a> Renderer<'a> {
             buffer_device_address: false,
         }).unwrap();
 
+        let graph = Graph::new();
+
         Self {
             entry,
             instance,
@@ -160,7 +164,17 @@ impl<'a> Renderer<'a> {
             surface,
             swapchain,
             window,
+            graph,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
+    }
+
+    pub fn on_swapchain_created(&mut self) {
+        self.graph.reset();
+
+        let mut backbuffer = self.graph.register_texture("builtin://backbuffer", self.swapchain.format());
+
+        let mut a = self.graph.register_pass("Pass A");
+        let mut b = self.graph.register_pass("Pass B");
     }
 }

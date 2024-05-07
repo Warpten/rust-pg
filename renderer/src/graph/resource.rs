@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use bitmask_enum::bitmask;
 
-use super::{manager::{Identifiable, Identifier}, pass::Pass, Graph};
+use super::{manager::{Identifiable, Identifier}, pass::Pass};
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
@@ -14,9 +14,8 @@ pub enum ResourceAccessFlags {
 pub struct Texture {
     name : &'static str,
     id : usize,
-    usage : ash::vk::ImageUsageFlags,
-    passes : HashMap<usize, ResourceAccessFlags>,
 
+    accessors : HashMap<usize, ResourceAccessFlags>,
     format : ash::vk::Format,
     levels : u32,
     layers : u32,
@@ -28,17 +27,27 @@ impl Identifiable for Texture {
 }
 
 impl Texture {
-    pub fn new(name : &'static str, id : usize, levels : u32, layers : u32) -> Self {
+    pub fn new(name : &'static str, id : usize, levels : u32, layers : u32, format : ash::vk::Format) -> Self {
         Self {
             name,
             id,
-            usage : Default::default(),
-            passes : HashMap::new(),
             
+            accessors : HashMap::new(),
             levels,
             layers,
-            format : todo!("This should be left to the user"),
+            format,
         }
+    }
+
+    pub fn format(&self) -> ash::vk::Format { self.format }
+    pub fn levels(&self) -> u32 { self.levels }
+    pub fn layers(&self) -> u32 { self.layers }
+
+    pub(in super) fn add_user(&mut self, pass : usize, usage_flags : ResourceAccessFlags) {
+        match self.accessors.entry(pass) {
+            Entry::Occupied(entry) => { *entry.into_mut() |= usage_flags; },
+            Entry::Vacant(entry) => { entry.insert(usage_flags); }
+        };
     }
 
     /// Returns all passes that write to this resource in any order.
@@ -61,8 +70,14 @@ impl Texture {
         self.accessors(ResourceAccessFlags::Read, only)
     }
 
+    /// Returns all passes that access this resource with the associated flags.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `flags` - One or many access flags.
+    /// * `only` - Determines if the provided access flags should be the only ones used for the pass to be returned.
     pub fn accessors(&self, flags : ResourceAccessFlags, only : bool) -> Vec<Identifier<Pass>> {
-        self.passes.iter()
+        self.accessors.iter()
             .filter(move |&(_, v)| {
                 if only {
                     (*v & flags) == flags
@@ -73,37 +88,16 @@ impl Texture {
             .map(move |(&k, _)| k.into())
             .collect::<Vec<Identifier<Pass>>>() // TODO: drop this collect
     }
-
-    /// Returns the combined usages of this texture.
-    pub fn usage(&self) -> ash::vk::ImageUsageFlags { self.usage }
-
-    /// Indicates to this texture that it is being used by a given pass.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `pass` - The pass using this texture.
-    /// * `access_flags` - The access flags used by a pass on this texture.
-    /// * `usage` - How is this image used?
-    /// 
-    /// # Notes
-    /// 
-    /// This method should **always** be called from either of:
-    /// * [`Pass::texture_attachment`]
-    /// * [`Pass::color_attachment`]
-    pub(super) fn add_usage(
-        &mut self,
-        pass : &Pass,
-        // access_flags : ResourceAccessFlags,
-        usage : ash::vk::ImageUsageFlags
-    ) {
-        self.usage |= usage;
-        /*self.passes.entry(pass.index())
-            .and_modify(|value| *value |= access_flags)
-            .or_insert(access_flags);*/
-    }
 }
 
-/// Models a buffer resource.
+#[derive(Clone)]
+pub struct TextureUsage {
+    pub access_flags : ResourceAccessFlags,
+    pub usage_flags : ash::vk::ImageUsageFlags
+}
+
+// ===== Buffer =====
+
 pub struct Buffer {
 
 }
@@ -112,6 +106,10 @@ impl Identifiable for Buffer {
     fn name(&self) -> &'static str { todo!() }
     fn id(&self) -> usize { todo!() }
 }
+
+pub struct BufferUsage;
+
+// ===== Resource =====
 
 pub enum Resource {
     Texture(Texture),
@@ -141,4 +139,9 @@ impl Resource {
             _ => unimplemented!()
         }
     }
+}
+
+pub enum ResourceUsage {
+    Texture(TextureUsage),
+    Buffer(BufferUsage),
 }

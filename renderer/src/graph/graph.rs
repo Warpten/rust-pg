@@ -1,7 +1,7 @@
 
-use std::{collections::HashMap, marker::PhantomData};
+use std::{collections::{HashMap, VecDeque}, marker::PhantomData};
 
-use super::{manager::{Identifiable, Identifier, Manager}, pass::Pass, resource::{Buffer, Resource, Texture}};
+use super::{manager::{Identifiable, Identifier, Manager}, pass::Pass, resource::{Buffer, Resource, Texture, TextureUsage}};
 
 /// A rendering graph.
 /// 
@@ -9,11 +9,7 @@ use super::{manager::{Identifiable, Identifier, Manager}, pass::Pass, resource::
 pub struct Graph {
     passes : Manager<Pass>,
     ressources : Manager<Resource>,
-    // synchronizations : Manager<Synchronization>,
-    // sequences : Manager<Sequencing>,
 }
-
-type SequencedValue<T> = Vec<(usize, T)>;
 
 impl Graph {
     /// Creates a new render graph.
@@ -64,21 +60,44 @@ impl Graph {
         // I thought about using a 0 offset dummy element, but that doesn't immediately jump out to me as "it works",
         // so for now, all you get is my rambling.
 
-        // Collect parent passes, in any order
-        let parents : Vec<&Pass> = root.executes_after().iter()
-            .cloned()
-            .filter_map(|identifier| self.find_pass(identifier))
-            .collect::<Vec<_>>();
+        let texture_history = {
+            let mut container = History::<Texture, TextureUsage>::new();
 
-        let mut texture_history = History::<Texture, TextureLayout>::new();
-        self.build_texture_history(root, &mut texture_history);
+            // Accumulator; we keep going until this is empty
+            //  This is the iterative implementation of depth-first traversal.
+            let mut traversal : VecDeque<&Pass> = VecDeque::from([root]);
+
+            while !traversal.is_empty() {
+                let node = unsafe {
+                    traversal.pop_front().unwrap_unchecked()
+                };
+
+                self.build_texture_history(root, &mut container);
+
+                node.executes_after().iter()
+                    .cloned()
+                    .filter_map(|identifier| self.find_pass(identifier))
+                    .for_each(|child| traversal.push_back(child));
+            }
+
+            container
+        };
+
+        // We now have the complete history of every texture in the graph.
+        // It's now time to build an adjacency list, starting from root.
     }
 
-    fn build_texture_history(&self, root : &Pass, texture_history : &mut History<Texture, TextureLayout>) {
-        for (&identifier, &usage) in root.resources() {
+    fn build_texture_history(&self, root : &Pass, texture_history : &mut History<Texture, TextureUsage>) {
+        for resource_identifier in root.used_resources() {
             let texture = unsafe {
-                self.find_texture(identifier.into()).unwrap_unchecked()
+                self.find_texture(resource_identifier).unwrap_unchecked()
             };
+
+            let texture_usage = unsafe {
+                root.texture_usage(texture).unwrap_unchecked()
+            };
+
+            texture_history.register(texture, root.id(), texture_usage.clone());
         }
     }
     
@@ -96,8 +115,8 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique name identifying this texture.
-    pub fn register_texture(&mut self, name : &'static str) -> &mut Resource {
-        self.ressources.register_deferred(name, |name, id| Resource::Texture(Texture::new(name, id, 1, 1)))
+    pub fn register_texture(&mut self, name : &'static str, format : ash::vk::Format) -> &mut Resource {
+        self.ressources.register_deferred(name, |name, id| Resource::Texture(Texture::new(name, id, 1, 1, format)))
     }
 
     /// Finds a rendering pass.
@@ -197,6 +216,11 @@ impl Graph {
             }
         })
     }
+
+    pub fn reset(&mut self) {
+        self.passes.clear();
+        self.ressources.clear();
+    }
 }
 
 /// Stores history for a set of objects
@@ -210,13 +234,13 @@ impl<T : Identifiable, V> History<T, V> {
         Self { values : HashMap::new(), _marker : PhantomData::default() }
     }
 
-    pub fn register(&mut self, resource : &T, pass : &Pass) {
+    pub fn register(&mut self, resource : &T, pass : usize, usage : V) {
         match self.values.get_mut(&resource.id()) {
             Some(value) => {
-                value.push((pass.id(), pass.usage_of(resource)))
+                value.push((pass, usage))
             },
             None => {
-                self.values.insert(resource.id(), vec![(pass.id(), pass.usage_of(resource))]);
+                self.values.insert(resource.id(), vec![(pass, usage)]);
             }
         }
     }

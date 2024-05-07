@@ -15,6 +15,8 @@ pub struct Swapchain {
     layer_count : u32,
     pub queue_families : Vec<QueueFamily>,
     framebuffer : Framebuffer,
+
+    surface_format : ash::vk::SurfaceFormatKHR,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -62,7 +64,7 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
-            self.image_views.into_iter().for_each(|view| {
+            self.image_views.iter().for_each(|&view| {
                 self.device.handle().destroy_image_view(view, None);
             });
 
@@ -212,9 +214,15 @@ impl Swapchain {
             images : swapchain_images,
             image_views : swapchain_image_views,
             framebuffer,
-            queue_families : options.queue_families().to_vec()
+            queue_families : options.queue_families().to_vec(),
+
+            surface_format,
         })
     }
+
+    pub fn format(&self) -> ash::vk::Format { self.surface_format.format }
+
+    pub fn color_space(&self) -> ash::vk::ColorSpaceKHR { self.surface_format.color_space}
 
     pub fn framebuffer(&self) -> &Framebuffer { &self.framebuffer }
 
