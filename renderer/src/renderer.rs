@@ -1,8 +1,8 @@
-use std::{collections::HashSet, ffi::{CStr, CString}, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, mem::ManuallyDrop, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 pub struct Renderer<'a> {
     pub entry : Arc<ash::Entry>,
@@ -11,7 +11,6 @@ pub struct Renderer<'a> {
     pub surface : Arc<Surface>,
     pub swapchain : Arc<Swapchain>,
     pub window : &'a Window,
-    pub framebuffer : Arc<Framebuffer>,
     pub allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 }
 
@@ -36,8 +35,35 @@ impl<'a> Renderer<'a> {
         // 4. And swapchain capable.
         let (physical_device, graphics_queue, presentation_queue) = instance.get_physical_devices(
                 |left, right| {
-                    // TODO: Revisit this; DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
-                    left.properties.device_type.cmp(&right.properties.device_type)
+                    let left_device_type = left.properties.device_type;
+                    let right_device_type = right.properties.device_type;
+
+                    // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
+                    match (right.properties.device_type, left.properties.device_type) {
+                        // Base equality case
+                        (a, b) if a == b => Ordering::Equal,
+
+                        // DISCRETE_GPU > ALL
+                        (ash::vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
+
+                        // DISCRETE > INTEGRATED > ALL
+                        (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
+
+                        // DISCRETE, INTEGRATED > VIRTUAL > ALL
+                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
+
+                        // DISCRETE, INTEGRATED, VIRTUAL > CPU > ALL
+                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
+                        (ash::vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
+
+                        // ALL > OTHER
+                        (ash::vk::PhysicalDeviceType::OTHER, _) => Ordering::Less
+                    }
                 }
             )
             .into_iter()
@@ -134,7 +160,6 @@ impl<'a> Renderer<'a> {
             surface,
             swapchain,
             window,
-            framebuffer,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }
