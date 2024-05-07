@@ -2,7 +2,7 @@ use std::{collections::HashSet, ffi::{CStr, CString}, mem::ManuallyDrop, sync::{
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 pub struct Renderer<'a> {
     pub entry : Arc<ash::Entry>,
@@ -11,6 +11,7 @@ pub struct Renderer<'a> {
     pub surface : Arc<Surface>,
     pub swapchain : Arc<Swapchain>,
     pub window : &'a Window,
+    pub framebuffer : Arc<Framebuffer>,
     pub allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 }
 
@@ -133,6 +134,7 @@ impl<'a> Renderer<'a> {
             surface,
             swapchain,
             window,
+            framebuffer,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }

@@ -1,5 +1,7 @@
 
-use super::{manager::{Identifier, Manager}, pass::Pass, resource::{Buffer, Resource, Texture}};
+use std::{collections::HashMap, marker::PhantomData};
+
+use super::{manager::{Identifiable, Identifier, Manager}, pass::Pass, resource::{Buffer, Resource, Texture}};
 
 /// A rendering graph.
 /// 
@@ -10,6 +12,8 @@ pub struct Graph {
     // synchronizations : Manager<Synchronization>,
     // sequences : Manager<Sequencing>,
 }
+
+type SequencedValue<T> = Vec<(usize, T)>;
 
 impl Graph {
     /// Creates a new render graph.
@@ -60,12 +64,22 @@ impl Graph {
         // I thought about using a 0 offset dummy element, but that doesn't immediately jump out to me as "it works",
         // so for now, all you get is my rambling.
 
-        root.executes_after().iter()
+        // Collect parent passes, in any order
+        let parents : Vec<&Pass> = root.executes_after().iter()
             .cloned()
             .filter_map(|identifier| self.find_pass(identifier))
-            .for_each(|prev| {
-                
-            });
+            .collect::<Vec<_>>();
+
+        let mut texture_history = History::<Texture, TextureLayout>::new();
+        self.build_texture_history(root, &mut texture_history);
+    }
+
+    fn build_texture_history(&self, root : &Pass, texture_history : &mut History<Texture, TextureLayout>) {
+        for (&identifier, &usage) in root.resources() {
+            let texture = unsafe {
+                self.find_texture(identifier.into()).unwrap_unchecked()
+            };
+        }
     }
     
     /// Registers a new rendering pass.
@@ -83,7 +97,7 @@ impl Graph {
     /// 
     /// * `name` - A unique name identifying this texture.
     pub fn register_texture(&mut self, name : &'static str) -> &mut Resource {
-        self.ressources.register_deferred(name, |name, id| Resource::Texture(Texture::new(name, id)))
+        self.ressources.register_deferred(name, |name, id| Resource::Texture(Texture::new(name, id, 1, 1)))
     }
 
     /// Finds a rendering pass.
@@ -182,5 +196,28 @@ impl Graph {
                 _ => None
             }
         })
+    }
+}
+
+/// Stores history for a set of objects
+struct History<T : Identifiable, V> {
+    values : HashMap<usize /* resource identifier */, Vec<(usize /* pass identifier */, V /* value for pass */)>>,
+    _marker : PhantomData<(T, V)>,
+}
+
+impl<T : Identifiable, V> History<T, V> {
+    pub fn new() -> Self {
+        Self { values : HashMap::new(), _marker : PhantomData::default() }
+    }
+
+    pub fn register(&mut self, resource : &T, pass : &Pass) {
+        match self.values.get_mut(&resource.id()) {
+            Some(value) => {
+                value.push((pass.id(), pass.usage_of(resource)))
+            },
+            None => {
+                self.values.insert(resource.id(), vec![(pass.id(), pass.usage_of(resource))]);
+            }
+        }
     }
 }

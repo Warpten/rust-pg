@@ -15,16 +15,29 @@ pub struct Texture {
     name : &'static str,
     id : usize,
     usage : ash::vk::ImageUsageFlags,
-    passes : HashMap<usize, ResourceAccessFlags>
+    passes : HashMap<usize, ResourceAccessFlags>,
+
+    format : ash::vk::Format,
+    levels : u32,
+    layers : u32,
+}
+
+impl Identifiable for Texture {
+    fn name(&self) -> &'static str { self.name }
+    fn id(&self) -> usize { self.id }
 }
 
 impl Texture {
-    pub fn new(name : &'static str , id : usize) -> Self {
+    pub fn new(name : &'static str, id : usize, levels : u32, layers : u32) -> Self {
         Self {
             name,
             id,
             usage : Default::default(),
-            passes : HashMap::new()
+            passes : HashMap::new(),
+            
+            levels,
+            layers,
+            format : todo!("This should be left to the user"),
         }
     }
 
@@ -90,11 +103,6 @@ impl Texture {
     }
 }
 
-impl Identifiable for Texture {
-    fn name(&self) -> &'static str { self.name }
-    fn id(&self) -> usize { self.id }
-}
-
 /// Models a buffer resource.
 pub struct Buffer {
 
@@ -104,7 +112,6 @@ impl Identifiable for Buffer {
     fn name(&self) -> &'static str { todo!() }
     fn id(&self) -> usize { todo!() }
 }
-
 
 pub enum Resource {
     Texture(Texture),

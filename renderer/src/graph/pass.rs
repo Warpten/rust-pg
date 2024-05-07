@@ -6,7 +6,7 @@ pub struct Pass {
     name : &'static str,
     id : usize,
 
-    resources : HashMap<usize, ResourceAccessFlags>,
+    resources : HashMap<usize, ResourceUsage>,
     executes_before : Vec<usize>,
     executes_after : Vec<usize>,
 }
@@ -32,6 +32,10 @@ impl Pass {
     /// * `resource` - The resource this pass may potentially use.
     pub fn uses(&self, resource : &Resource) -> Option<ResourceAccessFlags> {
         self.resources.get(&resource.id()).copied()
+    }
+
+    pub fn resources(&self) -> &HashMap<usize, ResourceAccessFlags> {
+        &self.resources
     }
 
     /// Links two passes together.

@@ -1,6 +1,6 @@
-use std::{ops::Range, sync::Arc};
+use std::{borrow::Borrow, ops::Range, sync::Arc};
 
-use crate::traits::{BorrowHandle, Handle};
+use crate::{traits::{BorrowHandle, Handle}, Framebuffer};
 
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
@@ -14,6 +14,7 @@ pub struct Swapchain {
     pub image_views : Vec<ash::vk::ImageView>,
     layer_count : u32,
     pub queue_families : Vec<QueueFamily>,
+    framebuffer : Framebuffer,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -61,9 +62,9 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
-            /*self.image_views.into_iter().for_each(|view| {
+            self.image_views.into_iter().for_each(|view| {
                 self.device.handle().destroy_image_view(view, None);
-            });*/
+            });
 
             self.loader.destroy_swapchain(self.handle, None);
         }
@@ -197,8 +198,12 @@ impl Swapchain {
             }
         }).collect::<Vec<_>>();
 
+        let framebuffer = {
+            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.borrow())
+        };
+
         Arc::new(Self {
-            device : device,
+            device,
             extent : surface_extent,
             handle,
             surface,
@@ -206,9 +211,12 @@ impl Swapchain {
             loader : swapchain_loader,
             images : swapchain_images,
             image_views : swapchain_image_views,
+            framebuffer,
             queue_families : options.queue_families().to_vec()
         })
     }
+
+    pub fn framebuffer(&self) -> &Framebuffer { &self.framebuffer }
 
     pub fn layer_count(&self) -> u32 { self.layer_count }
 

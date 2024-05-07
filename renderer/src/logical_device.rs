@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::traits::BorrowHandle;
+use crate::{traits::BorrowHandle, Framebuffer};
 
 use super::{Queue, Instance, PhysicalDevice};
 
@@ -20,6 +20,10 @@ impl LogicalDevice {
             instance,
             queues
         }
+    }
+
+    pub fn create_framebuffer(&self, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Arc<Framebuffer> {
+        return Framebuffer::new(extent, views, layers, self)
     }
 }
 
