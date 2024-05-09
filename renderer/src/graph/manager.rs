@@ -47,6 +47,11 @@ impl<T : Identifiable> Manager<T> {
             }
         }
     }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.name_map.clear();
+    }
 }
 
 impl<T : Identifiable> Default for Manager<T> {

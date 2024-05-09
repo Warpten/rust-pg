@@ -1,4 +1,4 @@
-use super::{manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}};
+use super::{buffer::Buffer, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::Texture};
 
 /// A rendering graph.
 /// 
@@ -52,14 +52,14 @@ impl Graph {
     pub fn find_resource(&self, identifier : Identifier<ResourceID>) -> Option<&Resource> {
         self.resources.find(identifier)
     }
-/* 
+
     /// Returns a registered texture, given an uniquely identifying name.
     /// If no texture with that name exists, returns an empty Option.
     /// 
     /// # Arguments
     /// 
     /// * `name` - The name of that texture.
-    pub fn find_texture(&self, identifier : Identifier) -> Option<&Texture> {
+    pub fn find_texture(&self, identifier : Identifier<ResourceID>) -> Option<&Texture> {
         self.find_resource(identifier).and_then(|resource| {
             match resource {
                 Resource::Texture(value) => Some(value),
@@ -74,7 +74,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that buffer in this graph.
-    pub fn find_buffer(&self, identifier : Identifier<Resource>) -> Option<&Buffer> {
+    pub fn find_buffer(&self, identifier : Identifier<ResourceID>) -> Option<&Buffer> {
         self.find_resource(identifier).and_then(|resource| {
             match resource {
                 Resource::Buffer(buffer) => Some(buffer),
@@ -82,10 +82,9 @@ impl Graph {
             }
         })
     }
-*/
 
     pub fn reset(&mut self) {
-        //self.passes.clear();
-        //self.ressources.clear();
+        self.passes.clear();
+        self.resources.clear();
     }
 }

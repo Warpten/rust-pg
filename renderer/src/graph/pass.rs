@@ -24,26 +24,55 @@ impl Pass {
     pub fn name(&self) -> &'static str { self.name }
 
     /// Adds an input to this pass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - The name of this input. Locally to the pass, this name must be unique.
+    /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
     pub fn add_input(mut self, name : &'static str, resource : ResourceID) -> Self {
         self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
         self
     }
+    
+    /// Adds an output to this pass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - The name of this input. Locally to the pass, this name must be unique.
+    /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
     pub fn add_output(mut self, name : &'static str, resource : ResourceID) -> Self {
         self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
         self
     }
 
+    /// Finalizes this pass and registers it on a graph. The object is moved from this call and no longer accessible.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `graph` - The graph that will take ownership of this pass.
     pub fn register(self, manager : &mut Graph) -> PassID {
         manager.passes.register(self, |instance, id| instance.id = PassID(id))
     }
 
-    pub fn input(&self, name : &'static str,) -> ResourceID {
+    /// Returns the [`ResourceID`] of an input identified by its name. The returned resource id is
+    /// local to this pass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
+    pub fn input(&self, name : &'static str) -> ResourceID {
         match self.inputs.get(name) {
             None => ResourceID::None,
             Some(value) => value.clone(),
         }
     }
 
+    /// Returns the [`ResourceID`] of an output identified by its name .The returned resource id is
+    /// local to this pass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
     pub fn output(&self, name : &'static str,) -> ResourceID {
         match self.outputs.get(name) {
             None => ResourceID::None,
@@ -137,7 +166,7 @@ impl PassID {
         self.get(graph).map(|pass| pass.input(name)).unwrap_or(ResourceID::None)
     }
 
-    pub fn output(&self, graph: &Graph, name : &'static str,) -> ResourceID {
+    pub fn output(&self, graph: &Graph, name : &'static str) -> ResourceID {
         self.get(graph).map(|pass| pass.output(name)).unwrap_or(ResourceID::None)
     }
 }
