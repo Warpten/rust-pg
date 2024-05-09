@@ -32,6 +32,16 @@ impl LogicalDevice {
     pub fn create_framebuffer(&self, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
         return Framebuffer::new(extent, views, layers, self)
     }
+
+    pub fn find_memory_type(&self, memory_type_bits : u32, flags : ash::vk::MemoryPropertyFlags) -> u32 {
+        for (i, memory_type) in self.physical_device.memory_properties.memory_types.iter().enumerate() {
+            if (memory_type_bits & (1 << i)) != 0 && (memory_type.property_flags & flags) == flags {
+                return i as _;
+            }
+        }
+
+        panic!("No memory type found matching the requirements")
+    }
 }
 
 impl BorrowHandle for LogicalDevice {

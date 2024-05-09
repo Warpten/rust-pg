@@ -10,9 +10,11 @@ mod semaphore_pool;
 mod swapchain;
 mod application;
 mod framebuffer;
+mod image;
 
 pub mod graph;
 
+pub use image::*;
 pub use framebuffer::*;
 pub use application::*;
 pub use swapchain::*;
