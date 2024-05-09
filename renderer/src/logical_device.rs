@@ -1,24 +1,44 @@
-use std::sync::Arc;
+use std::{mem::ManuallyDrop, sync::{Arc, Mutex}};
 
-use crate::{traits::BorrowHandle, Framebuffer};
+use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use super::{Queue, Instance, PhysicalDevice};
+use crate::{traits::{BorrowHandle, Handle}, Framebuffer};
+
+use super::{Queue, Context, PhysicalDevice};
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
     handle : ash::Device,
-    pub instance : Arc<Instance>,
-    pub physical_device : PhysicalDevice,
-    pub queues : Vec<Queue>
+    instance : Arc<Context>,
+    physical_device : PhysicalDevice,
+    allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+
+    pub queues : Vec<Queue>,
 }
 
 impl LogicalDevice {
-    pub fn new(instance : Arc<Instance>, device : ash::Device, physical_device : PhysicalDevice, queues : Vec<Queue>) -> Self {
+    pub fn instance(&self) -> &Arc<Context> { &self.instance }
+    pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
+    pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
+
+    pub fn new(instance : Arc<Context>, device : ash::Device, physical_device : PhysicalDevice, queues : Vec<Queue>) -> Self {
+        let allocator = Allocator::new(&AllocatorCreateDesc{
+            instance: instance.handle().clone(),
+            device: device.clone(),
+            physical_device: physical_device.handle().clone(),
+
+            // TODO: All these may need tweaking and fixing
+            debug_settings: AllocatorDebugSettings::default(),
+            allocation_sizes : AllocationSizes::default(),
+            buffer_device_address: false,
+        }).expect("Error creating an allocator");
+
         Self {
             handle : device,
             physical_device,
             instance,
-            queues
+            queues,
+            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }
 
@@ -34,7 +54,7 @@ impl LogicalDevice {
     }
 
     pub fn find_memory_type(&self, memory_type_bits : u32, flags : ash::vk::MemoryPropertyFlags) -> u32 {
-        for (i, memory_type) in self.physical_device.memory_properties.memory_types.iter().enumerate() {
+        for (i, memory_type) in self.physical_device().memory_properties().memory_types.iter().enumerate() {
             if (memory_type_bits & (1 << i)) != 0 && (memory_type.property_flags & flags) == flags {
                 return i as _;
             }
@@ -53,6 +73,8 @@ impl BorrowHandle for LogicalDevice {
 impl Drop for LogicalDevice {
     fn drop(&mut self) {
         unsafe {
+            ManuallyDrop::drop(&mut self.allocator);
+
             self.handle.destroy_device(None);
         }
     }

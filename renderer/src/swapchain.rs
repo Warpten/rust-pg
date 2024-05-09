@@ -4,7 +4,7 @@ use ash::khr::swapchain;
 
 use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Image};
 
-use super::{Instance, LogicalDevice, QueueFamily, Surface};
+use super::{Context, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain {
     pub device : Arc<LogicalDevice>,
@@ -89,7 +89,7 @@ impl Swapchain {
     /// * Panics if [`vkCreateSwapchainKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateSwapchainKHR.html) fails.
     /// * Panics if [`vkGetSwapchainImagesKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetSwapchainImagesKHR.html) fails.
     pub fn new(
-        instance : Arc<Instance>,
+        instance : Arc<Context>,
         device : Arc<LogicalDevice>,
         surface : Arc<Surface>,
         options : impl SwapchainOptions,
@@ -97,7 +97,7 @@ impl Swapchain {
         let surface_format = {
             let surface_formats = unsafe {
                 surface.loader
-                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle())
+                    .get_physical_device_surface_formats(device.physical_device().handle(), surface.handle())
                     .expect("Failed to get physical device surface formats")
             };
 
@@ -109,7 +109,7 @@ impl Swapchain {
 
         let surface_capabilities = unsafe {
             surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle())
+                .get_physical_device_surface_capabilities(device.physical_device().handle(), surface.handle())
                 .expect("Failed to get physical device surface capabilities")
         };
         let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {

@@ -2,43 +2,41 @@ use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 pub struct Application<'a> {
-    pub entry : Arc<ash::Entry>,
-    pub instance : Arc<Instance>,
-    pub logical_device : Arc<LogicalDevice>,
-    pub surface : Arc<Surface>,
-    pub swapchain : Arc<Swapchain>,
-    pub window : &'a Window,
-    pub allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+    context : Arc<Context>,
+    logical_device : Arc<LogicalDevice>,
+    surface : Arc<Surface>,
+    swapchain : Arc<Swapchain>,
+    window : &'a Window,
+    allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     graph : Graph,
 }
 
 impl<'a> Application<'a> {
     pub fn new<T : SwapchainOptions>(window : &'a Window, instance_extensions : Vec<CString>, device_extensions : Vec<CString>, options : T) -> Self {
-        let entry = Arc::new(ash::Entry::linked());
-        let instance = unsafe {
+        let context = unsafe {
             // TODO: This could probably use some cleaning up.
             let mut all_extensions = instance_extensions;
             for extension in window.surface_extensions() {
                 all_extensions.push(CStr::from_ptr(extension).to_owned());
             }
 
-            Instance::new(&entry, CString::new("World Editor").unwrap(), all_extensions)
+            Context::new(CString::new("World Editor").unwrap(), all_extensions)
         };
-        let surface = Surface::new(&entry, instance.clone(), window);
+        let surface = Surface::new(context.clone(), window);
         
         // Select a physical device
         // 1. GRAPHICS capable
         // 2. Able to present to a KHR swapchain
         // 3. With the requested extensions
         // 4. And swapchain capable.
-        let (physical_device, graphics_queue, presentation_queue) = instance.get_physical_devices(
+        let (physical_device, graphics_queue, presentation_queue) = context.get_physical_devices(
                 |left, right| {
                     // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
-                    match (right.properties.device_type, left.properties.device_type) {
+                    match (right.properties().device_type, left.properties().device_type) {
                         // Base equality case
                         (a, b) if a == b => Ordering::Equal,
 
@@ -132,20 +130,20 @@ impl<'a> Application<'a> {
             .expect("Failed to select a physical device and an associated queue family");
 
         let logical_device = physical_device.create_logical_device(
-            instance.clone(),
+            context.clone(),
             vec![(1, graphics_queue), (1, presentation_queue)],
             |_index, _family| 1.0_f32,
             device_extensions);
 
         let swapchain = Swapchain::new(
-            instance.clone(),
+            context.clone(),
             logical_device.clone(),
             surface.clone(),
             options
         );
 
         let allocator = Allocator::new(&AllocatorCreateDesc{
-            instance: instance.handle().clone(),
+            instance: context.handle().clone(),
             device: logical_device.handle().clone(),
             physical_device: physical_device.handle().clone(),
 
@@ -158,8 +156,7 @@ impl<'a> Application<'a> {
         let graph = Graph::new();
 
         Self {
-            entry,
-            instance,
+            context,
             logical_device,
             surface,
             swapchain,
@@ -168,6 +165,14 @@ impl<'a> Application<'a> {
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }
+
+    #[inline] pub fn context(&self) -> &Arc<Context> { &self.context }
+    #[inline] pub fn entry(&self) -> &Arc<ash::Entry> { self.context().entry() }
+    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.logical_device }
+    #[inline] pub fn surface(&self) -> &Arc<Surface> { &self.surface }
+    #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
+    #[inline] pub fn window(&self) -> &'a Window { &self.window }
+    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
     pub fn on_swapchain_created(&mut self) {
         self.graph.reset();

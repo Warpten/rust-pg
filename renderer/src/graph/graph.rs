@@ -22,6 +22,10 @@ impl Graph {
         //    It's too late for my brain to function so here goes.
         //    https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
         //    https://blog.traverseresearch.nl/render-graph-101-f42646255636
+
+        for pass in self.passes.iter() {
+            
+        }
     }
 
     /// Registers a new texture.

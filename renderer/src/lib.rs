@@ -1,4 +1,4 @@
-mod instance;
+mod context;
 mod command_pool;
 mod traits;
 mod logical_device;
@@ -19,7 +19,7 @@ pub use framebuffer::*;
 pub use application::*;
 pub use swapchain::*;
 pub use semaphore_pool::*;
-pub use instance::*;
+pub use context::*;
 pub use command_pool::*;
 pub use logical_device::*;
 pub use physical_device::*;

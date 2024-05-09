@@ -2,14 +2,14 @@ use std::{collections::HashMap, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use crate::traits::{BorrowHandle, Handle};
 
-use super::{QueueFamily, Instance, LogicalDevice, Queue};
+use super::{QueueFamily, Context, LogicalDevice, Queue};
 
 #[derive(Clone)]
 pub struct PhysicalDevice {
     handle : ash::vk::PhysicalDevice,
-    pub instance : Weak<Instance>,
-    pub memory_properties : ash::vk::PhysicalDeviceMemoryProperties,
-    pub properties : ash::vk::PhysicalDeviceProperties,
+    context : Weak<Context>,
+    memory_properties : ash::vk::PhysicalDeviceMemoryProperties,
+    properties : ash::vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
 }
 
@@ -20,6 +20,10 @@ impl Handle for PhysicalDevice {
 }
 
 impl PhysicalDevice {
+    #[inline] pub fn context(&self) -> &Weak<Context> { &self.context }
+    #[inline] pub fn memory_properties(&self) -> &ash::vk::PhysicalDeviceMemoryProperties { &self.memory_properties }
+    #[inline] pub fn properties(&self) -> &ash::vk::PhysicalDeviceProperties { &self.properties }
+
     /// Returns the extensions available on this [`PhysicalDevice`].
     ///
     /// # Panics
@@ -27,7 +31,7 @@ impl PhysicalDevice {
     /// Panics if [`vkEnumerateDeviceExtensionProperties`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumerateDeviceExtensionProperties.html) fails.
     pub fn get_extensions(&self) -> Vec<ash::vk::ExtensionProperties> {
         unsafe {
-            self.instance.upgrade()
+            self.context.upgrade()
                 .expect("Instance released too early")
                 .handle()
                 .enumerate_device_extension_properties(self.handle)
@@ -50,7 +54,7 @@ impl PhysicalDevice {
     /// * Panics if [`vkCreateDevice`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDevice.html) fails.
     pub fn create_logical_device<F>(
         &self,
-        instance : Arc<Instance>,
+        instance : Arc<Context>,
         queue_families : Vec<(u32, QueueFamily)>,
         get_queue_priority : F,
         extensions : Vec<CString>,
@@ -146,7 +150,7 @@ impl PhysicalDevice {
     /// * `instance` - The global Vulkan instance.
     pub fn new(
         device : ash::vk::PhysicalDevice,
-        instance : &Arc<Instance>
+        instance : &Arc<Context>
     ) -> Self {
         let physical_device_memory_properties = unsafe {
             instance.handle().get_physical_device_memory_properties(device)
@@ -164,7 +168,7 @@ impl PhysicalDevice {
 
         Self {
             handle : device,
-            instance : Arc::downgrade(&instance),
+            context : Arc::downgrade(&instance),
             memory_properties : physical_device_memory_properties,
             properties : physical_device_properties,
             queue_families

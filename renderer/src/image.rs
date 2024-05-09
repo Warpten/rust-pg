@@ -1,11 +1,13 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
 use crate::{traits::BorrowHandle, LogicalDevice};
 
 pub struct Image {
     device : Arc<LogicalDevice>,
     handle : ash::vk::Image,
-    allocation : Option<ash::vk::DeviceMemory>,
+    allocation : Option<Allocation>,
     view : ash::vk::ImageView,
 
     layout : ash::vk::ImageLayout,
@@ -14,15 +16,20 @@ pub struct Image {
 }
 
 impl Image {
+    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.device }
+    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.logical_device().allocator() }
+
     /// Creates a new image.
     /// 
     /// # Arguments
     /// 
     /// * `device` - The logical device owning this image.
+    /// * `allocator` - A GPU allocator.
     /// * `create_info` - Describes the format and type of the texel blocks that will be contained in the image.
     /// * `aspect_mask` - Number of data elements in each dimension of the image.
     /// * `levels` - Number of levels of detail available for minified sampling of the image.
     pub fn new(
+        name : &'static str,
         device : Arc<LogicalDevice>,
         create_info : ash::vk::ImageCreateInfo,
         aspect_mask : ash::vk::ImageAspectFlags,
@@ -36,16 +43,20 @@ impl Image {
 
         let requirements = unsafe { device.handle().get_image_memory_requirements(image) };
 
-        // TODO: replace with gpu-allocator
-        let allocation = unsafe {
-            let memory_allocation = ash::vk::MemoryAllocateInfo::default()
-                .allocation_size(requirements.size)
-                .memory_type_index(device.find_memory_type(requirements.memory_type_bits, ash::vk::MemoryPropertyFlags::DEVICE_LOCAL));
+        let allocation = device.allocator()
+            .lock()
+            .expect("Failed to obtain allocator")
+            .allocate(&AllocationCreateDesc {
+                name,
+                requirements,
+                location : gpu_allocator::MemoryLocation::GpuOnly,
+                linear : false,
+                // TODO: Figure this out
+                allocation_scheme : gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged
+            })
+            .expect("Memory allocation failed");
 
-            device.handle().allocate_memory(&memory_allocation, None).expect("Memory allocation failed")
-        };
-
-        unsafe { device.handle().bind_image_memory(image, allocation, 0) };
+        unsafe { device.handle().bind_image_memory(image, allocation.memory(), allocation.offset()).expect("Memory binding failed") };
 
         let image_view_info = ash::vk::ImageViewCreateInfo::default()
             .view_type(ash::vk::ImageViewType::TYPE_2D)
@@ -127,8 +138,11 @@ impl Drop for Image {
             if self.allocation.is_some() {
                 self.device.handle().destroy_image(self.handle, None);
 
-                // TODO: gpu-allocator
-                self.device.handle().free_memory(self.allocation.take().unwrap_unchecked(), None);
+                self.device.allocator()
+                    .lock()
+                    .unwrap()
+                    .free(self.allocation.take().unwrap_unchecked())
+                    .expect("Failed to free memory");
             }
         }
     }

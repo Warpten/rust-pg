@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hint, marker::PhantomData};
+use std::{hint, marker::PhantomData};
 
 use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceAccessFlags, ResourceID}, Graph};
 

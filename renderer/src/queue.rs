@@ -19,6 +19,8 @@ impl Queue {
             }
         }
     }
+
+    pub fn family(&self) -> &QueueFamily { &self.family }
 }
 
 impl Handle for Queue {

@@ -4,20 +4,21 @@ use crate::traits::BorrowHandle;
 
 use super::PhysicalDevice;
 
-pub struct Instance {
-    pub entry : Arc<ash::Entry>,
+pub struct Context {
+    entry : Arc<ash::Entry>,
     handle : ash::Instance,
     pub debug_utils : ash::ext::debug_utils::Instance,
     pub debug_messenger : ash::vk::DebugUtilsMessengerEXT,
+    
 }
 
-impl BorrowHandle for Instance {
+impl BorrowHandle for Context {
     type Target = ash::Instance;
 
     fn handle(&self) -> &ash::Instance { &self.handle }
 }
 
-impl Drop for Instance {
+impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
             self.debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
@@ -26,7 +27,7 @@ impl Drop for Instance {
     }
 }
 
-impl Instance {
+impl Context {
     unsafe extern "system" fn vulkan_debug_utils_callback(
         message_severity : ash::vk::DebugUtilsMessageSeverityFlagsEXT,
         message_types : ash::vk::DebugUtilsMessageTypeFlagsEXT,
@@ -52,6 +53,8 @@ impl Instance {
         ash::vk::FALSE
     }
 
+    pub fn entry(&self) -> &Arc<ash::Entry> { &self.entry }
+
     /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted by device type,
     /// in the following order:
     /// 
@@ -68,7 +71,7 @@ impl Instance {
     /// # Panics
     ///
     /// Panics if [`vkEnumeratePhysicalDevices`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumeratePhysicalDevices.html) fails.
-    pub fn get_physical_devices<F>(self : &Arc<Instance>, cmp : F) -> Vec<PhysicalDevice>
+    pub fn get_physical_devices<F>(self : &Arc<Context>, cmp : F) -> Vec<PhysicalDevice>
         where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
     {
         let physical_devices = unsafe {
@@ -89,7 +92,6 @@ impl Instance {
     /// 
     /// # Arguments
     /// 
-    /// * `entry` - The global Vulkan entry table.
     /// * `app_name` - The name of the application.
     /// * `instance_extensions` - An array of extensions to apply to this instance.
     ///
@@ -97,7 +99,8 @@ impl Instance {
     ///
     /// * Panics if [`vkCreateInstance`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateInstance.html) failed.
     /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
-    pub fn new(entry : &Arc<ash::Entry>, app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
+    pub fn new(app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
+        let entry = Arc::new(ash::Entry::linked());
         let mut debug_utils_messenger_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
             .flags(ash::vk::DebugUtilsMessengerCreateFlagsEXT::empty())
             .message_severity(
@@ -111,11 +114,10 @@ impl Instance {
             )
             .pfn_user_callback(Some(Self::vulkan_debug_utils_callback));
 
-        let app_info =
-        ash::vk::ApplicationInfo::default()
-                .application_name(&app_name)
-                .application_version(ash::vk::make_api_version(1, 0, 0, 0))
-                .api_version(ash::vk::API_VERSION_1_3);
+        let app_info = ash::vk::ApplicationInfo::default()
+            .application_name(&app_name)
+            .application_version(ash::vk::make_api_version(1, 0, 0, 0))
+            .api_version(ash::vk::API_VERSION_1_3);
 
         const VALIDATION: [&'static str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
@@ -147,10 +149,10 @@ impl Instance {
         };
 
         Arc::new(Self {
-            entry : entry.clone(),
+            entry,
             handle : instance,
             debug_utils : debug_utils_loader,
-            debug_messenger,
+            debug_messenger
         })
     }
 }
