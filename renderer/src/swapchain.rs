@@ -7,10 +7,12 @@ use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Image};
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain {
-    handle : ash::vk::SwapchainKHR,
     pub device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
+
+    handle : ash::vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
+    
     pub extent : ash::vk::Extent2D,
     pub images : Vec<Image>,
     layer_count : u32,
@@ -65,10 +67,6 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
-            self.image_views.iter().for_each(|&view| {
-                self.device.handle().destroy_image_view(view, None);
-            });
-
             self.loader.destroy_swapchain(self.handle, None);
         }
     }
@@ -149,7 +147,11 @@ impl Swapchain {
             .image_usage(ash::vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
             .queue_family_indices(&queue_family_indices)
-            .pre_transform(surface_capabilities.current_transform)
+            .pre_transform(if surface_capabilities.supported_transforms.contains(ash::vk::SurfaceTransformFlagsKHR::IDENTITY) {
+                ash::vk::SurfaceTransformFlagsKHR::IDENTITY
+            } else {
+                surface_capabilities.current_transform
+            })
             // Indicates the alpha compositing mode to use when this surface is composited together with other
             // surfaces on certain window systems.
             .composite_alpha(options.composite_alpha())

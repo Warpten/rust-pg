@@ -1,6 +1,6 @@
-use std::{mem::swap, sync::Arc};
+use std::sync::Arc;
 
-use crate::{traits::BorrowHandle, LogicalDevice, Swapchain};
+use crate::{traits::BorrowHandle, LogicalDevice};
 
 pub struct Image {
     device : Arc<LogicalDevice>,
@@ -19,15 +19,9 @@ impl Image {
     /// # Arguments
     /// 
     /// * `device` - The logical device owning this image.
-    /// * `format` - Describes the format and type of the texel blocks that will be contained in the image.
-    /// * `extent` - Number of data elements in each dimension of the image.
+    /// * `create_info` - Describes the format and type of the texel blocks that will be contained in the image.
+    /// * `aspect_mask` - Number of data elements in each dimension of the image.
     /// * `levels` - Number of levels of detail available for minified sampling of the image.
-    /// * `layers` - Number of layers in the image.
-    /// * `sampling` - The number of [samples per texel](https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#primsrast-multisampling).
-    /// * `tiling` - The tiling arrangement of the texel blocks in memory.
-    /// * `usage` - The intended usage of the image.
-    /// * `initial_layout` - The initial layout of this image.
-    /// * `queues` - All queue families allowed to access this image.
     pub fn new(
         device : Arc<LogicalDevice>,
         create_info : ash::vk::ImageCreateInfo,
@@ -105,7 +99,7 @@ impl Image {
                     .expect("Failed to create an image view on the swapchain image");
 
                 Self {
-                    device : device,
+                    device : device.clone(),
                     handle : image,
                     extent : ash::vk::Extent3D {
                         width : extent.width,
