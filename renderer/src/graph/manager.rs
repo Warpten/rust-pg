@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, marker::PhantomData};
 
 pub trait Identifiable {
     type Key;
@@ -12,16 +12,16 @@ pub struct Manager<T : Identifiable> {
     name_map : HashMap<&'static str, usize>,
 }
 
-pub enum Identifier {
-    Numeric(usize),
-    Named(&'static str),
+pub enum Identifier<T> {
+    Numeric(usize, PhantomData<T>),
+    Named(&'static str, PhantomData<T>),
 }
 
 impl<T : Identifiable> Manager<T> {
-    pub fn find(&self, identifier : Identifier) -> Option<&T> {
+    pub fn find(&self, identifier : Identifier<T::Key>) -> Option<&T> {
         match identifier {
-            Identifier::Numeric(index) => self.entries.get(index),
-            Identifier::Named(name) => self.name_map.get(name).and_then(|&index| self.entries.get(index))
+            Identifier::Numeric(index, _) => self.entries.get(index),
+            Identifier::Named(name, _) => self.name_map.get(name).and_then(|&index| self.entries.get(index))
         }
     }
 

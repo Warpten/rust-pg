@@ -1,8 +1,8 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::rc::Rc;
 
 use bitmask_enum::bitmask;
 
-use super::{buffer::{Buffer, BufferID, BufferUsage}, manager::{Identifiable, Identifier}, pass::Pass, texture::{Texture, TextureID, TextureUsage}};
+use super::{buffer::{Buffer, BufferID, BufferUsage}, manager::Identifiable, pass::PassID, texture::{Texture, TextureID, TextureUsage}};
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
@@ -15,15 +15,25 @@ pub enum Resource {
     Buffer(Buffer),
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ResourceID(pub(in super) usize);
+/// Encapsulates varying types of resource.
+/// 
+/// Note that this cannot implement [`Copy`] because the [`ResourceID::Virtual`] variant is
+/// recursive and needs an indirection that is not [`Copy`]able.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ResourceID {
+    Texture(TextureID),
+    Buffer(BufferID),
+    
+    Virtual(PassID, Box<ResourceID>),
+    None
+}
 
 impl From<TextureID> for ResourceID {
-    fn from(val: TextureID) -> Self { ResourceID(val.0) }
+    fn from(val: TextureID) -> Self { ResourceID::Texture(val) }
 }
 
 impl From<BufferID> for ResourceID {
-    fn from(val: BufferID) -> Self { ResourceID(val.0) }
+    fn from(val: BufferID) -> Self { ResourceID::Buffer(val) }
 }
 
 impl Identifiable for Resource {
@@ -38,8 +48,8 @@ impl Identifiable for Resource {
 
     fn id(&self) -> ResourceID {
         match self {
-            Resource::Texture(value) => value.id().into(),
-            Resource::Buffer(value) => value.id().into(),
+            Self::Texture(value) => value.id().into(),
+            Self::Buffer(value) => value.id().into(),
         }
     }
 }

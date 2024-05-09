@@ -1,6 +1,6 @@
-use std::{collections::HashMap, hint};
+use std::{collections::HashMap, hint, marker::PhantomData};
 
-use super::{manager::Identifiable, resource::{Resource, ResourceAccessFlags, ResourceID}, Graph};
+use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceAccessFlags, ResourceID}, Graph};
 
 
 /// Models a texture resource.
@@ -13,11 +13,11 @@ pub struct Texture {
     layers : u32,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TextureID(pub (in super) usize);
 
-impl From<ResourceID> for TextureID {
-    fn from(value: ResourceID) -> Self { TextureID(value.0) }
+impl Into<Identifier<ResourceID>> for TextureID {
+    fn into(self) -> Identifier<ResourceID> { Identifier::Numeric(self.0, PhantomData::default()) }
 }
 
 impl Identifiable for Texture {
@@ -46,12 +46,17 @@ impl Texture {
     pub fn register(self, manager : &mut Graph) -> TextureID {
         let texture = Resource::Texture(self);
 
-        manager.resources.register(texture, |instance, id| {
+        let resource_id = manager.resources.register(texture, |instance, id| {
             match instance {
                 Resource::Texture(texture) => texture.id = TextureID(id),
                 _ => unsafe { hint::unreachable_unchecked() }
             };
-        }).into()
+        });
+
+        match resource_id {
+            ResourceID::Texture(texture) => texture,
+            _ => panic!("This should not happen"),
+        }
     }
 }
 

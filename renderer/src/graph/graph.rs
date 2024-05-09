@@ -1,4 +1,4 @@
-use super::{manager::{Identifier, Manager}, pass::Pass, resource::Resource};
+use super::{manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}};
 
 /// A rendering graph.
 /// 
@@ -39,7 +39,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique identifier for the pass.
-    pub fn find_pass(&self, identifier : Identifier) -> Option<&Pass> {
+    pub fn find_pass(&self, identifier : Identifier<PassID>) -> Option<&Pass> {
         self.passes.find(identifier)
     }
 
@@ -49,7 +49,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique identifier for that resource.
-    pub fn find_resource(&self, identifier : Identifier) -> Option<&Resource> {
+    pub fn find_resource(&self, identifier : Identifier<ResourceID>) -> Option<&Resource> {
         self.resources.find(identifier)
     }
 /* 

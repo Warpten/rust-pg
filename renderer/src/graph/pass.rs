@@ -1,17 +1,14 @@
-use std::{collections::HashMap, hint};
+use std::{collections::HashMap, marker::PhantomData};
 
-use super::{manager::{Identifiable, Identifier, Manager}, resource::{Resource, ResourceUsage}, virtual_resource::VirtualResource, Graph};
+use super::{manager::{Identifiable, Identifier}, resource::ResourceID, Graph};
 
 pub struct Pass {
     pub(in self) id : PassID,
     name : &'static str,
 
-    inputs : HashMap<&'static str, VirtualResource>,
-    outputs : HashMap<&'static str, VirtualResource>,
+    pub(in self) inputs : HashMap<&'static str, ResourceID /* local alias */>,
+    pub(in self) outputs : HashMap<&'static str, ResourceID /* local alias*/>,
 }
-
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PassID(usize);
 
 impl Pass {
     pub fn new(name : &'static str) -> Pass {
@@ -26,18 +23,13 @@ impl Pass {
 
     pub fn name(&self) -> &'static str { self.name }
 
-    pub fn add_input(&mut self, resource : &Resource) -> &mut Self {
-        match resource {
-            Resource::Texture(texture) => self.inputs.insert(texture.name(), VirtualResource::Texture(texture.id())),
-            Resource::Buffer(buffer) => todo!(),
-        };
+    /// Adds an input to this pass.
+    pub fn add_input(mut self, name : &'static str, resource : ResourceID) -> Self {
+        self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
         self
     }
-    pub fn add_output(&mut self, resource : Resource) -> &mut Self {
-        match resource {
-            Resource::Texture(texture) => self.outputs.insert(texture.name(), VirtualResource::Texture(texture.id())),
-            Resource::Buffer(buffer) => todo!(),
-        };
+    pub fn add_output(mut self, name : &'static str, resource : ResourceID) -> Self {
+        self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
         self
     }
 
@@ -45,12 +37,18 @@ impl Pass {
         manager.passes.register(self, |instance, id| instance.id = PassID(id))
     }
 
-    pub fn input(&self, name : &'static str) -> Option<&VirtualResource> {
-        self.inputs.get(name)
+    pub fn input(&self, name : &'static str,) -> ResourceID {
+        match self.inputs.get(name) {
+            None => ResourceID::None,
+            Some(value) => value.clone(),
+        }
     }
 
-    pub fn output(&self, name : &'static str) -> Option<&VirtualResource> {
-        self.outputs.get(name)
+    pub fn output(&self, name : &'static str,) -> ResourceID {
+        match self.outputs.get(name) {
+            None => ResourceID::None,
+            Some(value) => value.clone(), // See the documentation on ResourceID to understand why this clone call is necessary
+        }
     }
     
     pub fn validate(&self) { }
@@ -127,4 +125,23 @@ impl Identifiable for Pass {
     
     fn name(&self) -> &'static str { self.name }
     fn id(&self) -> Self::Key { self.id }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct PassID(usize);
+
+impl PassID {
+    pub fn get(self, graph : &Graph) -> Option<&Pass> { graph.find_pass(self.into()) }
+    
+    pub fn input(&self, graph : &Graph, name : &'static str) -> ResourceID {
+        self.get(graph).map(|pass| pass.input(name)).unwrap_or(ResourceID::None)
+    }
+
+    pub fn output(&self, graph: &Graph, name : &'static str,) -> ResourceID {
+        self.get(graph).map(|pass| pass.output(name)).unwrap_or(ResourceID::None)
+    }
+}
+
+impl Into<Identifier<PassID>> for PassID {
+    fn into(self) -> Identifier<PassID> { Identifier::Numeric(self.0, PhantomData::default()) }
 }

@@ -5,7 +5,7 @@ pub struct Buffer {
 
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct BufferID(pub(in super) usize);
 
 impl Identifiable for Buffer {
