@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use bitmask_enum::bitmask;
 
-use super::{buffer::{Buffer, BufferID, BufferUsage}, manager::Identifiable, pass::PassID, texture::{Texture, TextureID, TextureUsage}};
+use super::{buffer::{Buffer, BufferID}, manager::Identifiable, pass::PassID, texture::{Texture, TextureID}};
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
@@ -13,6 +11,24 @@ pub enum ResourceAccessFlags {
 pub enum Resource {
     Texture(Texture),
     Buffer(Buffer),
+}
+
+impl Identifiable for Resource {
+    type Key = ResourceID;
+
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Texture(value) => value.name(),
+            Self::Buffer(value) => value.name(),
+        }
+    }
+
+    fn id(&self) -> ResourceID {
+        match self {
+            Self::Texture(value) => value.id().into(),
+            Self::Buffer(value) => value.id().into(),
+        }
+    }
 }
 
 /// Encapsulates varying types of resource.
@@ -36,25 +52,3 @@ impl From<BufferID> for ResourceID {
     fn from(val: BufferID) -> Self { ResourceID::Buffer(val) }
 }
 
-impl Identifiable for Resource {
-    type Key = ResourceID;
-
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Texture(value) => value.name(),
-            Self::Buffer(value) => value.name(),
-        }
-    }
-
-    fn id(&self) -> ResourceID {
-        match self {
-            Self::Texture(value) => value.id().into(),
-            Self::Buffer(value) => value.id().into(),
-        }
-    }
-}
-
-pub enum ResourceUsage {
-    Texture(TextureUsage),
-    Buffer(BufferUsage),
-}

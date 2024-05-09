@@ -1,6 +1,8 @@
-use std::{borrow::Borrow, ops::Range, sync::Arc};
+use std::{borrow::Borrow, mem::swap, ops::Range, slice::Iter, sync::Arc};
 
-use crate::{traits::{BorrowHandle, Handle}, Framebuffer};
+use ash::khr::swapchain;
+
+use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Image};
 
 use super::{Instance, LogicalDevice, QueueFamily, Surface};
 
@@ -10,8 +12,7 @@ pub struct Swapchain {
     pub surface : Arc<Surface>,
     pub loader : ash::khr::swapchain::Device,
     pub extent : ash::vk::Extent2D,
-    pub images : Vec<ash::vk::Image>,
-    pub image_views : Vec<ash::vk::ImageView>,
+    pub images : Vec<Image>,
     layer_count : u32,
     pub queue_families : Vec<QueueFamily>,
     framebuffer : Framebuffer,
@@ -172,33 +173,8 @@ impl Swapchain {
                 .expect("Failed to get swapchain images")
         };
 
-        let swapchain_image_views = swapchain_images.iter().map(|&image| {
-            let image_view_create_info = ash::vk::ImageViewCreateInfo::default()
-                .image(image)
-                .view_type(ash::vk::ImageViewType::TYPE_2D)
-                .format(surface_format.format)
-                .components(ash::vk::ComponentMapping::default()
-                    .a(ash::vk::ComponentSwizzle::IDENTITY)
-                    .r(ash::vk::ComponentSwizzle::IDENTITY)
-                    .g(ash::vk::ComponentSwizzle::IDENTITY)
-                    .b(ash::vk::ComponentSwizzle::IDENTITY))
-                .subresource_range(ash::vk::ImageSubresourceRange::default()
-                    // Aspects of the image that will be included in the view.
-                    .aspect_mask(ash::vk::ImageAspectFlags::COLOR)
-                    // The first mipmap level accessible to the view.
-                    .base_mip_level(options.mip_range().start)
-                    // The number of mipmap levels accessible to the view.
-                    .level_count(options.mip_range().len() as _)
-                    // The first array layer accessible to the view.
-                    .base_array_layer(options.layers().start)
-                    // The number of array layers (starting from base_array_layer) accessible to the view.
-                    .layer_count(options.layers().len() as _));
-
-            unsafe {   
-                device.handle().create_image_view(&image_view_create_info, None)
-                    .expect("Failed creating an image view to swapchain image")
-            }
-        }).collect::<Vec<_>>();
+        let swapchain_images = Image::from_swapchain(&surface_extent, device, surface_format.format, swapchain_images);
+        let swapchain_image_views = swapchain_images.iter().map(Image::view).collect::<Vec<_>>();
 
         let framebuffer = {
             Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.borrow())
@@ -212,11 +188,10 @@ impl Swapchain {
             layer_count : options.layers().len() as _,
             loader : swapchain_loader,
             images : swapchain_images,
-            image_views : swapchain_image_views,
             framebuffer,
             queue_families : options.queue_families().to_vec(),
 
-            surface_format,
+            surface_format
         })
     }
 
@@ -230,7 +205,7 @@ impl Swapchain {
 
     pub fn image_count(&self) -> usize { self.images.len() }
 
-    pub fn images<'a>(&'a self) -> impl Iterator<Item = (ash::vk::Image, ash::vk::ImageView)> + 'a {
-        self.images.iter().cloned().zip(self.image_views.iter().cloned())
+    pub fn images(&self) -> Iter<Image> {
+        self.images.iter()
     }
 }

@@ -172,6 +172,9 @@ impl<'a> Application<'a> {
     pub fn on_swapchain_created(&mut self) {
         self.graph.reset();
 
+        // Obviously not actual code, scaffolding tests
+        // (making sure stuff compiles)
+
         let backbuffer = Texture::new("builtin://backbuffer", 1, 1, ash::vk::Format::A8B8G8R8_UINT_PACK32)
             .register(&mut self.graph);
 
