@@ -2,7 +2,7 @@ use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{graph::Graph, traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::{pass::Pass, Graph}, traits::{BorrowHandle, Handle}, Instance, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 pub struct Application<'a> {
     pub entry : Arc<ash::Entry>,
@@ -172,9 +172,10 @@ impl<'a> Application<'a> {
     pub fn on_swapchain_created(&mut self) {
         self.graph.reset();
 
-        let mut backbuffer = self.graph.register_texture("builtin://backbuffer", self.swapchain.format());
+        // let mut backbuffer = self.graph.register_texture("builtin://backbuffer", self.swapchain.format());
 
-        let mut a = self.graph.register_pass("Pass A");
-        let mut b = self.graph.register_pass("Pass B");
+        let a = Pass::new("Pass A").register(&mut self.graph);
+        // let mut a = self.graph.register_pass("Pass A");
+        // let mut b = self.graph.register_pass("Pass B");
     }
 }

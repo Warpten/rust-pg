@@ -1,30 +1,60 @@
 use std::{collections::HashMap, hint};
 
-use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceUsage, TextureUsage}};
+use super::{manager::{Identifiable, Identifier, Manager}, resource::{Resource, ResourceUsage}, virtual_resource::VirtualResource, Graph};
 
 pub struct Pass {
+    pub(in self) id : PassID,
     name : &'static str,
-    id : usize,
 
-    resources : HashMap<usize, ResourceUsage>,
-    executes_before : Vec<usize>,
-    executes_after : Vec<usize>,
+    inputs : HashMap<&'static str, VirtualResource>,
+    outputs : HashMap<&'static str, VirtualResource>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub struct PassID(usize);
+
 impl Pass {
-    pub fn new(name : &'static str, id : usize) -> Self {
+    pub fn new(name : &'static str) -> Pass {
         Self {
             name,
-            id,
+            id : PassID(usize::MAX), 
 
-            resources : HashMap::new(),
-            executes_after : vec![],
-            executes_before : vec![]
+            inputs : HashMap::new(),
+            outputs : HashMap::new(),
         }
     }
 
-    pub fn validate(&self) { }
+    pub fn name(&self) -> &'static str { self.name }
 
+    pub fn add_input(&mut self, resource : &Resource) -> &mut Self {
+        match resource {
+            Resource::Texture(texture) => self.inputs.insert(texture.name(), VirtualResource::Texture(texture.id())),
+            Resource::Buffer(buffer) => todo!(),
+        };
+        self
+    }
+    pub fn add_output(&mut self, resource : Resource) -> &mut Self {
+        match resource {
+            Resource::Texture(texture) => self.outputs.insert(texture.name(), VirtualResource::Texture(texture.id())),
+            Resource::Buffer(buffer) => todo!(),
+        };
+        self
+    }
+
+    pub fn register(self, manager : &mut Graph) -> PassID {
+        manager.passes.register(self, |instance, id| instance.id = PassID(id))
+    }
+
+    pub fn input(&self, name : &'static str) -> Option<&VirtualResource> {
+        self.inputs.get(name)
+    }
+
+    pub fn output(&self, name : &'static str) -> Option<&VirtualResource> {
+        self.outputs.get(name)
+    }
+    
+    pub fn validate(&self) { }
+/*
     /// Returns usage flags of a given resource for this pass.
     /// 
     /// # Arguments
@@ -89,10 +119,12 @@ impl Pass {
     /// Returns identifiers of all the passes that execute after this one.
     pub fn executes_before(&self) -> Vec<Identifier<Pass>> {
         self.executes_before.iter().map(|&id| id.into()).collect::<Vec<_>>()
-    }
+    }*/
 }
 
 impl Identifiable for Pass {
+    type Key = PassID;
+    
     fn name(&self) -> &'static str { self.name }
-    fn id(&self) -> usize { self.id }
+    fn id(&self) -> Self::Key { self.id }
 }
