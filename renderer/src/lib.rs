@@ -11,9 +11,11 @@ mod swapchain;
 mod application;
 mod framebuffer;
 mod image;
+mod pipeline;
 
 pub mod graph;
 
+pub use pipeline::*;
 pub use image::*;
 pub use framebuffer::*;
 pub use application::*;

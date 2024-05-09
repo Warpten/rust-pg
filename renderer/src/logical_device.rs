@@ -9,7 +9,7 @@ use super::{Queue, Context, PhysicalDevice};
 /// A logical Vulkan device.
 pub struct LogicalDevice {
     handle : ash::Device,
-    instance : Arc<Context>,
+    context : Arc<Context>,
     physical_device : PhysicalDevice,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
@@ -17,13 +17,13 @@ pub struct LogicalDevice {
 }
 
 impl LogicalDevice {
-    pub fn instance(&self) -> &Arc<Context> { &self.instance }
+    pub fn context(&self) -> &Arc<Context> { &self.context }
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn new(instance : Arc<Context>, device : ash::Device, physical_device : PhysicalDevice, queues : Vec<Queue>) -> Self {
+    pub fn new(context : Arc<Context>, device : ash::Device, physical_device : PhysicalDevice, queues : Vec<Queue>) -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
-            instance: instance.handle().clone(),
+            instance: context.handle().clone(),
             device: device.clone(),
             physical_device: physical_device.handle().clone(),
 
@@ -36,7 +36,7 @@ impl LogicalDevice {
         Self {
             handle : device,
             physical_device,
-            instance,
+            context,
             queues,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }

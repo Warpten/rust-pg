@@ -2,11 +2,12 @@ use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 pub struct Application<'a> {
     context : Arc<Context>,
     logical_device : Arc<LogicalDevice>,
+    pipeline_cache : Arc<PipelinePool>,
     surface : Arc<Surface>,
     swapchain : Arc<Swapchain>,
     window : &'a Window,
@@ -157,6 +158,7 @@ impl<'a> Application<'a> {
 
         Self {
             context,
+            pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), "pipelines.dat".into())),
             logical_device,
             surface,
             swapchain,
@@ -173,6 +175,7 @@ impl<'a> Application<'a> {
     #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
     #[inline] pub fn window(&self) -> &'a Window { &self.window }
     #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
+    #[inline] pub fn pipeline_pool(&self) -> &Arc<PipelinePool> { &self.pipeline_cache }
 
     pub fn on_swapchain_created(&mut self) {
         self.graph.reset();
