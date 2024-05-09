@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{traits::{BorrowHandle, Handle}, LogicalDevice};
 
 // This whole file needs cleaning
@@ -11,7 +13,7 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(extent : ash::vk::Extent2D, image_views : Vec<ash::vk::ImageView>, layers : u32, device : &LogicalDevice) -> Framebuffer {
+    pub fn new(extent : ash::vk::Extent2D, image_views : Vec<ash::vk::ImageView>, layers : u32, device : Arc<LogicalDevice>) -> Framebuffer {
         let framebuffer_create_info = ash::vk::FramebufferCreateInfo::default()
             .height(extent.height)
             .width(extent.width)

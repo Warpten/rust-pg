@@ -185,5 +185,7 @@ impl<'a> Application<'a> {
         let b = Pass::new("Pass B")
             .add_input("Backbuffer input", a.output(&self.graph, "Backbuffer output"))
             .register(&mut self.graph);
+
+        self.graph.build();
     }
 }

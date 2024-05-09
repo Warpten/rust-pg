@@ -175,11 +175,11 @@ impl Swapchain {
                 .expect("Failed to get swapchain images")
         };
 
-        let swapchain_images = Image::from_swapchain(&surface_extent, device, surface_format.format, swapchain_images);
+        let swapchain_images = Image::from_swapchain(&surface_extent, device.clone(), surface_format.format, swapchain_images);
         let swapchain_image_views = swapchain_images.iter().map(Image::view).collect::<Vec<_>>();
 
         let framebuffer = {
-            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.borrow())
+            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.clone())
         };
 
         Arc::new(Self {

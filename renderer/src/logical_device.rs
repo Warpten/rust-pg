@@ -29,7 +29,7 @@ impl LogicalDevice {
     /// * `extent` - 
     /// * `views` - A slice of image views used to create this framebuffer.
     /// * `layers` - 
-    pub fn create_framebuffer(&self, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
+    pub fn create_framebuffer(self : Arc<Self>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
         return Framebuffer::new(extent, views, layers, self)
     }
 
