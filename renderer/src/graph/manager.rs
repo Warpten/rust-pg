@@ -1,7 +1,7 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
 
 pub trait Identifiable {
-    type Key;
+    type Key : Into<Identifier>;
 
     fn name(&self) -> &'static str;
     fn id(&self) -> Self::Key;
@@ -12,16 +12,33 @@ pub struct Manager<T : Identifiable> {
     name_map : HashMap<&'static str, usize>,
 }
 
-pub enum Identifier<T> {
-    Numeric(usize, PhantomData<T>),
-    Named(&'static str, PhantomData<T>),
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum Identifier {
+    Numeric(usize),
+    Named(&'static str),
+    None,
 }
 
 impl<T : Identifiable> Manager<T> {
-    pub fn find(&self, identifier : Identifier<T::Key>) -> Option<&T> {
+    pub fn find<K>(&self, key : K) -> Option<&T>
+        where K : From<T::Key>, Identifier : From<K>
+    {
+        let identifier = Identifier::from(key);
+
         match identifier {
-            Identifier::Numeric(index, _) => self.entries.get(index),
-            Identifier::Named(name, _) => self.name_map.get(name).and_then(|&index| self.entries.get(index))
+            Identifier::Numeric(index) => self.entries.get(index),
+            Identifier::Named(name) => self.name_map.get(name).and_then(|&index| self.entries.get(index)),
+            Identifier::None => None,
+        }
+    }
+
+    pub(in super) fn find_mut<K>(&mut self, key : K) -> Option<&mut T>
+        where K : From<T::Key>, Identifier : From<K>
+    {
+        match Identifier::from(key) {
+            Identifier::Numeric(index) => self.entries.get_mut(index),
+            Identifier::Named(name) => self.name_map.get(name).and_then(|&index| self.entries.get_mut(index)),
+            Identifier::None => None,
         }
     }
 

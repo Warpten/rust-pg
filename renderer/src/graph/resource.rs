@@ -1,6 +1,6 @@
 use bitmask_enum::bitmask;
 
-use super::{buffer::{Buffer, BufferID}, manager::Identifiable, pass::PassID, texture::{Texture, TextureID}};
+use super::{buffer::{Buffer, BufferID}, manager::{Identifiable, Identifier}, pass::PassID, texture::{Texture, TextureID}};
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
@@ -11,6 +11,21 @@ pub enum ResourceAccessFlags {
 pub enum Resource {
     Texture(Texture),
     Buffer(Buffer),
+}
+
+impl Resource {
+    pub fn register_reader(&mut self, pass_id : PassID) {
+        match self {
+            Resource::Texture(texture) => texture.register_reader(pass_id),
+            Resource::Buffer(buffer) => buffer.register_reader(pass_id),
+        }
+    }
+    pub fn register_writer(&mut self, pass_id : PassID) {
+        match self {
+            Resource::Texture(texture) => texture.register_writer(pass_id),
+            Resource::Buffer(buffer) => buffer.register_writer(pass_id),
+        }
+    }
 }
 
 impl Identifiable for Resource {
@@ -35,13 +50,24 @@ impl Identifiable for Resource {
 /// 
 /// Note that this cannot implement [`Copy`] because the [`ResourceID::Virtual`] variant is
 /// recursive and needs an indirection that is not [`Copy`]able.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum ResourceID {
     Texture(TextureID),
     Buffer(BufferID),
     
     Virtual(PassID, Box<ResourceID>),
     None
+}
+
+impl From<ResourceID> for Identifier {
+    fn from(value: ResourceID) -> Self {
+        match value {
+            ResourceID::Texture(texture) => Identifier::from(texture),
+            ResourceID::Buffer(buffer) => Identifier::from(buffer),
+            ResourceID::Virtual(_, resource) => Identifier::from(*resource),
+            ResourceID::None => Identifier::Numeric(usize::MAX),
+        }
+    }
 }
 
 impl From<TextureID> for ResourceID {

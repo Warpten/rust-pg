@@ -1,4 +1,4 @@
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
 
 use super::{manager::{Identifiable, Identifier}, resource::ResourceID, Graph};
 
@@ -54,6 +54,20 @@ impl Pass {
     /// * `graph` - The graph that will take ownership of this pass.
     #[inline]
     pub fn register(self, manager : &mut Graph) -> PassID {
+        for (_, input_id) in &self.inputs {
+            match manager.resources.find_mut(input_id.clone()) {
+                Some(resource) => resource.register_reader(self.id),
+                None => panic!("Inconsistent state")
+            };
+        }
+
+        for (_, output_id) in &self.outputs {
+            match manager.resources.find_mut(output_id.clone()) {
+                Some(resource) => resource.register_writer(self.id),
+                None => panic!("Inconsistent state")
+            };
+        }
+
         manager.passes.register(self, |instance, id| instance.id = PassID(id))
     }
 
@@ -93,12 +107,12 @@ impl Identifiable for Pass {
     fn id(&self) -> Self::Key { self.id }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct PassID(usize);
 
 impl PassID {
     /// Retrieves the actual pass from the graph.
-    pub fn get(self, graph : &Graph) -> Option<&Pass> { graph.find_pass(self.into()) }
+    pub fn get(self, graph : &Graph) -> Option<&Pass> { graph.find_pass(self) }
     
     pub fn input(&self, graph : &Graph, name : &'static str) -> ResourceID {
         self.get(graph).map(|pass| pass.input(name)).unwrap_or(ResourceID::None)
@@ -109,6 +123,8 @@ impl PassID {
     }
 }
 
-impl Into<Identifier<PassID>> for PassID {
-    fn into(self) -> Identifier<PassID> { Identifier::Numeric(self.0, PhantomData::default()) }
+impl From<PassID> for Identifier {
+    fn from(value: PassID) -> Self {
+        Identifier::Numeric(value.0)
+    }
 }

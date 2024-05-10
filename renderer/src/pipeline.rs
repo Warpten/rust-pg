@@ -1,6 +1,6 @@
-use std::{fs::{self, File}, marker::PhantomData, ops::Range, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{fs, marker::PhantomData, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
-use ash::{amd::rasterization_order, vk};
+use ash::vk;
 use gpu_allocator::vulkan::Allocator;
 use shaderc::{CompileOptions, Compiler, EnvVersion, IncludeType, ResolvedInclude, ShaderKind};
 

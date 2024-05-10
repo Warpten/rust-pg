@@ -1,4 +1,6 @@
-use super::{buffer::Buffer, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::Texture};
+use std::hint;
+
+use super::{buffer::{Buffer, BufferID}, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::{Texture, TextureID}};
 
 /// A rendering graph.
 /// 
@@ -6,6 +8,7 @@ use super::{buffer::Buffer, manager::{Identifier, Manager}, pass::{Pass, PassID}
 pub struct Graph {
     pub(in super) passes : Manager<Pass>,
     pub(in super) resources : Manager<Resource>,
+    backbuffer : TextureID,
 }
 
 impl Graph {
@@ -14,28 +17,25 @@ impl Graph {
         Self {
             passes : Manager::default(),
             resources : Manager::default(),
+            backbuffer : TextureID(Identifier::None),
         }
     }
 
+    pub fn backbuffer(&self) -> Option<&Texture> { self.find_texture(self.backbuffer) }
+
     pub fn build(&self) {
+        assert_ne!(self.backbuffer, TextureID(Identifier::None), "No backbuffer declared for this graph");
+        
+        let texture = self.backbuffer().unwrap();
+
+        texture.writers().iter().for_each(|&pass| {
+            let pass = self.find_pass(pass);
+        })
+
         // 2. Traverse the tree bottom-up
         //    It's too late for my brain to function so here goes.
         //    https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
         //    https://blog.traverseresearch.nl/render-graph-101-f42646255636
-
-        for pass in self.passes.iter() {
-            
-        }
-    }
-
-    /// Registers a new texture.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `name` - A unique name identifying this texture.
-    pub fn register_texture(&mut self, name : &'static str, format : ash::vk::Format) -> &mut Resource {
-        // self.ressources.register_deferred(name, |name, id| Resource::Texture(Texture::new(name, id, 1, 1, format)))
-        todo!()
     }
 
     /// Finds a rendering pass.
@@ -43,7 +43,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique identifier for the pass.
-    pub fn find_pass(&self, identifier : Identifier<PassID>) -> Option<&Pass> {
+    pub fn find_pass(&self, identifier : PassID) -> Option<&Pass> {
         self.passes.find(identifier)
     }
 
@@ -53,7 +53,7 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - A unique identifier for that resource.
-    pub fn find_resource(&self, identifier : Identifier<ResourceID>) -> Option<&Resource> {
+    pub fn find_resource(&self, identifier : ResourceID) -> Option<&Resource> {
         self.resources.find(identifier)
     }
 
@@ -63,8 +63,8 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that texture.
-    pub fn find_texture(&self, identifier : Identifier<ResourceID>) -> Option<&Texture> {
-        self.find_resource(identifier).and_then(|resource| {
+    pub fn find_texture(&self, identifier : TextureID) -> Option<&Texture> {
+        self.find_resource(identifier.to_resource()).and_then(|resource| {
             match resource {
                 Resource::Texture(value) => Some(value),
                 _ => None
@@ -78,8 +78,8 @@ impl Graph {
     /// # Arguments
     /// 
     /// * `name` - The name of that buffer in this graph.
-    pub fn find_buffer(&self, identifier : Identifier<ResourceID>) -> Option<&Buffer> {
-        self.find_resource(identifier).and_then(|resource| {
+    pub fn find_buffer(&self, identifier : &BufferID) -> Option<&Buffer> {
+        self.find_resource(identifier.to_resource()).and_then(|resource| {
             match resource {
                 Resource::Buffer(buffer) => Some(buffer),
                 _ => None
