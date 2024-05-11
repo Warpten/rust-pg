@@ -1,248 +1,183 @@
-use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::time::SystemTime;
 
-use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
+use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{renderer::{Renderer, RendererOptions}, Window};
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum DynamicState<T> {
-    Fixed(T),
-    #[default]
-    Dynamic
-}
-
-impl<T> From<T> for DynamicState<T> {
-    fn from(value: T) -> Self {
-        DynamicState::Fixed(value)
-    }
-}
-
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ApplicationOptions {
-    pub(in crate) line_width : DynamicState<f32>,
     pub(in crate) title : String,
-    pub(in crate) device_extensions : Vec<CString>,
-    pub(in crate) instance_extensions : Vec<CString>,
-    pub(in crate) surface_extensions : Vec<CString>,
+    pub(in crate) resolution : [u32; 2],
+
+    pub(in crate) renderer : RendererOptions,
+}
+
+impl Default for ApplicationOptions {
+    fn default() -> Self {
+        Self {
+            renderer: Default::default(),
+
+            title: "WorldEdit".to_owned(),
+            resolution: [1280, 720]
+        }
+    }
 }
 
 impl ApplicationOptions {
-    #[inline] pub fn line_width(mut self, line_width : DynamicState<f32>) -> Self {
-        self.line_width = line_width;
-        self
-    }
-
     #[inline] pub fn title(mut self, title : impl Into<String>) -> Self {
         self.title = title.into();
         self
     }
 
-    #[inline] pub fn device_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.device_extensions = extensions;
-        self
-    }
-
-    #[inline] pub fn instance_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.instance_extensions = extensions;
-        self
-    }
-
-    #[inline] pub fn surface_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.surface_extensions = extensions;
+    #[inline] pub fn renderer(mut self, renderer : RendererOptions) -> Self {
+        self.renderer = renderer;
         self
     }
 }
 
-pub struct Application<'a> {
-    context : Arc<Context>,
-    logical_device : Arc<LogicalDevice>,
-    pipeline_cache : Arc<PipelinePool>,
-    surface : Arc<Surface>,
-    swapchain : Arc<Swapchain>,
-    window : &'a Window,
-    allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
-
-    graph : Graph,
+pub enum ApplicationRenderError {
+    InvalidSwapchain,
 }
 
-impl<'a> Application<'a> {
-    pub fn new<T : SwapchainOptions>(window : &'a Window, instance_extensions : Vec<CString>, device_extensions : Vec<CString>, options : T) -> Self {
-        let context = unsafe {
-            // TODO: This could probably use some cleaning up.
-            let mut all_extensions = instance_extensions;
-            for extension in window.surface_extensions() {
-                all_extensions.push(CStr::from_ptr(extension).to_owned());
+pub type PrepareFn = fn() -> ApplicationOptions;
+pub type SetupFn<T> = fn(&mut Application) -> T;
+pub type UpdateFn<T> = fn(&mut Application, &mut T);
+pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), ApplicationRenderError>;
+pub type WindowEventFn<T> = fn(&mut Application, &mut T, event: &WindowEvent);
+
+pub struct ApplicationBuilder<State : 'static> {
+    pub prepare : Option<PrepareFn>,
+    pub setup : SetupFn<State>,
+    pub update : Option<UpdateFn<State>>,
+    pub event : Option<WindowEventFn<State>>,
+    pub render : Option<RenderFn<State>>,
+}
+
+impl<T> ApplicationBuilder<T> {
+    pub fn prepare(mut self, prepare: PrepareFn) -> Self {
+        self.prepare = Some(prepare);
+        self
+    }
+
+    pub fn update(mut self, update: UpdateFn<T>) -> Self {
+        self.update = Some(update);
+        self
+    }
+
+    pub fn render(mut self, render: RenderFn<T>) -> Self {
+        self.render = Some(render);
+        self
+    }
+
+    pub fn window_event(mut self, window_event: WindowEventFn<T>) -> Self {
+        self.event = Some(window_event);
+        self
+    }
+
+    pub fn run(self) {
+        main_loop(self);
+    }
+
+    pub(in crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
+        if let Some(render_fn) = self.render {
+            match render_fn(application, data) {
+                Err(ApplicationRenderError::InvalidSwapchain) => true,
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+}
+
+fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
+    let event_loop = EventLoop::new().unwrap();
+    let settings = {
+        if let Some(prepare) = builder.prepare {
+            prepare()
+        } else {
+            ApplicationOptions::default()
+        }
+    };
+    let mut app = Application::new(settings, &event_loop);
+    let mut app_data = (builder.setup)(&mut app);
+    let mut dirty_swapchain = false;
+
+    let now = SystemTime::now();
+    let mut modifiers = ModifiersState::default();
+
+    event_loop.run(move |event, target| {
+        target.set_control_flow(ControlFlow::Poll);
+
+        if !app.window.is_minimized() {
+            
+            if dirty_swapchain {
+                app.recreate_swapchain();
+                dirty_swapchain = false;
             }
 
-            Context::new(CString::new("World Editor").unwrap(), all_extensions)
-        };
-        let surface = Surface::new(context.clone(), window);
-        
-        // Select a physical device
-        // 1. GRAPHICS capable
-        // 2. Able to present to a KHR swapchain
-        // 3. With the requested extensions
-        // 4. And swapchain capable.
-        let (physical_device, graphics_queue, presentation_queue) = context.get_physical_devices(
-                |left, right| {
-                    // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
-                    match (right.properties().device_type, left.properties().device_type) {
-                        // Base equality case
-                        (a, b) if a == b => Ordering::Equal,
-
-                        // DISCRETE_GPU > ALL
-                        (ash::vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
-
-                        // DISCRETE > INTEGRATED > ALL
-                        (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
-
-                        // DISCRETE, INTEGRATED > VIRTUAL > ALL
-                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
-
-                        // DISCRETE, INTEGRATED, VIRTUAL > CPU > ALL
-                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
-                        (ash::vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
-
-                        // ALL > OTHER
-                        (ash::vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
-
-                        // Default case for branch solver
-                        (_, _) => unsafe { hint::unreachable_unchecked() },
+            match event {
+                Event::WindowEvent { event, .. } => {
+                    match event {
+                        WindowEvent::CloseRequested => target.exit(),
+                        WindowEvent::ModifiersChanged(m) => modifiers = m.state(),
+                        _ => (),
+                    }
+                    if let Some(event_fn) = builder.event {
+                        event_fn(&mut app, &mut app_data, &event);
                     }
                 }
-            )
-            .into_iter()
-            .filter(|device| -> bool {
-                // 1. First, check for device extensions.
-                // We start by collecting a device's extensions and then remove them from the extensions
-                // we asked for. If no extension subside, we're good.
-                let extensions_supported = {
-                    let device_extensions_names = device.get_extensions().into_iter()
-                        .map(|device_extension| {
-                            unsafe {
-                                CStr::from_ptr(device_extension.extension_name.as_ptr()).to_owned()
-                            }
-                        }).collect::<Vec<_>>();
+                Event::AboutToWait => {
+                    let now = now.elapsed().unwrap();
 
-                    let mut required_extensions = device_extensions.iter()
-                        .map(|e| e.to_owned())
-                        .collect::<HashSet<_>>();
-                    for extension_name in device_extensions_names {
-                        required_extensions.remove(&extension_name);
+                    match builder.update {
+                        Some(update_fn) => {
+                            update_fn(&mut app, &mut app_data);
+                        }
+                        None => {}
                     }
 
-                    required_extensions.is_empty()
-                };
-
-                // 2. Finally, check for swapchain support.
-                let supports_present = {
-                    let surface_formats = unsafe {
-                        surface.loader.get_physical_device_surface_formats(device.handle(), surface.handle())
-                            .expect("Failed to get physical device surface formats")
-                    };
-
-                    let surface_present_modes = unsafe {
-                        surface.loader.get_physical_device_surface_present_modes(device.handle(), surface.handle())
-                            .expect("Failed to get physical device surface present modes")
-                    };
-
-                    !surface_formats.is_empty() && !surface_present_modes.is_empty()
-                };
-
-                return extensions_supported && supports_present
-            }).find_map(|device| -> Option<(PhysicalDevice, QueueFamily, QueueFamily)> {
-                // At this point, the current device is eligible and we just need to check for a present queue and a graphics queue.
-                // To do that, we will grab the queue's families.
-
-                let mut graphics_queue = None;
-                let mut present_queue = None;
-
-                for family in &device.queue_families[..] {
-                    if family.properties.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) {
-                        graphics_queue = Some(family.clone());
-                    }
-
-                    if family.can_present(&surface, &device) {
-                        present_queue = Some(family.clone());
-                    }
+                    dirty_swapchain = builder.run_render(&mut app, &mut app_data);
                 }
+                Event::Suspended => println!("Suspended."),
+                Event::Resumed => println!("Resumed."),
+                Event::LoopExiting => app.renderer().logical_device().wait_idle(),
+                _ => { }
+            }
+        }
+    });
+}
 
-                match (graphics_queue, present_queue) {
-                    (Some(g), Some(p)) => Some((device, g, p)),
-                    _ => None
-                }
-            })
-            .expect("Failed to select a physical device and an associated queue family");
 
-        let logical_device = physical_device.create_logical_device(
-            context.clone(),
-            vec![(1, graphics_queue), (1, presentation_queue)],
-            |_index, _family| 1.0_f32,
-            device_extensions);
+pub struct Application {
+    renderer : Renderer,
+    window : Window,
+}
 
-        let swapchain = Swapchain::new(
-            context.clone(),
-            logical_device.clone(),
-            surface.clone(),
-            options
-        );
+impl Application {
+    #[inline] pub fn renderer(&self) -> &Renderer { &self.renderer }
 
-        let allocator = Allocator::new(&AllocatorCreateDesc{
-            instance: context.handle().clone(),
-            device: logical_device.handle().clone(),
-            physical_device: physical_device.handle().clone(),
-
-            // TODO: All these may need tweaking and fixing
-            debug_settings: AllocatorDebugSettings::default(),
-            allocation_sizes : AllocationSizes::default(),
-            buffer_device_address: false,
-        }).unwrap();
-
-        let graph = Graph::new();
-
-        Self {
-            context,
-            pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), "pipelines.dat".into())),
-            logical_device,
-            surface,
-            swapchain,
-            window,
-            graph,
-            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
+    pub fn build<T>(setup: SetupFn<T>) -> ApplicationBuilder<T> {
+        ApplicationBuilder {
+            prepare: None,
+            setup,
+            update: None,
+            event: None,
+            render: None,
         }
     }
 
-    #[inline] pub fn context(&self) -> &Arc<Context> { &self.context }
-    #[inline] pub fn entry(&self) -> &Arc<ash::Entry> { self.context().entry() }
-    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.logical_device }
-    #[inline] pub fn surface(&self) -> &Arc<Surface> { &self.surface }
-    #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
-    #[inline] pub fn window(&self) -> &'a Window { &self.window }
-    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
-    #[inline] pub fn pipeline_pool(&self) -> &Arc<PipelinePool> { &self.pipeline_cache }
+    pub fn new(settings : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
+        let window = Window::new(&settings, event_loop);
+        let renderer = Renderer::new(&settings.renderer, &window);
 
-    pub fn on_swapchain_created(&mut self) {
-        self.graph.reset();
+        Self {
+            window,
+            renderer,
+        }
+    }
 
-        // Obviously not actual code, scaffolding tests
-        // (making sure stuff compiles)
+    pub fn recreate_swapchain(&mut self) {
 
-        let backbuffer = Texture::new("builtin://backbuffer", 1, 1, ash::vk::Format::A8B8G8R8_UINT_PACK32)
-            .register(&mut self.graph);
-
-        let a = Pass::new("Pass A")
-            .add_output("Backbuffer output", backbuffer.into())
-            .register(&mut self.graph);
-
-        let b = Pass::new("Pass B")
-            .add_input("Backbuffer input", a.output(&self.graph, "Backbuffer output"))
-            .register(&mut self.graph);
-
-        self.graph.build();
     }
 }

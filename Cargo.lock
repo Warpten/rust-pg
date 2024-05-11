@@ -2148,6 +2148,7 @@ name = "wowedit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ash",
  "bytes",
  "enumflags2",
  "md5",

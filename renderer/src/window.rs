@@ -1,25 +1,23 @@
 use egui_winit::winit::{self, event_loop::EventLoop, window::WindowBuilder};
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
+use crate::ApplicationOptions;
+
 pub struct Window {
     handle : winit::window::Window,
 }
 
 impl Window {
-    pub fn new<Source : Into<String>>(
-        width : u32,
-        height : u32,
-        title : Source,
+    pub fn new(
+        options : &ApplicationOptions,
         event_loop : &EventLoop<()>
     ) -> Self {
-        let window = WindowBuilder::default()
-            .with_title(title)
-            .with_inner_size(winit::dpi::LogicalSize::new(width, height))
-            .build(event_loop)
-            .expect("Failed to create window");
-
         Self {
-            handle : window
+            handle : WindowBuilder::default()
+                .with_title(options.title)
+                .with_inner_size(winit::dpi::LogicalSize::new(options.resolution[0], options.resolution[1]))
+                .build(event_loop)
+                .expect("Window creation failed")
         }
     }
 
@@ -49,7 +47,7 @@ impl Window {
     pub fn width(&self) -> u32 { self.handle.inner_size().width }
     pub fn height(&self) -> u32 { self.handle.inner_size().height }
 
-    pub fn is_minized(&self) -> bool {
+    pub fn is_minimized(&self) -> bool {
         let size = self.handle.inner_size();
         size.width == 0 && size.height == 0
     }

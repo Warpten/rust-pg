@@ -44,7 +44,7 @@ pub trait SwapchainOptions {
     fn height(&self) -> u32;
 
     /// Returns the composite flags to be used by the swapchain's images.
-    fn composite_alpha(&self) -> ash::vk::CompositeAlphaFlagsKHR;
+    fn composite_alpha(&self) -> ash::vk::CompositeAlphaFlagsKHR { ash::vk::CompositeAlphaFlagsKHR::OPAQUE }
 
     /// Returns the presentation mode of this swapchain.
     fn present_mode(&self) -> ash::vk::PresentModeKHR;

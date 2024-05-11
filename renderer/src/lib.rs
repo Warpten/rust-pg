@@ -14,6 +14,7 @@ mod image;
 mod pipeline;
 mod utils;
 
+pub mod renderer;
 pub mod graph;
 
 pub use pipeline::*;

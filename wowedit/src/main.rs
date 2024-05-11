@@ -1,44 +1,38 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-use application::{Application, debugging_state::DebuggingState};
+use renderer::{Application, ApplicationBuilder, ApplicationOptions, SwapchainOptions, Window};
 
 mod application;
 mod casc;
 mod exit_signal;
-mod gui;
 mod vulkan;
 
-fn main() { }
-/*
-fn main() -> Result<(), eframe::Error> {
-    #[cfg(debug_assertions)]
-    let state = {
-        let mut state = DebuggingState::default();
-        for arg in std::env::args().skip(1) {
-            match arg.as_str() {
-                "--debug-memory" => {
-                    state.memory = true;
-                }, "--profiler" => {
-                    state.profiler = true;
-                }, _ => panic!("Unknown argument: {arg}")
-            }
-        }
+struct SwapchainOpts;
 
-        Some(state)
-    };
+struct ApplicationData;
 
-    #[cfg(not(debug_assertions))]
-    let state = Option::None;
-
-    eframe::run_native("WorldEdit",
-        eframe::NativeOptions {
-            viewport : egui::ViewportBuilder::default()
-                .with_inner_size([1280.0, 1024.0])
-                .with_drag_and_drop(false),
-
-            ..Default::default()
-        },
-        Box::new(|cc| Box::new(Application::new(cc, state))),
-    )
+fn setup(app : &mut Application) -> ApplicationData {
+    ApplicationData { }
 }
-*/
+
+fn prepare() -> ApplicationOptions {
+    ApplicationOptions::default()
+        .title("Send help")
+        .line_width(1.0f32)
+        .resolution([800; 600])
+}
+
+pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
+    // Issue render calls here?
+    Some(()) 
+}
+
+pub fn window_event(_: &mut Application, data: &mut ApplicationData, event: &winit::event::WindowEvent) {
+    // Handle keyboard events, etc
+}
+
+fn main() {
+    Application::build(setup)
+        .prepare(prepare)
+        .render(render)
+        .window_event(window_event)
+        .run();
+}

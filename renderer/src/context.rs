@@ -55,15 +55,7 @@ impl Context {
 
     pub fn entry(&self) -> &Arc<ash::Entry> { &self.entry }
 
-    /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted by device type,
-    /// in the following order:
-    /// 
-    /// 1. [`ash::vk::PhysicalDeviceType::DISCRETE_GPU`]
-    /// 2. [`ash::vk::PhysicalDeviceType::INTEGRATED_GPU`]
-    /// 3. [`ash::vk::PhysicalDeviceType::VIRTUAL_GPU`]
-    /// 4. [`ash::vk::PhysicalDeviceType::CPU`]
-    /// 5. [`ash::vk::PhysicalDeviceType::OTHER`]
-    /// 
+    /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted according to the provided comparator.
     /// # Arguments
     /// 
     /// * `cmp` A comparator function that returns an ordering.

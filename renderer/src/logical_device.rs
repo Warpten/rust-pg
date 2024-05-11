@@ -62,6 +62,12 @@ impl LogicalDevice {
 
         panic!("No memory type found matching the requirements")
     }
+
+    pub fn wait_idle(&self) {
+        unsafe {
+            self.handle.device_wait_idle();
+        }
+    }
 }
 
 impl BorrowHandle for LogicalDevice {
