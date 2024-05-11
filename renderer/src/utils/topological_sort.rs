@@ -26,6 +26,7 @@ impl<T : Ord + Eq + Copy + Hash + nohash_hasher::IsEnabled> TopologicalSorter<T>
         self
     }
 
+    #[allow(dead_code)]
     pub fn sort_kahn(&self) -> Result<Vec<T>, Error> {
         // Build an adjacency list
         let adj = {
@@ -49,6 +50,7 @@ impl<T : Ord + Eq + Copy + Hash + nohash_hasher::IsEnabled> TopologicalSorter<T>
         kahn_impl::<T>(adj)
     }
 
+    #[allow(dead_code)]
     pub fn sort_dfs(&self) -> Result<Vec<T>, Error> {
         let mut visited = IntSet::<T>::default();
         let mut on_stack = IntSet::<T>::default();

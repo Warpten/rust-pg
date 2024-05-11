@@ -4,6 +4,55 @@ use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, A
 
 use crate::{graph::{pass::Pass, texture::Texture, Graph}, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum DynamicState<T> {
+    Fixed(T),
+    #[default]
+    Dynamic
+}
+
+impl<T> From<T> for DynamicState<T> {
+    fn from(value: T) -> Self {
+        DynamicState::Fixed(value)
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct ApplicationOptions {
+    pub(in crate) line_width : DynamicState<f32>,
+    pub(in crate) title : String,
+    pub(in crate) device_extensions : Vec<CString>,
+    pub(in crate) instance_extensions : Vec<CString>,
+    pub(in crate) surface_extensions : Vec<CString>,
+}
+
+impl ApplicationOptions {
+    #[inline] pub fn line_width(mut self, line_width : DynamicState<f32>) -> Self {
+        self.line_width = line_width;
+        self
+    }
+
+    #[inline] pub fn title(mut self, title : impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    #[inline] pub fn device_extensions(mut self, extensions : Vec<CString>) -> Self {
+        self.device_extensions = extensions;
+        self
+    }
+
+    #[inline] pub fn instance_extensions(mut self, extensions : Vec<CString>) -> Self {
+        self.instance_extensions = extensions;
+        self
+    }
+
+    #[inline] pub fn surface_extensions(mut self, extensions : Vec<CString>) -> Self {
+        self.surface_extensions = extensions;
+        self
+    }
+}
+
 pub struct Application<'a> {
     context : Arc<Context>,
     logical_device : Arc<LogicalDevice>,

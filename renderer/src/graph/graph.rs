@@ -26,7 +26,7 @@ impl Graph {
     pub fn build(&self) {
         assert_ne!(self.backbuffer, TextureID(Identifier::None), "No backbuffer declared for this graph");
         
-        let texture = self.backbuffer().unwrap();
+        let backbuffer = unsafe { self.backbuffer().unwrap_unchecked() };
 
         // Whenever a pass is added an input or an output, it stores a ResourceID that is either physical
         // (as in, backed by the CPU or GPU) or virtual. In the latter case, this virtual resource ID is
@@ -34,7 +34,7 @@ impl Graph {
         // an adjacency graph that we can then invert to do stuff. I don't actually know what I'm saying.
 
         let topological_sequence = {
-            let mut topological_sort = TopologicalSorter::<PassID>::default();
+            let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
                 // For each pass, find the edges (as in, passes that read from its outputs).
                 let edges = self.passes.iter().filter(|other_pass| {
@@ -46,9 +46,9 @@ impl Graph {
                     })
                 }).map(Pass::id).collect::<Vec<_>>();
 
-                topological_sort = topological_sort.add_node(pass.id(), edges);
+                sorter = sorter.add_node(pass.id(), edges);
             }
-            topological_sort.sort_kahn()
+            sorter.sort_kahn()
         };
 
         // 2. Traverse the tree bottom-up

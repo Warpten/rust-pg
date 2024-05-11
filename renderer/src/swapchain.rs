@@ -1,6 +1,4 @@
-use std::{borrow::Borrow, mem::swap, ops::Range, slice::Iter, sync::Arc};
-
-use ash::khr::swapchain;
+use std::{ops::Range, slice::Iter, sync::Arc};
 
 use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Image};
 

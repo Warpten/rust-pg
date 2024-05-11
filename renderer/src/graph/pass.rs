@@ -1,6 +1,4 @@
-use std::{collections::{hash_map::Values, HashMap}, fmt::Display};
-
-use crate::utils::topological_sort;
+use std::collections::HashMap;
 
 use super::{manager::{Identifiable, Identifier}, resource::ResourceID, Graph};
 

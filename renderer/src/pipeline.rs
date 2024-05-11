@@ -2,7 +2,7 @@ use std::{fs, marker::PhantomData, ops::Range, path::PathBuf, sync::{Arc, Mutex}
 
 use ash::vk;
 use gpu_allocator::vulkan::Allocator;
-use shaderc::{CompileOptions, Compiler, EnvVersion, IncludeType, ResolvedInclude, ShaderKind};
+use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
 
 use crate::{traits::BorrowHandle, Context, LogicalDevice};
 

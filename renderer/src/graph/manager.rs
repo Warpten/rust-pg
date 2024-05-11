@@ -13,6 +13,7 @@ pub struct Manager<T : Identifiable> {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[allow(dead_code)]
 pub enum Identifier {
     Numeric(usize),
     Named(&'static str),
