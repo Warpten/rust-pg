@@ -48,7 +48,7 @@ impl<T : Identifiable> Manager<T> {
         self.entries.iter()
     }
 
-    pub(in super) fn register<F>(&mut self, mut entry : T, id_setter : F) -> <T as Identifiable>::Key
+    pub(in super) fn register<F>(&mut self, mut entry : T, id_setter : F) -> &T
         where F : Fn(&mut T, usize)
     {
         match self.name_map.get(entry.name()) {
@@ -60,7 +60,7 @@ impl<T : Identifiable> Manager<T> {
                 self.name_map.insert(entry.name(), index);
                 self.entries.push(entry);
 
-                self.entries[index].id()
+                &self.entries[index]
             }
         }
     }

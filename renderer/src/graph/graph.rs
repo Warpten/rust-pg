@@ -1,4 +1,4 @@
-use std::hint;
+use crate::{graph::manager::Identifiable, utils::topological_sort::TopologicalSorter};
 
 use super::{buffer::{Buffer, BufferID}, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::{Texture, TextureID}};
 
@@ -28,9 +28,28 @@ impl Graph {
         
         let texture = self.backbuffer().unwrap();
 
-        texture.writers().iter().for_each(|&pass| {
-            let pass = self.find_pass(pass);
-        })
+        // Whenever a pass is added an input or an output, it stores a ResourceID that is either physical
+        // (as in, backed by the CPU or GPU) or virtual. In the latter case, this virtual resource ID is
+        // actually a resource ID tied to the pass producing that input. This design allows to infer pass dependencies and build
+        // an adjacency graph that we can then invert to do stuff. I don't actually know what I'm saying.
+
+        let topological_sequence = {
+            let mut topological_sort = TopologicalSorter::<PassID>::default();
+            for pass in self.passes.iter() {
+                // For each pass, find the edges (as in, passes that read from its outputs).
+                let edges = self.passes.iter().filter(|other_pass| {
+                    other_pass.inputs().iter().any(|input| {
+                        match input {
+                            ResourceID::Virtual(edge_start, _) => *edge_start == pass.id(),
+                            _ => false
+                        }
+                    })
+                }).map(Pass::id).collect::<Vec<_>>();
+
+                topological_sort = topological_sort.add_node(pass.id(), edges);
+            }
+            topological_sort.sort_kahn()
+        };
 
         // 2. Traverse the tree bottom-up
         //    It's too late for my brain to function so here goes.

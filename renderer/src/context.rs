@@ -100,7 +100,7 @@ impl Context {
     /// * Panics if [`vkCreateInstance`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateInstance.html) failed.
     /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
     pub fn new(app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
-        let entry = Arc::new(ash::Entry::linked());
+        let entry = Arc::new(unsafe { ash::Entry::load().unwrap() });
         let mut debug_utils_messenger_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
             .flags(ash::vk::DebugUtilsMessengerCreateFlagsEXT::empty())
             .message_severity(

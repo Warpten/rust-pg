@@ -12,6 +12,7 @@ mod application;
 mod framebuffer;
 mod image;
 mod pipeline;
+mod utils;
 
 pub mod graph;
 

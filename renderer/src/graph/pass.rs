@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::{hash_map::Values, HashMap}, fmt::Display};
+
+use crate::utils::topological_sort;
 
 use super::{manager::{Identifiable, Identifier}, resource::ResourceID, Graph};
 
@@ -6,15 +8,15 @@ pub struct Pass {
     pub(in self) id : PassID,
     name : &'static str,
 
-    pub(in self) inputs : HashMap<&'static str, ResourceID /* local alias */>,
-    pub(in self) outputs : HashMap<&'static str, ResourceID /* local alias*/>,
+    pub(in self) inputs : HashMap<&'static str, ResourceID /* remote */>,
+    pub(in self) outputs : HashMap<&'static str, ResourceID /* remote */>,
 }
 
 impl Pass {
     pub fn new(name : &'static str) -> Pass {
         Self {
             name,
-            id : PassID(usize::MAX), 
+            id : PassID(usize::MAX),
 
             inputs : HashMap::new(),
             outputs : HashMap::new(),
@@ -31,7 +33,7 @@ impl Pass {
     /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
     #[inline]
     pub fn add_input(mut self, name : &'static str, resource : ResourceID) -> Self {
-        self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
+        self.inputs.insert(name, resource);
         self
     }
     
@@ -43,7 +45,7 @@ impl Pass {
     /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
     #[inline]
     pub fn add_output(mut self, name : &'static str, resource : ResourceID) -> Self {
-        self.inputs.insert(name, ResourceID::Virtual(self.id, Box::new(resource)));
+        self.inputs.insert(name, resource);
         self
     }
 
@@ -54,21 +56,23 @@ impl Pass {
     /// * `graph` - The graph that will take ownership of this pass.
     #[inline]
     pub fn register(self, manager : &mut Graph) -> PassID {
-        for (_, input_id) in &self.inputs {
+        let registered_self = manager.passes.register(self, |instance, id| instance.id = PassID(id));
+
+        for (_, input_id) in &registered_self.inputs {
             match manager.resources.find_mut(input_id.clone()) {
-                Some(resource) => resource.register_reader(self.id),
-                None => panic!("Inconsistent state")
-            };
+                Some(resource) => resource.register_reader(registered_self.id),
+                None => panic!("Inconsistent state"),
+            }
         }
 
-        for (_, output_id) in &self.outputs {
-            match manager.resources.find_mut(output_id.clone()) {
-                Some(resource) => resource.register_writer(self.id),
-                None => panic!("Inconsistent state")
-            };
+        for (_, input_id) in &registered_self.outputs {
+            match manager.resources.find_mut(input_id.clone()) {
+                Some(resource) => resource.register_writer(registered_self.id),
+                None => panic!("Inconsistent state"),
+            }
         }
 
-        manager.passes.register(self, |instance, id| instance.id = PassID(id))
+        registered_self.id()
     }
 
     /// Returns the [`ResourceID`] of an input identified by its name. The returned resource id is
@@ -80,7 +84,7 @@ impl Pass {
     pub fn input(&self, name : &'static str) -> ResourceID {
         match self.inputs.get(name) {
             None => ResourceID::None,
-            Some(value) => value.clone(),
+            Some(value) => ResourceID::Virtual(self.id(), Box::new(value.clone())),
         }
     }
 
@@ -93,8 +97,15 @@ impl Pass {
     pub fn output(&self, name : &'static str,) -> ResourceID {
         match self.outputs.get(name) {
             None => ResourceID::None,
-            Some(value) => value.clone(), // See the documentation on ResourceID to understand why this clone call is necessary
+            Some(value) => ResourceID::Virtual(self.id(), Box::new(value.clone())),
         }
+    }
+
+    pub fn inputs(&self) -> Vec<&ResourceID> { self.inputs.values().collect::<Vec<_>>() }
+    pub fn outputs(&self) -> Vec<ResourceID> { 
+        self.outputs.values().map(|resource| {
+            ResourceID::Virtual(self.id(), Box::new(resource.clone()))
+        }).collect::<Vec<_>>()
     }
     
     pub fn validate(&self) { }
@@ -111,6 +122,8 @@ impl Identifiable for Pass {
 pub struct PassID(usize);
 
 impl PassID {
+    pub fn raw(&self) -> usize { self.0 }
+
     /// Retrieves the actual pass from the graph.
     pub fn get(self, graph : &Graph) -> Option<&Pass> { graph.find_pass(self) }
     
@@ -122,6 +135,8 @@ impl PassID {
         self.get(graph).map(|pass| pass.output(name)).unwrap_or(ResourceID::None)
     }
 }
+
+impl nohash_hasher::IsEnabled for PassID { }
 
 impl From<PassID> for Identifier {
     fn from(value: PassID) -> Self {

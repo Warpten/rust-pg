@@ -11,9 +11,10 @@ egui-winit = "0.27.2"
 anyhow = "1.0.82"
 # gpu-allocator = { version = "0.27.0", default-features = false, features = ["vulkan"] }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan"] }
-ash = { version = "0.38.0", default-features = false, features = ["linked", "debug"] }
+ash = { version = "0.38.0", default-features = false, features = ["loaded", "debug"] }
 ash-window = "0.13.0"
 raw-window-handle = "0.6.1"
 derive-getters = "0.3.0"
 bitmask-enum = "2.2.3"
 shaderc = "0.8.3"
+nohash-hasher = "0.2.0"

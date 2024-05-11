@@ -44,20 +44,15 @@ impl Texture {
     pub fn readers(&self) -> &Vec<PassID> { &self.readers }
     pub fn writers(&self) -> &Vec<PassID> { &self.writers }
 
-    pub fn register(self, manager : &mut Graph) -> TextureID {
+    pub fn register(self, manager : &mut Graph) -> ResourceID {
         let texture = Resource::Texture(self);
 
-        let resource_id = manager.resources.register(texture, |instance, id| {
+        manager.resources.register(texture, |instance, id| {
             match instance {
                 Resource::Texture(texture) => texture.id = TextureID(Identifier::Numeric(id)),
                 _ => unsafe { hint::unreachable_unchecked() }
             };
-        });
-
-        match resource_id {
-            ResourceID::Texture(texture) => texture,
-            _ => panic!("This should not happen"),
-        }
+        }).id()
     }
 
     pub(in super) fn register_reader(&mut self, pass_id : PassID) {
