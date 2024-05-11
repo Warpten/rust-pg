@@ -101,8 +101,11 @@ impl Pass {
         }
     }
 
+    /// Returns all the inputs of this pass.
     pub fn inputs(&self) -> Vec<&ResourceID> { self.inputs.values().collect::<Vec<_>>() }
-    pub fn outputs(&self) -> Vec<ResourceID> { 
+
+    /// Returns all the outputs of this pass.
+    pub fn outputs(&self) -> Vec<ResourceID> {
         self.outputs.values().map(|resource| {
             ResourceID::Virtual(self.id(), Box::new(resource.clone()))
         }).collect::<Vec<_>>()
@@ -133,6 +136,11 @@ impl PassID {
 
     pub fn output(&self, graph: &Graph, name : &'static str) -> ResourceID {
         self.get(graph).map(|pass| pass.output(name)).unwrap_or(ResourceID::None)
+    }
+
+    #[deprecated = "May be removed, usage is absurd"]
+    pub fn sequencing_point(&self) -> ResourceID {
+        ResourceID::Virtual(self.clone(), Box::new(ResourceID::None))
     }
 }
 
