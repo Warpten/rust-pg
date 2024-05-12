@@ -1,8 +1,9 @@
-use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::{CStr, CString}, hint, mem::ManuallyDrop, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
+use nohash_hasher::IntMap;
 
-use crate::{graph::Graph, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, Window};
+use crate::{graph::Graph, queue, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -11,8 +12,8 @@ pub enum DynamicState<T> {
     Dynamic
 }
 
-impl<T> From<T> for DynamicState<T> {
-    fn from(value: T) -> Self {
+impl From<f32> for DynamicState<f32> {
+    fn from(value: f32) -> Self {
         DynamicState::Fixed(value)
     }
 }
@@ -22,7 +23,8 @@ pub struct RendererOptions {
     pub(in crate) line_width : DynamicState<f32>,
     pub(in crate) device_extensions : Vec<CString>,
     pub(in crate) instance_extensions : Vec<CString>,
-    pub(in crate) surface_extensions : Vec<CString>,
+    pub(in crate) resolution :[u32; 2],
+    pub(in crate) get_queue_count : fn(&QueueFamily) -> u32,
 }
 
 impl RendererOptions {
@@ -41,8 +43,13 @@ impl RendererOptions {
         self
     }
 
-    #[inline] pub fn surface_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.surface_extensions = extensions;
+    #[inline] pub fn resolution(mut self, resolution : [u32; 2]) -> Self {
+        self.resolution = resolution;
+        self
+    }
+
+    #[inline] pub fn queue_count(mut self, getter : fn(&QueueFamily) -> u32) -> Self {
+        self.get_queue_count = getter;
         self
     }
 }
@@ -51,11 +58,23 @@ impl Default for RendererOptions {
     fn default() -> Self {
         Self {
             line_width: DynamicState::Fixed(1.0f32),
-            device_extensions: vec![],
+            device_extensions: vec![ash::khr::swapchain::NAME.to_owned()],
             instance_extensions: vec![],
-            surface_extensions: vec![],
+            resolution : [1280, 720],
+            get_queue_count : |&q| 1,
         }
     }
+}
+
+impl SwapchainOptions for RendererOptions {
+    fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool {
+        format.format == ash::vk::Format::B8G8R8A8_SRGB && format.color_space == ash::vk::ColorSpaceKHR::SRGB_NONLINEAR
+    }
+
+    fn width(&self) -> u32 { self.resolution[0] }
+    fn height(&self) -> u32 { self.resolution[1] }
+
+    fn present_mode(&self) -> ash::vk::PresentModeKHR { ash::vk::PresentModeKHR::MAILBOX }
 }
 
 pub struct Renderer {
@@ -78,7 +97,7 @@ impl Renderer {
 
     pub fn new(settings : &RendererOptions, window : &Window) -> Self {
         let context = unsafe {
-            let mut all_extensions = settings.instance_extensions;
+            let mut all_extensions = settings.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
             all_extensions.dedup();
 
@@ -88,17 +107,28 @@ impl Renderer {
 
         let (physical_device, graphics_queue, presentation_queue) = select(&context, &surface, &settings);
 
+        let queue_families = { // Deduplicate the graphics and presentation queues.
+            let mut queue_families_map = IntMap::<u32, QueueFamily>::default();
+            queue_families_map.entry(graphics_queue.index).or_insert(graphics_queue);
+            queue_families_map.entry(presentation_queue.index).or_insert(presentation_queue);
+
+            queue_families_map.into_values().collect::<Vec<_>>()
+        };
+
         let logical_device = physical_device.create_logical_device(
             context.clone(),
-            vec![(1, graphics_queue), (1, presentation_queue)],
+            queue_families.iter()
+                .map(|&q| ((settings.get_queue_count)(&q), q.clone()))
+                .collect::<Vec<_>>(),
             |_index, _family| 1.0_f32,
-            vec![]);
+            &settings.device_extensions);
 
         let swapchain = Swapchain::new(
             context.clone(),
             logical_device.clone(),
             surface.clone(),
-            swapchain_options
+            settings,
+            queue_families
         );
 
         let allocator = Allocator::new(&AllocatorCreateDesc {

@@ -1,13 +1,9 @@
-use renderer::{Application, ApplicationBuilder, ApplicationOptions, SwapchainOptions, Window};
+use renderer::{renderer::{DynamicState, RendererOptions}, Application, ApplicationOptions, ApplicationRenderError};
+use winit::event::WindowEvent;
 
-mod application;
 mod casc;
-mod exit_signal;
-mod vulkan;
 
-struct SwapchainOpts;
-
-struct ApplicationData;
+pub struct ApplicationData;
 
 fn setup(app : &mut Application) -> ApplicationData {
     ApplicationData { }
@@ -16,16 +12,18 @@ fn setup(app : &mut Application) -> ApplicationData {
 fn prepare() -> ApplicationOptions {
     ApplicationOptions::default()
         .title("Send help")
-        .line_width(1.0f32)
-        .resolution([800; 600])
+        .renderer(RendererOptions::default()
+            .line_width(DynamicState::Fixed(1.0f32))
+            .resolution([1280, 720])
+        )
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
     // Issue render calls here?
-    Some(()) 
+    Ok(()) 
 }
 
-pub fn window_event(_: &mut Application, data: &mut ApplicationData, event: &winit::event::WindowEvent) {
+pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
     // Handle keyboard events, etc
 }
 

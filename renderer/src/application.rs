@@ -7,8 +7,6 @@ use crate::{renderer::{Renderer, RendererOptions}, Window};
 #[derive(Debug)]
 pub struct ApplicationOptions {
     pub(in crate) title : String,
-    pub(in crate) resolution : [u32; 2],
-
     pub(in crate) renderer : RendererOptions,
 }
 
@@ -18,7 +16,6 @@ impl Default for ApplicationOptions {
             renderer: Default::default(),
 
             title: "WorldEdit".to_owned(),
-            resolution: [1280, 720]
         }
     }
 }
@@ -90,6 +87,7 @@ impl<T> ApplicationBuilder<T> {
     }
 }
 
+#[allow(dead_code, unused)]
 fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     let event_loop = EventLoop::new().unwrap();
     let settings = {

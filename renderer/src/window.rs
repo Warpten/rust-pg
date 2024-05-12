@@ -14,8 +14,8 @@ impl Window {
     ) -> Self {
         Self {
             handle : WindowBuilder::default()
-                .with_title(options.title)
-                .with_inner_size(winit::dpi::LogicalSize::new(options.resolution[0], options.resolution[1]))
+                .with_title(options.title.clone())
+                .with_inner_size(winit::dpi::LogicalSize::new(options.renderer.resolution[0], options.renderer.resolution[1]))
                 .build(event_loop)
                 .expect("Window creation failed")
         }

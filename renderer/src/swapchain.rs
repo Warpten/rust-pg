@@ -1,6 +1,6 @@
-use std::{ops::Range, slice::Iter, sync::Arc};
+use std::{borrow::Borrow, ops::Range, slice::Iter, sync::Arc};
 
-use crate::{traits::{BorrowHandle, Handle}, Framebuffer, Image};
+use crate::{queue, traits::{BorrowHandle, Handle}, Framebuffer, Image};
 
 use super::{Context, LogicalDevice, QueueFamily, Surface};
 
@@ -22,7 +22,7 @@ pub struct Swapchain {
 
 /// Options that are used when creating a [`Swapchain`].
 pub trait SwapchainOptions {
-    /// Determines if the provided surface_format is eligible for the swapchain.
+    /// Determines if the provided surface_format is the preferred format for the swapchain.
     /// 
     /// # Arguments
     /// 
@@ -31,11 +31,9 @@ pub trait SwapchainOptions {
     /// # Returns
     /// 
     /// This function should return `true` in one exact case; if it doesn't, whatever format is tested
-    /// `true` first will be selected.
+    /// `true` first will be selected. If no format returns true, the first available format for will
+    /// be selected.
     fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool;
-
-    /// Returns the [`QueueFamily`]ies that will have access to the swapchain's images.
-    fn queue_families(&self) -> Vec<QueueFamily>;
 
     /// Returns the width of the swapchain's images.
     fn width(&self) -> u32;
@@ -79,6 +77,7 @@ impl Swapchain {
     /// * `device` - The [`LogicalDevice`] for which to create a swapchain.
     /// * `surface` - The [`Surface`] for which to create a swapchain.
     /// * `options` - An implementation of the [`SwapchainOptions`] trait that defines how the swapchain should be created.
+    /// * `queue_families` - All queue families that will have access to the swapchain's images.
     /// 
     /// # Panics
     ///
@@ -86,11 +85,12 @@ impl Swapchain {
     /// * Panics if [`vkGetPhysicalDeviceSurfaceCapabilities`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceCapabilitiesKHR.html) fails.
     /// * Panics if [`vkCreateSwapchainKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateSwapchainKHR.html) fails.
     /// * Panics if [`vkGetSwapchainImagesKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetSwapchainImagesKHR.html) fails.
-    pub fn new(
+    pub fn new<T : SwapchainOptions>(
         instance : Arc<Context>,
         device : Arc<LogicalDevice>,
         surface : Arc<Surface>,
-        options : impl SwapchainOptions,
+        options : &T,
+        queue_families : Vec<QueueFamily>,
     ) -> Arc<Self> {
         let surface_format = {
             let surface_formats = unsafe {
@@ -128,10 +128,15 @@ impl Swapchain {
             image_count
         };
 
-        let image_sharing_mode = ash::vk::SharingMode::EXCLUSIVE;
-        let queue_family_indices = options.queue_families().iter()
+        let queue_family_indices = queue_families.iter()
             .map(|q| q.index as u32)
             .collect::<Vec<_>>();
+
+        let image_sharing_mode = if queue_family_indices.len() == 1 {
+            ash::vk::SharingMode::EXCLUSIVE
+        } else {
+            ash::vk::SharingMode::CONCURRENT
+        };
 
         let swapchain_create_info = ash::vk::SwapchainCreateInfoKHR::default()
             .surface(surface.handle())
@@ -144,7 +149,7 @@ impl Swapchain {
             // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
             .image_usage(ash::vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
-            .queue_family_indices(&queue_family_indices)
+            // .queue_family_indices(&queue_family_indices)
             .pre_transform(if surface_capabilities.supported_transforms.contains(ash::vk::SurfaceTransformFlagsKHR::IDENTITY) {
                 ash::vk::SurfaceTransformFlagsKHR::IDENTITY
             } else {
@@ -162,9 +167,8 @@ impl Swapchain {
 
         let swapchain_loader = ash::khr::swapchain::Device::new(instance.handle(), device.handle());
         let handle = unsafe {
-            swapchain_loader
-                .create_swapchain(&swapchain_create_info, None)
-                .expect("Failed to create swapchain")
+            swapchain_loader.create_swapchain(&swapchain_create_info, None)
+                .expect(format!("Failed to create swapchain with options {:?}", swapchain_create_info).borrow())
         };
 
         let swapchain_images = unsafe {
@@ -189,7 +193,7 @@ impl Swapchain {
             loader : swapchain_loader,
             images : swapchain_images,
             framebuffer,
-            queue_families : options.queue_families().to_vec(),
+            queue_families,
 
             surface_format
         })

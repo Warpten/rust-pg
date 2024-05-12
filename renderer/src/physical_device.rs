@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::CString, ops::Range, sync::{Arc, Weak}};
+use std::{cmp::min, collections::HashMap, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use crate::traits::{BorrowHandle, Handle};
 
@@ -57,22 +57,10 @@ impl PhysicalDevice {
         instance : Arc<Context>,
         queue_families : Vec<(u32, QueueFamily)>,
         get_queue_priority : F,
-        extensions : Vec<CString>,
+        extensions : &Vec<CString>,
     ) -> Arc<LogicalDevice>
-        where F : Fn(u32, QueueFamily) -> f32
+        where F : Fn(u32, &QueueFamily) -> f32
     {
-        // If we have the same queue family twice (for example, a graphics queue family and a present-able queue family are the same)
-        // deduplicate them.
-        // That implies we must sum up the queue counts - we'll limit them later
-        let queue_families = {
-            let mut work_buffer = HashMap::<QueueFamily, u32>::with_capacity(queue_families.len());
-            for (count, family) in queue_families {
-                work_buffer.entry(family).and_modify(|v| { *v += count; }).or_insert(count);
-            }
-            // Short lived, don't shrink_to_fit
-            work_buffer
-        };
-
         // Store queue priorities in a flattened buffer; each queue family will index into
         // that buffer to slice out the amount of queue families.
         let mut queue_create_infos = Vec::with_capacity(queue_families.len());
@@ -80,22 +68,23 @@ impl PhysicalDevice {
 
         // Unfortunately has to happen in two loops because one borrow is immutable
         // and the other is mutable...
-        for (&key, &value) in &queue_families {
-            for queue_index in 0..value.min(key.properties.queue_count) {
-                flat_queue_priorities.push(get_queue_priority(queue_index, key));
+        for (count, family) in queue_families.iter() {
+            for queue_index in 0..min(family.properties.queue_count, *count) {
+                flat_queue_priorities.push(get_queue_priority(queue_index, family));
             }
         }
         
-        for (&key, &value) in &queue_families {
-            let priority_index = flat_queue_priorities.len();
+        let mut priority_index = 0;
+        for (count, family) in queue_families.iter() {
             // Sacrificing brevity for readability (thank me later)
             let queue_priorities_range = Range {
-                start : priority_index,
-                end : priority_index + (value.min(key.properties.queue_count) as usize)
+                start : priority_index as usize,
+                end : (priority_index + count) as usize
             };
+            priority_index += count;
             
             queue_create_infos.push(ash::vk::DeviceQueueCreateInfo::default()
-                .queue_family_index(key.index)
+                .queue_family_index(family.index)
                 .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
         }
 
@@ -108,6 +97,7 @@ impl PhysicalDevice {
             .map(|s| s.as_ptr())
             .collect::<Vec<_>>();
 
+        /*
         let mut physical_device_descriptor_indexing_features = ash::vk::PhysicalDeviceDescriptorIndexingFeatures::default();
 
         let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default();
@@ -122,10 +112,11 @@ impl PhysicalDevice {
         assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind, 0);
         assert_ne!(physical_device_descriptor_indexing_features.shader_storage_buffer_array_non_uniform_indexing, 0);
         assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind, 0);
+        */
 
         let device_create_info = ash::vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
-            .push_next(&mut physical_device_features2)
+            // .push_next(&mut physical_device_features2)
             .enabled_features(&physical_device_features)
             .enabled_extension_names(&enabled_extension_names);
 
@@ -135,7 +126,7 @@ impl PhysicalDevice {
         };
 
         // Now, get all the queues
-        let queues_objs = queue_families.iter().flat_map(|(family, count)| {
+        let queues_objs = queue_families.iter().flat_map(|(count, family)| {
             (0..*count).map(|index| Queue::new(*family, index, &device))
         }).collect::<Vec<_>>();
 
