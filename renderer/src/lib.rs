@@ -13,10 +13,12 @@ mod framebuffer;
 mod image;
 mod pipeline;
 mod utils;
+mod render_pass;
 
 pub mod renderer;
 pub mod graph;
 
+pub use render_pass::*;
 pub use pipeline::*;
 pub use image::*;
 pub use framebuffer::*;

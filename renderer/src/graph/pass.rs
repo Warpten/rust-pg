@@ -100,7 +100,7 @@ impl Pass {
     }
 
     /// Returns all the inputs of this pass.
-    pub fn inputs(&self) -> Vec<&ResourceID> { self.inputs.values().collect::<Vec<_>>() }
+    pub fn inputs(&self) -> Vec<ResourceID> { self.inputs.values().cloned().collect::<Vec<_>>() }
 
     /// Returns all the outputs of this pass.
     pub fn outputs(&self) -> Vec<ResourceID> {
@@ -123,6 +123,8 @@ impl Identifiable for Pass {
 pub struct PassID(usize);
 
 impl PassID {
+    pub const NONE : PassID = PassID(usize::MAX);
+
     pub fn raw(&self) -> usize { self.0 }
 
     /// Retrieves the actual pass from the graph.

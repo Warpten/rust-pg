@@ -3,7 +3,7 @@ use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::{CStr, CString}, 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 
-use crate::{graph::Graph, queue, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::Graph, queue, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, RenderPass, Surface, Swapchain, SwapchainOptions, Window};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {

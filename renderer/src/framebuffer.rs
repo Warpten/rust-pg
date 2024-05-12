@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{traits::{BorrowHandle, Handle}, LogicalDevice};
+use crate::{traits::{BorrowHandle, Handle}, LogicalDevice, RenderPass};
 
 // This whole file needs cleaning
 // - Device should be Arc<LogicalDevice> and stored
@@ -13,11 +13,12 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(extent : ash::vk::Extent2D, image_views : Vec<ash::vk::ImageView>, layers : u32, device : Arc<LogicalDevice>) -> Framebuffer {
+    pub fn new(extent : ash::vk::Extent2D, image_views : Vec<ash::vk::ImageView>, layers : u32, device : Arc<LogicalDevice>, render_pass : &Arc<RenderPass>) -> Framebuffer {
         let framebuffer_create_info = ash::vk::FramebufferCreateInfo::default()
             .height(extent.height)
             .width(extent.width)
             .attachments(&image_views[..])
+            .render_pass(render_pass.handle())
             .layers(layers);
 
         let framebuffer = unsafe {

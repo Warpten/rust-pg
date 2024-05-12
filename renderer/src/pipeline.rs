@@ -228,7 +228,7 @@ impl<V : VertexType> Pipeline<V> {
     #[inline] pub fn context(&self) -> &Arc<Context> { self.device().context() }
     #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.device().allocator() }
 
-    pub fn new(device : Arc<LogicalDevice>, pool : Option<&Arc<PipelinePool>>, name : &'static str, info : PipelineInfo) -> Self {
+    pub fn new(device : Arc<LogicalDevice>, pool : Option<&Arc<PipelinePool>>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
             .map(|(path, flags)| Shader::new(device.clone(), path, flags))

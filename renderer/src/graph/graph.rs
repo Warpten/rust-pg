@@ -1,4 +1,4 @@
-use crate::{graph::manager::Identifiable, utils::topological_sort::TopologicalSorter};
+use crate::{graph::manager::Identifiable, utils::topological_sort::{self, TopologicalSorter}};
 
 use super::{buffer::{Buffer, BufferID}, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::{Texture, TextureID}};
 
@@ -33,7 +33,7 @@ impl Graph {
         // actually a resource ID tied to the pass producing that input. This design allows to infer pass dependencies and build
         // an adjacency graph that we can then invert to do stuff. I don't actually know what I'm saying.
 
-        let topological_sequence = {
+        let topological_sequence : Vec<&Pass> = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
                 // For each pass, find the edges (as in, passes that read from its outputs).
@@ -48,13 +48,39 @@ impl Graph {
 
                 sorter = sorter.add_node(pass.id(), edges);
             }
-            sorter.sort_kahn()
+
+            match sorter.sort_kahn() {
+                Ok(sorted) => sorted.iter().filter_map(|&pass_id| self.find_pass(pass_id)).collect::<Vec<_>>(),
+                Err(_) => panic!("Cyclic graph detected"),
+            }
         };
 
-        // 2. Traverse the tree bottom-up
-        //    It's too late for my brain to function so here goes.
-        //    https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
-        //    https://blog.traverseresearch.nl/render-graph-101-f42646255636
+        // Now that we have topologically sorted the graph, we can start looking at synchronization.
+        // This is irrelevant on a single queue, but if multiple queues exist, we need to potentially
+        // synchronize between render passes that execute on different queues.
+        // This can be inferred by looking at the input/output chains, but we also want to reduce the
+        // amount of stalls on each queue.
+        //   +-------+-------+  +-------+-------+
+        // A |   1   |   2   |  |   3   |   4   |
+        //   +-------+-------+  +-------+-------+
+        //   +-------+       +-------+
+        // B |   5   |       |   6   |
+        //   +-------+       +-------+
+        // If 3 depends on 5, but nothing depends on 6, 3 could just as well be depending on 6, to reduce
+        // the stall time on queue B. In practise, this is not exactly an easy problem to solve, because 2
+        // might actually be so fast that the transition between 2 and 3 might stall instead.
+        // This problem can be summarized like this:
+        // - For each pass (call it A)
+        //    - Find the direct dependency (call it B) on another queue.
+        //    - For each pass following B on its queue, find the last one that does not depend on B's outputs.
+        //      This pass is now pass C.
+        // - Do the same for the queue on A; look for the last pass that does not sequence.
+        // The basic idea is to have delayed synchronization as much as possible, both on the source and the target.
+
+        // https://themaister.net/blog/2017/08/15/render-graphs-and-vulkan-a-deep-dive/
+        // https://blog.traverseresearch.nl/render-graph-101-f42646255636
+        // https://blog.traverseresearch.nl/an-update-to-our-render-graph-17ca4154fd23
+        // https://levelup.gitconnected.com/organizing-gpu-work-with-directed-acyclic-graphs-f3fd5f2c2af3
     }
 
     /// Finds a rendering pass.

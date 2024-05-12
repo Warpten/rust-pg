@@ -2,7 +2,7 @@ use std::{mem::ManuallyDrop, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{traits::{BorrowHandle, Handle}, Framebuffer};
+use crate::{traits::{BorrowHandle, Handle}, Framebuffer, RenderPass};
 
 use super::{Queue, Context, PhysicalDevice};
 
@@ -46,11 +46,12 @@ impl LogicalDevice {
     /// 
     /// # Arguments
     /// 
+    /// * `render_pass` - 
     /// * `extent` - 
     /// * `views` - A slice of image views used to create this framebuffer.
     /// * `layers` - 
-    pub fn create_framebuffer(self : Arc<Self>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
-        return Framebuffer::new(extent, views, layers, self)
+    pub fn create_framebuffer(self : Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
+        return Framebuffer::new(extent, views, layers, self, render_pass)
     }
 
     pub fn find_memory_type(&self, memory_type_bits : u32, flags : ash::vk::MemoryPropertyFlags) -> u32 {

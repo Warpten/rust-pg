@@ -1,12 +1,13 @@
 use std::{borrow::Borrow, ops::Range, slice::Iter, sync::Arc};
 
-use crate::{queue, traits::{BorrowHandle, Handle}, Framebuffer, Image};
+use crate::{queue, traits::{BorrowHandle, Handle}, Framebuffer, Image, RenderPass};
 
 use super::{Context, LogicalDevice, QueueFamily, Surface};
 
 pub struct Swapchain {
-    pub device : Arc<LogicalDevice>,
+    device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
+    render_pass : Arc<RenderPass>,
 
     handle : ash::vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
@@ -69,6 +70,8 @@ impl Drop for Swapchain {
 }
 
 impl Swapchain {
+    #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
+
     /// Creates a new swapchain.
     /// 
     /// # Arguments
@@ -180,8 +183,10 @@ impl Swapchain {
         let swapchain_images = Image::from_swapchain(&surface_extent, device.clone(), surface_format.format, swapchain_images);
         let swapchain_image_views = swapchain_images.iter().map(Image::view).collect::<Vec<_>>();
 
+        let render_pass = Arc::new(RenderPass::new(&device, surface_format.format));
+
         let framebuffer = {
-            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.clone())
+            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.clone(), &render_pass)
         };
 
         Arc::new(Self {
@@ -194,6 +199,7 @@ impl Swapchain {
             images : swapchain_images,
             framebuffer,
             queue_families,
+            render_pass,
 
             surface_format
         })
