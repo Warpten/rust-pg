@@ -170,4 +170,36 @@ mod test {
             Err(_) => panic!(),
         }
     }
+
+    #[test]
+    pub fn complex() {
+        //    0
+        //  / | \
+        // 1  2  3
+        // | /|  |
+        // 4  5  6
+        // |   \ |
+        // 8     7
+        //
+        // 9 and 10 are isolated
+
+        let sorted = super::TopologicalSorter::default()
+            .add_node(0, vec![1, 2, 3])
+            .add_node(1, vec![4])
+            .add_node(2, vec![4, 5])
+            .add_node(3, vec![6])
+            .add_node(4, vec![8])
+            .add_node(5, vec![7])
+            .add_node(6, vec![7])
+            .add_node(7, vec![])
+            .add_node(8, vec![])
+            .add_node(9, vec![])
+            .add_node(10, vec![])
+            .sort_kahn();
+
+        match sorted {
+            Ok(sorted) => assert_eq!(sorted, vec![10, 9, 0, 3, 6, 2, 5, 7, 1, 4, 8]),
+            Err(_) => panic!(),
+        }
+    }
 }
