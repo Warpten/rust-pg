@@ -1,4 +1,4 @@
-use crate::{graph::manager::Identifiable, utils::topological_sort::{self, TopologicalSorter}};
+use crate::{graph::manager::Identifiable, utils::topological_sort::TopologicalSorter};
 
 use super::{buffer::{Buffer, BufferID}, manager::{Identifier, Manager}, pass::{Pass, PassID}, resource::{Resource, ResourceID}, texture::{Texture, TextureID}};
 

@@ -1,9 +1,9 @@
-use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::{CStr, CString}, hint, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{cmp::Ordering, collections::{HashMap, HashSet}, ffi::{CStr, CString}, hint, mem::ManuallyDrop, path::PathBuf, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 
-use crate::{graph::Graph, queue, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, RenderPass, Surface, Swapchain, SwapchainOptions, Window};
+use crate::{graph::Graph, queue, traits::{BorrowHandle, Handle}, Context, LogicalDevice, PhysicalDevice, PipelinePool, Queue, QueueFamily, RenderPass, Surface, Swapchain, SwapchainOptions, Window};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -25,6 +25,7 @@ pub struct RendererOptions {
     pub(in crate) instance_extensions : Vec<CString>,
     pub(in crate) resolution :[u32; 2],
     pub(in crate) get_queue_count : fn(&QueueFamily) -> u32,
+    pub(in crate) get_pipeline_cache_file : fn() -> PathBuf,
 }
 
 impl RendererOptions {
@@ -52,6 +53,11 @@ impl RendererOptions {
         self.get_queue_count = getter;
         self
     }
+
+    #[inline] pub fn pipeline_cache_file(mut self, getter : fn() -> PathBuf) -> Self {
+        self.get_pipeline_cache_file = getter;
+        self
+    }
 }
 
 impl Default for RendererOptions {
@@ -61,7 +67,8 @@ impl Default for RendererOptions {
             device_extensions: vec![ash::khr::swapchain::NAME.to_owned()],
             instance_extensions: vec![],
             resolution : [1280, 720],
-            get_queue_count : |&q| 1,
+            get_queue_count : |&_| 1,
+            get_pipeline_cache_file : || "pipelines.dat".into(),
         }
     }
 }
@@ -103,30 +110,30 @@ impl Renderer {
 
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         };
-        let surface = Surface::new(context.clone(), &window);
+        let surface = Surface::new(&context, &window);
 
         let (physical_device, graphics_queue, presentation_queue) = select(&context, &surface, &settings);
 
         let queue_families = { // Deduplicate the graphics and presentation queues.
             let mut queue_families_map = IntMap::<u32, QueueFamily>::default();
-            queue_families_map.entry(graphics_queue.index).or_insert(graphics_queue);
-            queue_families_map.entry(presentation_queue.index).or_insert(presentation_queue);
+            queue_families_map.entry(graphics_queue.index()).or_insert(graphics_queue);
+            queue_families_map.entry(presentation_queue.index()).or_insert(presentation_queue);
 
             queue_families_map.into_values().collect::<Vec<_>>()
         };
 
         let logical_device = physical_device.create_logical_device(
-            context.clone(),
+            &context,
             queue_families.iter()
-                .map(|&q| ((settings.get_queue_count)(&q), q.clone()))
+                .map(|queue : &QueueFamily| ((settings.get_queue_count)(queue), queue))
                 .collect::<Vec<_>>(),
             |_index, _family| 1.0_f32,
             &settings.device_extensions);
 
         let swapchain = Swapchain::new(
-            context.clone(),
-            logical_device.clone(),
-            surface.clone(),
+            &context,
+            &logical_device,
+            &surface,
             settings,
             queue_families
         );
@@ -146,7 +153,7 @@ impl Renderer {
 
         Self {
             context,
-            pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), "pipelines.dat".into())),
+            pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
             logical_device,
             surface,
             swapchain,
@@ -248,7 +255,7 @@ fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &Renderer
         let mut present_queue = None;
 
         for family in &device.queue_families[..] {
-            if family.properties.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) {
+            if family.is_graphics() {
                 graphics_queue = Some(family.clone());
             }
 

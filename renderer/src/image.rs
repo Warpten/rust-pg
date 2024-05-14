@@ -30,7 +30,7 @@ impl Image {
     /// * `levels` - Number of levels of detail available for minified sampling of the image.
     pub fn new(
         name : &'static str,
-        device : Arc<LogicalDevice>,
+        device : &Arc<LogicalDevice>,
         create_info : ash::vk::ImageCreateInfo,
         aspect_mask : ash::vk::ImageAspectFlags,
         levels : u32,
@@ -73,7 +73,7 @@ impl Image {
         };
 
         Self {
-            device,
+            device : device.clone(),
             allocation : Some(allocation),
             handle : image,
             layout : create_info.initial_layout,
@@ -83,7 +83,7 @@ impl Image {
         }
     }
 
-    pub fn from_swapchain(extent : &ash::vk::Extent2D, device : Arc<LogicalDevice>, format : ash::vk::Format, images : Vec<ash::vk::Image>) -> Vec<Image> {
+    pub fn from_swapchain(extent : &ash::vk::Extent2D, device : &Arc<LogicalDevice>, format : ash::vk::Format, images : Vec<ash::vk::Image>) -> Vec<Image> {
         images.iter().map(|&image| {
             unsafe {
                 let image_view_info = ash::vk::ImageViewCreateInfo::default()

@@ -24,7 +24,7 @@ impl LogicalDevice {
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn new(context : Arc<Context>,
+    pub fn new(context : &Arc<Context>,
         device : ash::Device,
         physical_device : PhysicalDevice,
         queues : Vec<Queue>,
@@ -47,7 +47,7 @@ impl LogicalDevice {
             physical_device,
             features,
             indexing_features,
-            context,
+            context : context.clone(),
             queues,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
@@ -61,7 +61,7 @@ impl LogicalDevice {
     /// * `extent` - 
     /// * `views` - A slice of image views used to create this framebuffer.
     /// * `layers` - 
-    pub fn create_framebuffer(self : Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
+    pub fn create_framebuffer(self : &Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
         return Framebuffer::new(extent, views, layers, self, render_pass)
     }
 
@@ -100,25 +100,105 @@ impl Drop for LogicalDevice {
 
 
 pub struct IndexingFeatures {
+    /// Indicates whether arrays of input attachments can be indexed by dynamically uniform integer expressions in shader code.
+    /// If this feature is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT must be indexed
+    /// only by constant integral expressions when aggregated into arrays in shader code. This also indicates whether shader
+    /// modules can declare the InputAttachmentArrayDynamicIndexing capability.
     pub shader_input_attachment_array_dynamic_indexing: bool,
+
+    /// Indicates whether arrays of uniform texel buffers can be indexed by dynamically uniform integer expressions in shader code.
+    /// If this feature is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER must be indexed
+    /// only by constant integral expressions when aggregated into arrays in shader code. This also indicates whether shader
+    /// modules can declare the UniformTexelBufferArrayDynamicIndexing capability.
     pub shader_uniform_texel_buffer_array_dynamic_indexing: bool,
+
+    /// Indicates whether arrays of storage texel buffers can be indexed by dynamically uniform integer expressions in shader code.
+    /// If this feature is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER must be indexed
+    /// only by constant integral expressions when aggregated into arrays in shader code. This also indicates whether shader modules
+    /// can declare the StorageTexelBufferArrayDynamicIndexing capability.
     pub shader_storage_texel_buffer_array_dynamic_indexing: bool,
+
+    /// Indicates whether arrays of uniform buffers can be indexed by non-uniform integer expressions in shader code. If this feature
+    /// is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER or VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+    /// must not be indexed by non-uniform integer expressions when aggregated into arrays in shader code. This also indicates whether
+    /// shader modules can declare the UniformBufferArrayNonUniformIndexing capability.
     pub shader_uniform_buffer_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of samplers or sampled images can be indexed by non-uniform integer expressions in shader code.
+    /// If this feature is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    /// or VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE must not be indexed by non-uniform integer expressions when aggregated into arrays in shader
+    /// code. This also indicates whether shader modules can declare the SampledImageArrayNonUniformIndexing capability.
     pub shader_sampled_image_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of storage buffers can be indexed by non-uniform integer expressions in shader code. If this feature
+    /// is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_STORAGE_BUFFER or VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC
+    /// must not be indexed by non-uniform integer expressions when aggregated into arrays in shader code. This also indicates whether
+    /// shader modules can declare the StorageBufferArrayNonUniformIndexing capability.
     pub shader_storage_buffer_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of storage images can be indexed by non-uniform integer expressions in shader code. If this feature is
+    /// not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_STORAGE_IMAGE must not be indexed by non-uniform integer
+    /// expressions when aggregated into arrays in shader code. This also indicates whether shader modules can declare the
+    /// StorageImageArrayNonUniformIndexing capability.
     pub shader_storage_image_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of input attachments can be indexed by non-uniform integer expressions in shader code. If this feature
+    /// is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT must not be indexed by non-uniform
+    /// integer expressions when aggregated into arrays in shader code. This also indicates whether shader modules can declare the
+    /// InputAttachmentArrayNonUniformIndexing capability.
     pub shader_input_attachment_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of uniform texel buffers can be indexed by non-uniform integer expressions in shader code. If this feature
+    /// is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER must not be indexed by non-uniform
+    /// integer expressions when aggregated into arrays in shader code. This also indicates whether shader modules can declare the
+    /// UniformTexelBufferArrayNonUniformIndexing capability.
     pub shader_uniform_texel_buffer_array_non_uniform_indexing: bool,
+
+    /// Indicates whether arrays of storage texel buffers can be indexed by non-uniform integer expressions in shader code. If this feature
+    /// is not enabled, resources with a descriptor type of VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER must not be indexed by non-uniform
+    /// integer expressions when aggregated into arrays in shader code. This also indicates whether shader modules can declare the
+    /// StorageTexelBufferArrayNonUniformIndexing capability.
     pub shader_storage_texel_buffer_array_non_uniform_indexing: bool,
+
+    /// Indicates whether the implementation supports updating uniform buffer descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER.
     pub descriptor_binding_uniform_buffer_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating sampled image descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+    /// or VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE.
     pub descriptor_binding_sampled_image_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating storage image descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_STORAGE_IMAGE.
     pub descriptor_binding_storage_image_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating storage buffer descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_STORAGE_BUFFER.
     pub descriptor_binding_storage_buffer_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating uniform texel buffer descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER.
     pub descriptor_binding_uniform_texel_buffer_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating storage texel buffer descriptors after a set is bound. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not be used with VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER.
     pub descriptor_binding_storage_texel_buffer_update_after_bind: bool,
+
+    /// Indicates whether the implementation supports updating descriptors while the set is in use. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT must not be used.
     pub descriptor_binding_update_unused_while_pending: bool,
+
+    /// Indicates whether the implementation supports statically using a descriptor set binding in which some descriptors are not valid.
+    /// If this feature is not enabled, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT must not be used.
     pub descriptor_binding_partially_bound: bool,
+
+    /// Indicates whether the implementation supports descriptor sets with a variable-sized last binding. If this feature is not enabled,
+    /// VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT must not be used.
     pub descriptor_binding_variable_descriptor_count: bool,
+
+    /// Indicates whether the implementation supports the SPIR-V RuntimeDescriptorArray capability. If this feature is not enabled,
+    /// descriptors must not be declared in runtime arrays.
     pub runtime_descriptor_array: bool,
 }
 

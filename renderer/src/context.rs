@@ -7,8 +7,8 @@ use super::PhysicalDevice;
 pub struct Context {
     entry : Arc<ash::Entry>,
     handle : ash::Instance,
-    pub debug_utils : ash::ext::debug_utils::Instance,
-    pub debug_messenger : ash::vk::DebugUtilsMessengerEXT,
+    debug_utils : ash::ext::debug_utils::Instance,
+    debug_messenger : ash::vk::DebugUtilsMessengerEXT,
     
 }
 

@@ -54,8 +54,8 @@ impl PhysicalDevice {
     /// * Panics if [`vkCreateDevice`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDevice.html) fails.
     pub fn create_logical_device<F>(
         &self,
-        instance : Arc<Context>,
-        queue_families : Vec<(u32, QueueFamily)>,
+        instance : &Arc<Context>,
+        queue_families : Vec<(u32, &QueueFamily)>,
         get_queue_priority : F,
         extensions : &Vec<CString>,
     ) -> Arc<LogicalDevice>
@@ -69,7 +69,7 @@ impl PhysicalDevice {
         // Unfortunately has to happen in two loops because one borrow is immutable
         // and the other is mutable...
         for (count, family) in queue_families.iter() {
-            for queue_index in 0..min(family.properties.queue_count, *count) {
+            for queue_index in 0..min(family.count(), *count) {
                 flat_queue_priorities.push(get_queue_priority(queue_index, family));
             }
         }
@@ -84,7 +84,7 @@ impl PhysicalDevice {
             priority_index += count;
             
             queue_create_infos.push(ash::vk::DeviceQueueCreateInfo::default()
-                .queue_family_index(family.index)
+                .queue_family_index(family.index())
                 .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
         }
 
@@ -120,7 +120,7 @@ impl PhysicalDevice {
 
         // Now, get all the queues
         let queues_objs = queue_families.iter().flat_map(|(count, family)| {
-            (0..*count).map(|index| Queue::new(*family, index, &device))
+            (0..*count).map(|index| Queue::new(family, index, &device))
         }).collect::<Vec<_>>();
 
         Arc::new(LogicalDevice::new(instance,
@@ -152,9 +152,7 @@ impl PhysicalDevice {
 
         let queue_families = unsafe {
             instance.handle().get_physical_device_queue_family_properties(device)
-        }.iter().enumerate().map(|(index, &properties)| {
-            QueueFamily {  index: index as u32, properties }
-        }).collect::<Vec<_>>();
+        }.iter().enumerate().map(|(index, &properties)| QueueFamily::new(index as u32, properties)).collect::<Vec<_>>();
 
         Self {
             handle : device,

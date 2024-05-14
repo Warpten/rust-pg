@@ -12,10 +12,16 @@ pub trait Scheduler {
     fn schedule(graph : &Graph, topological_sort : Vec<&Pass>, queues : &Vec<Queue>);
 }
 
+/// Synthesized passes. Can be either a reference to an actual graph pass, or a synchronization node
+enum SyntheticPass {
+    Pass(PassID),
+    CrossQueueSynchronization(PassID, PassID),
+}
+
 struct QueueScheduler<'a> {
     pub passes : Vec<PassID>,
-    pub full : bool,
     pub queue : &'a Queue,
+    pub enqueuing_index : usize,
 }
 
 impl QueueScheduler<'_> {
@@ -23,16 +29,21 @@ impl QueueScheduler<'_> {
         QueueScheduler {
             queue,
             passes : vec![PassID::NONE; pass_count],
-            full   : false,
+            enqueuing_index : 0,
         }
     }
 
     pub fn can_process(&self, pass : &Pass) -> bool {
-        todo!()
+        if self.enqueuing_index < self.passes.len() {
+            return true;
+        }
+
+        false
     }
 
-    pub fn take(&self, pass : &Pass) {
-        todo!()
+    pub fn append(&mut self, pass : &Pass) {
+        self.passes[self.enqueuing_index] = pass.id();
+        self.enqueuing_index += 1;
     }
 }
 
@@ -41,26 +52,8 @@ impl Scheduler for DefaultScheduler {
         // All queued passes, indexed on the exact queue index (ignoring families)
         let queue_schedulers = queues.iter().map(|q| QueueScheduler::new(&q, topological_sort.len())).collect::<Vec<_>>();
         
-        // Create a set of synchronization rules
-        for pass in &topological_sort {
-            match queue_schedulers.iter().find(|scheduler| scheduler.can_process(pass)) {
-                Some(scheduler) => scheduler.take(pass),
-                None => panic!("No queue can accept this pass")
-            }
-        }
-
         // A queue of the passes that can be reordered at any point in the graph.
         let reorganizable_passes = VecDeque::<PassID>::with_capacity(topological_sort.len());
-        for pass in &topological_sort {
-
-            for input in pass.inputs() {
-                match input {
-                    _ => (),
-                    ResourceID::Virtual(source, _) => 
-                }
-            }
-        }
-
         
         // My basic idea (god knows if it's actually good, though) is to find the first and the last pass in the topology
         // that are directly connected to the starting pass.
@@ -76,7 +69,7 @@ impl Scheduler for DefaultScheduler {
         //         | 4 |                 | 3 |                           | 3 | → | 4 |
         //         +---+                 +---+                           +---+   +---+
         //       (A)                         (B)                             (C)
-        // With that in mind, we can now add **the minimum** amount of any of the passes that were not sequenced after 
+        // With that in mind, we can now add * *the minimum** amount of any of the passes that were not sequenced after 
         // pass 3 on (B) (or pass 2 on (C)) (again, taking in mind wether or not the queues can accept these passes). These passes
         // could also be sequenced with one pass before 3 on (B) (or 2 on (C)) because 1 is happening on a single queue (regardless
         // of how the figures above lays it out), or any pass before 2 and 3 and with 1. This is to prevent whatever queues not
@@ -97,16 +90,54 @@ impl Scheduler for DefaultScheduler {
         // When spread on two queues this can become:
         // 0  
         // | \
-        // 2  3 
+        // 1  2 
         // |  |
-        // 4  6
+        // 3  5
         // | /|
-        // 5  7
+        // 4  6
         // |  |
-        // 9  8
+        // 8  7
         // Note that now we have an explicit synchronization between 5 and 6. This means that synchronizations have now become late binding!
         // 5 was sequenced to 3, but 5 waiting on 3 would stall the execution of 6, so 5 waits for 6 now, which is itself implicitely waiting
         // on 3, since it's on the same queue.
+
+        {
+            let mut orphan_queue = VecDeque::<PassID>::with_capacity(topological_sort.len());
+
+            let mut index = 0;
+            let mut queue_roundtrip_index = 0;
+            while index < topological_sort.len() {
+                let current = topological_sort[index];
+                index += 1; 
+
+                { // If the pass does not take any virtual input it can be reordered anywhere on the graph.
+                    let is_orphaned = current.inputs().iter().all(|input| {
+                        match input {
+                            ResourceID::Texture(_) => true,
+                            ResourceID::Buffer(_) => true,
+                            ResourceID::None => true,
+                            ResourceID::Virtual(_, _) => false,
+                        }
+                    });
+
+                    if is_orphaned {
+                        orphan_queue.push_back(current.id());
+                    } else {
+                        
+                    }
+                }
+
+                // Find all passes taking at least one input from any of this pass's outputs.
+                let edges = topological_sort.iter().filter(|pass| {
+                    pass.inputs().iter().any(|input| {
+                        match input {
+                            ResourceID::Virtual(src, _) if *src == current.id() => true,
+                            _ => false,
+                        }
+                    })
+                }).collect::<Vec<_>>();
+            }
+        }
 
         
         // For the purpose of this algorithm, because freestanding (as in,

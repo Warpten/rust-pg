@@ -5,22 +5,27 @@ use crate::{traits::{BorrowHandle, Handle}, CommandPool, LogicalDevice, Physical
 /// A logical queue associated with a logical device.
 pub struct Queue {
     handle : ash::vk::Queue,
-    pub index : u32,
-    pub family : QueueFamily,
+    index : u32,
+    family : QueueFamily,
 }
 
 impl Queue {
-    pub fn new(family : QueueFamily, index : u32, device : &ash::Device) -> Self {
+    pub fn new(family : &QueueFamily, index : u32, device : &ash::Device) -> Self {
         Self {
             index,
-            family,
+            family : *family,
             handle : unsafe {
                 device.get_device_queue(family.index as u32, index)
             }
         }
     }
 
-    pub fn family(&self) -> &QueueFamily { &self.family }
+    #[inline] pub fn index(&self) -> u32 { self.index }
+    #[inline] pub fn family_index(&self) -> u32 { self.family.index() }
+    #[inline] pub fn is_graphics(&self) -> bool { self.family.is_graphics() }
+    #[inline] pub fn is_compute(&self) -> bool { self.family.is_compute() }
+    #[inline] pub fn is_transfer(&self) -> bool { self.family.is_transfer() }
+    #[inline] pub fn family(&self) -> &QueueFamily { &self.family }
 }
 
 impl Handle for Queue {
@@ -46,35 +51,36 @@ impl Handle for Queue {
 #[derive(Clone, Copy)]
 pub struct QueueFamily {
     /// The index of this queue family.
-    pub index : u32,
+    index : u32,
     /// An object describing properties of this queue family.
-    pub properties : ash::vk::QueueFamilyProperties,
-}
-
-// Have to implement these manually because ash doesn't derive Eq, PartialEq, and Hash for QFPs.
-impl PartialEq for QueueFamily {
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
-            && self.properties.queue_flags == other.properties.queue_flags
-            && self.properties.queue_count == other.properties.queue_count
-            && self.properties.timestamp_valid_bits == other.properties.timestamp_valid_bits
-            && self.properties.min_image_transfer_granularity == other.properties.min_image_transfer_granularity
-    }
-}
-
-impl Eq for QueueFamily { }
-
-impl Hash for QueueFamily {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.index.hash(state);
-        self.properties.queue_flags.hash(state);
-        self.properties.queue_count.hash(state);
-        self.properties.timestamp_valid_bits.hash(state);
-        self.properties.min_image_transfer_granularity.hash(state);
-    }
+    properties : ash::vk::QueueFamilyProperties,
 }
 
 impl QueueFamily {
+    pub fn new(index : u32, properties : ash::vk::QueueFamilyProperties) -> Self {
+        Self { index, properties }
+    }
+
+    #[inline] pub fn index(&self) -> u32 { self.index }
+
+    /// Checks if this queue family supports graphics operations.
+    #[inline] pub fn is_graphics(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) }
+    
+    /// Checks if this queue family supports compute operations.
+    #[inline] pub fn is_compute(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) }
+
+    /// Checks if this queue family supports transfer operations.
+    #[inline] pub fn is_transfer(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::TRANSFER) || self.is_compute() || self.is_graphics() }
+
+    #[inline] pub fn min_image_transfer_granularity(&self) -> ash::vk::Extent3D {
+        self.properties.min_image_transfer_granularity
+    }
+
+    #[inline] pub fn count(&self) -> u32 {
+        self.properties.queue_count
+    }
+
+
     /// Returns true if this queue family can present to a given surface for a physical device.
     ///
     /// # Arguments
@@ -107,18 +113,31 @@ impl QueueFamily {
     /// * Panics if [`vkCreateCommandPool`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateCommandPool.html) fails.
     pub fn create_command_pool(
         &self,
-        device : Arc<LogicalDevice>
+        device : &Arc<LogicalDevice>
     ) -> Arc<CommandPool> {
-        let command_pool = {
-            let command_pool_create_info = ash::vk::CommandPoolCreateInfo::default()
-                .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(self.index as u32);
-            unsafe {
-                device.handle().create_command_pool(&command_pool_create_info, None)
-                    .expect("Failed to create command pool")
-            }
-        };
+        Arc::new(CommandPool::create(&self, device))
+    }
+}
 
-        Arc::new(CommandPool { handle : command_pool, device })
+// Have to implement these manually because ash doesn't derive Eq, PartialEq, and Hash for QFPs.
+impl PartialEq for QueueFamily {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+            && self.properties.queue_flags == other.properties.queue_flags
+            && self.properties.queue_count == other.properties.queue_count
+            && self.properties.timestamp_valid_bits == other.properties.timestamp_valid_bits
+            && self.properties.min_image_transfer_granularity == other.properties.min_image_transfer_granularity
+    }
+}
+
+impl Eq for QueueFamily { }
+
+impl Hash for QueueFamily {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+        self.properties.queue_flags.hash(state);
+        self.properties.queue_count.hash(state);
+        self.properties.timestamp_valid_bits.hash(state);
+        self.properties.min_image_transfer_granularity.hash(state);
     }
 }

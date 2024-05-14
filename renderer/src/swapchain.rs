@@ -89,9 +89,9 @@ impl Swapchain {
     /// * Panics if [`vkCreateSwapchainKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateSwapchainKHR.html) fails.
     /// * Panics if [`vkGetSwapchainImagesKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetSwapchainImagesKHR.html) fails.
     pub fn new<T : SwapchainOptions>(
-        instance : Arc<Context>,
-        device : Arc<LogicalDevice>,
-        surface : Arc<Surface>,
+        instance : &Arc<Context>,
+        device : &Arc<LogicalDevice>,
+        surface : &Arc<Surface>,
         options : &T,
         queue_families : Vec<QueueFamily>,
     ) -> Arc<Self> {
@@ -131,9 +131,7 @@ impl Swapchain {
             image_count
         };
 
-        let queue_family_indices = queue_families.iter()
-            .map(|q| q.index as u32)
-            .collect::<Vec<_>>();
+        let queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
 
         let image_sharing_mode = if queue_family_indices.len() == 1 {
             ash::vk::SharingMode::EXCLUSIVE
@@ -180,20 +178,20 @@ impl Swapchain {
                 .expect("Failed to get swapchain images")
         };
 
-        let swapchain_images = Image::from_swapchain(&surface_extent, device.clone(), surface_format.format, swapchain_images);
+        let swapchain_images = Image::from_swapchain(&surface_extent, &device, surface_format.format, swapchain_images);
         let swapchain_image_views = swapchain_images.iter().map(Image::view).collect::<Vec<_>>();
 
         let render_pass = Arc::new(RenderPass::new(&device, surface_format.format));
 
         let framebuffer = {
-            Framebuffer::new(surface_extent, swapchain_image_views.clone(), options.layers().len() as _, device.clone(), &render_pass)
+            Framebuffer::new(surface_extent, swapchain_image_views, options.layers().len() as _, &device, &render_pass)
         };
 
         Arc::new(Self {
-            device,
+            device : device.clone(),
             extent : surface_extent,
             handle,
-            surface,
+            surface : surface.clone(),
             layer_count : options.layers().len() as _,
             loader : swapchain_loader,
             images : swapchain_images,

@@ -45,7 +45,7 @@ impl Surface {
     /// * Panics if [`HasDisplayHandle::display_handle`] fails.
     /// * Panics if [`HasWindowHandle::window_handle`] fails.
     pub fn new(
-        context : Arc<Context>, 
+        context : &Arc<Context>, 
         window : &Window
     ) -> Arc<Self> {
         let loader = ash::khr::surface::Instance::new(context.entry(), context.handle());
@@ -58,6 +58,10 @@ impl Surface {
             ).expect("Failed to create surface")
         };
 
-        Arc::new(Self { handle : surface, loader, context })
+        Arc::new(Self {
+            handle : surface,
+            loader,
+            context : context.clone()
+        })
     }
 }

@@ -1,15 +1,31 @@
 use std::sync::Arc;
 
-use crate::traits::{BorrowHandle, Handle};
+use crate::{traits::{BorrowHandle, Handle}, QueueFamily};
 
 use super::LogicalDevice;
 
 pub struct CommandPool {
-    pub(in super) handle : ash::vk::CommandPool,
-    pub device : Arc<LogicalDevice>,
+    handle : ash::vk::CommandPool,
+    device : Arc<LogicalDevice>,
 }
 
 impl CommandPool {
+    pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
+
+    pub(in crate) fn create(family : &QueueFamily, device : &Arc<LogicalDevice>) -> Self {
+        let handle = {
+            let command_pool_create_info = ash::vk::CommandPoolCreateInfo::default()
+                .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(family.index());
+            unsafe {
+                device.handle().create_command_pool(&command_pool_create_info, None)
+                    .expect("Failed to create command pool")
+            }
+        };
+
+        Self { handle, device : device.clone() }
+    }
+
     /// Resets this command pool.
     /// 
     /// # Arguments

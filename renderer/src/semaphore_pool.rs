@@ -10,9 +10,9 @@ pub struct SemaphorePool {
 }
 
 impl SemaphorePool {
-    pub fn new(device: Arc<LogicalDevice>) -> Self {
+    pub fn new(device: &Arc<LogicalDevice>) -> Self {
         SemaphorePool {
-            device : device,
+            device : device.clone(),
             handles: Vec::new(),
             active_count: 0,
         }
