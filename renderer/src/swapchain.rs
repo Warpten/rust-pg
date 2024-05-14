@@ -184,7 +184,7 @@ impl Swapchain {
         let render_pass = Arc::new(RenderPass::new(&device, surface_format.format));
 
         let framebuffer = {
-            Framebuffer::new(surface_extent, swapchain_image_views, options.layers().len() as _, &device, &render_pass)
+            Framebuffer::new(surface_extent, &swapchain_image_views[..], options.layers().len() as _, &device, &render_pass)
         };
 
         Arc::new(Self {

@@ -13,11 +13,11 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(extent : ash::vk::Extent2D, image_views : Vec<ash::vk::ImageView>, layers : u32, device : &Arc<LogicalDevice>, render_pass : &Arc<RenderPass>) -> Framebuffer {
+    pub fn new(extent : ash::vk::Extent2D, image_views : &[ash::vk::ImageView], layers : u32, device : &Arc<LogicalDevice>, render_pass : &Arc<RenderPass>) -> Framebuffer {
         let framebuffer_create_info = ash::vk::FramebufferCreateInfo::default()
             .height(extent.height)
             .width(extent.width)
-            .attachments(&image_views[..])
+            .attachments(image_views)
             .render_pass(render_pass.handle())
             .layers(layers);
 
@@ -26,7 +26,7 @@ impl Framebuffer {
                 .expect("Creating the framebuffer failed")
         };
 
-        Self { handle : handle, views : image_views }
+        Self { handle, views : image_views.to_vec() }
     }
 
     pub fn views(&self) -> &Vec<ash::vk::ImageView> { &self.views }

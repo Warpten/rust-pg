@@ -53,7 +53,7 @@ impl LogicalDevice {
         }
     }
 
-    /// Creates a new framebuffer
+    /// Creates a new framebuffer for this logical device.
     /// 
     /// # Arguments
     /// 
@@ -61,7 +61,7 @@ impl LogicalDevice {
     /// * `extent` - 
     /// * `views` - A slice of image views used to create this framebuffer.
     /// * `layers` - 
-    pub fn create_framebuffer(self : &Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : Vec<ash::vk::ImageView>, layers : u32) -> Framebuffer {
+    pub fn create_framebuffer(self : &Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : &[ash::vk::ImageView], layers : u32) -> Framebuffer {
         return Framebuffer::new(extent, views, layers, self, render_pass)
     }
 
@@ -75,9 +75,10 @@ impl LogicalDevice {
         panic!("No memory type found matching the requirements")
     }
 
+    /// Blocks until the completion of all operations of all queues on this logical device.
     pub fn wait_idle(&self) {
         unsafe {
-            self.handle.device_wait_idle();
+            _ = self.handle.device_wait_idle();
         }
     }
 }
