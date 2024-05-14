@@ -14,6 +14,9 @@ pub struct LogicalDevice {
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     pub queues : Vec<Queue>,
+
+    pub features : ash::vk::PhysicalDeviceFeatures,
+    pub indexing_features : IndexingFeatures,
 }
 
 impl LogicalDevice {
@@ -21,7 +24,13 @@ impl LogicalDevice {
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn new(context : Arc<Context>, device : ash::Device, physical_device : PhysicalDevice, queues : Vec<Queue>) -> Self {
+    pub fn new(context : Arc<Context>,
+        device : ash::Device,
+        physical_device : PhysicalDevice,
+        queues : Vec<Queue>,
+        features : ash::vk::PhysicalDeviceFeatures,
+        indexing_features : IndexingFeatures,
+    )  -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
             instance: context.handle().clone(),
             device: device.clone(),
@@ -36,6 +45,8 @@ impl LogicalDevice {
         Self {
             handle : device,
             physical_device,
+            features,
+            indexing_features,
             context,
             queues,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
@@ -83,6 +94,57 @@ impl Drop for LogicalDevice {
             ManuallyDrop::drop(&mut self.allocator);
 
             self.handle.destroy_device(None);
+        }
+    }
+}
+
+
+pub struct IndexingFeatures {
+    pub shader_input_attachment_array_dynamic_indexing: bool,
+    pub shader_uniform_texel_buffer_array_dynamic_indexing: bool,
+    pub shader_storage_texel_buffer_array_dynamic_indexing: bool,
+    pub shader_uniform_buffer_array_non_uniform_indexing: bool,
+    pub shader_sampled_image_array_non_uniform_indexing: bool,
+    pub shader_storage_buffer_array_non_uniform_indexing: bool,
+    pub shader_storage_image_array_non_uniform_indexing: bool,
+    pub shader_input_attachment_array_non_uniform_indexing: bool,
+    pub shader_uniform_texel_buffer_array_non_uniform_indexing: bool,
+    pub shader_storage_texel_buffer_array_non_uniform_indexing: bool,
+    pub descriptor_binding_uniform_buffer_update_after_bind: bool,
+    pub descriptor_binding_sampled_image_update_after_bind: bool,
+    pub descriptor_binding_storage_image_update_after_bind: bool,
+    pub descriptor_binding_storage_buffer_update_after_bind: bool,
+    pub descriptor_binding_uniform_texel_buffer_update_after_bind: bool,
+    pub descriptor_binding_storage_texel_buffer_update_after_bind: bool,
+    pub descriptor_binding_update_unused_while_pending: bool,
+    pub descriptor_binding_partially_bound: bool,
+    pub descriptor_binding_variable_descriptor_count: bool,
+    pub runtime_descriptor_array: bool,
+}
+
+impl IndexingFeatures {
+    pub fn new(features : ash::vk::PhysicalDeviceDescriptorIndexingFeatures) -> Self {
+        Self {
+            shader_input_attachment_array_dynamic_indexing : features.shader_input_attachment_array_dynamic_indexing != 0,
+            shader_uniform_texel_buffer_array_dynamic_indexing : features.shader_uniform_texel_buffer_array_dynamic_indexing != 0,
+            shader_storage_texel_buffer_array_dynamic_indexing : features.shader_storage_texel_buffer_array_dynamic_indexing != 0,
+            shader_uniform_buffer_array_non_uniform_indexing : features.shader_uniform_buffer_array_non_uniform_indexing != 0,
+            shader_sampled_image_array_non_uniform_indexing : features.shader_sampled_image_array_non_uniform_indexing != 0,
+            shader_storage_buffer_array_non_uniform_indexing : features.shader_storage_buffer_array_non_uniform_indexing != 0,
+            shader_storage_image_array_non_uniform_indexing : features.shader_storage_image_array_non_uniform_indexing != 0,
+            shader_input_attachment_array_non_uniform_indexing : features.shader_input_attachment_array_non_uniform_indexing != 0,
+            shader_uniform_texel_buffer_array_non_uniform_indexing : features.shader_uniform_texel_buffer_array_non_uniform_indexing != 0,
+            shader_storage_texel_buffer_array_non_uniform_indexing : features.shader_storage_texel_buffer_array_non_uniform_indexing != 0,
+            descriptor_binding_uniform_buffer_update_after_bind : features.descriptor_binding_uniform_buffer_update_after_bind != 0,
+            descriptor_binding_sampled_image_update_after_bind : features.descriptor_binding_sampled_image_update_after_bind != 0,
+            descriptor_binding_storage_image_update_after_bind : features.descriptor_binding_storage_image_update_after_bind != 0,
+            descriptor_binding_storage_buffer_update_after_bind : features.descriptor_binding_storage_buffer_update_after_bind != 0,
+            descriptor_binding_uniform_texel_buffer_update_after_bind : features.descriptor_binding_uniform_texel_buffer_update_after_bind != 0,
+            descriptor_binding_storage_texel_buffer_update_after_bind : features.descriptor_binding_storage_texel_buffer_update_after_bind != 0,
+            descriptor_binding_update_unused_while_pending : features.descriptor_binding_update_unused_while_pending != 0,
+            descriptor_binding_partially_bound : features.descriptor_binding_partially_bound != 0,
+            descriptor_binding_variable_descriptor_count : features.descriptor_binding_variable_descriptor_count != 0,
+            runtime_descriptor_array : features.runtime_descriptor_array != 0,
         }
     }
 }

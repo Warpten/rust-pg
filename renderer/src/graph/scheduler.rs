@@ -1,24 +1,27 @@
+use std::collections::VecDeque;
+
 use nohash_hasher::IntMap;
 
-use crate::utils::topological_sort;
+use crate::{utils::topological_sort, Queue};
 
 use super::{manager::Identifiable, pass::{Pass, PassID}, resource::ResourceID, Graph};
 
 pub struct DefaultScheduler;
 
 pub trait Scheduler {
-    fn schedule(graph : &Graph, topological_sort : Vec<&Pass>);
+    fn schedule(graph : &Graph, topological_sort : Vec<&Pass>, queues : &Vec<Queue>);
 }
 
-#[derive(Clone)]
-struct QueueScheduler {
+struct QueueScheduler<'a> {
     pub passes : Vec<PassID>,
     pub full : bool,
+    pub queue : &'a Queue,
 }
 
-impl QueueScheduler {
-    pub fn new(pass_count : usize) -> Self {
-        Self {
+impl QueueScheduler<'_> {
+    pub fn new<'a>(queue : &'a Queue, pass_count : usize) -> QueueScheduler<'a> {
+        QueueScheduler {
+            queue,
             passes : vec![PassID::NONE; pass_count],
             full   : false,
         }
@@ -34,15 +37,27 @@ impl QueueScheduler {
 }
 
 impl Scheduler for DefaultScheduler {
-    fn schedule(graph : &Graph, topological_sort : Vec<&Pass>) {
+    fn schedule(graph : &Graph, topological_sort : Vec<&Pass>, queues : &Vec<Queue>) {
         // All queued passes, indexed on the exact queue index (ignoring families)
-        let queue_schedulers = vec![QueueScheduler::new(topological_sort.len()); 2];
+        let queue_schedulers = queues.iter().map(|q| QueueScheduler::new(&q, topological_sort.len())).collect::<Vec<_>>();
         
         // Create a set of synchronization rules
         for pass in &topological_sort {
             match queue_schedulers.iter().find(|scheduler| scheduler.can_process(pass)) {
                 Some(scheduler) => scheduler.take(pass),
                 None => panic!("No queue can accept this pass")
+            }
+        }
+
+        // A queue of the passes that can be reordered at any point in the graph.
+        let reorganizable_passes = VecDeque::<PassID>::with_capacity(topological_sort.len());
+        for pass in &topological_sort {
+
+            for input in pass.inputs() {
+                match input {
+                    _ => (),
+                    ResourceID::Virtual(source, _) => 
+                }
             }
         }
 

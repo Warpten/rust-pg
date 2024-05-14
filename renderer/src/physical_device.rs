@@ -1,6 +1,6 @@
-use std::{cmp::min, collections::HashMap, ffi::CString, ops::Range, sync::{Arc, Weak}};
+use std::{cmp::min, collections::HashMap, ffi::CString, ops::{Index, Range}, sync::{Arc, Weak}};
 
-use crate::traits::{BorrowHandle, Handle};
+use crate::{traits::{BorrowHandle, Handle}, IndexingFeatures};
 
 use super::{QueueFamily, Context, LogicalDevice, Queue};
 
@@ -97,29 +97,22 @@ impl PhysicalDevice {
             .map(|s| s.as_ptr())
             .collect::<Vec<_>>();
 
-        /*
+        
         let mut physical_device_descriptor_indexing_features = ash::vk::PhysicalDeviceDescriptorIndexingFeatures::default();
 
-        let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default();
-        _ = physical_device_features2.push_next(&mut physical_device_descriptor_indexing_features);
+        let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut physical_device_descriptor_indexing_features);
         unsafe {
             instance.handle().get_physical_device_features2(self.handle, &mut physical_device_features2);
         }
 
-        assert_ne!(physical_device_descriptor_indexing_features.shader_sampled_image_array_non_uniform_indexing, 0);
-        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_sampled_image_update_after_bind, 0);
-        assert_ne!(physical_device_descriptor_indexing_features.shader_uniform_buffer_array_non_uniform_indexing, 0);
-        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_uniform_buffer_update_after_bind, 0);
-        assert_ne!(physical_device_descriptor_indexing_features.shader_storage_buffer_array_non_uniform_indexing, 0);
-        assert_ne!(physical_device_descriptor_indexing_features.descriptor_binding_storage_buffer_update_after_bind, 0);
-        */
-
         let device_create_info = ash::vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
-            // .push_next(&mut physical_device_features2)
+            .push_next(&mut physical_device_features2)
             .enabled_features(&physical_device_features)
             .enabled_extension_names(&enabled_extension_names);
 
+    
         let device = unsafe {
             instance.handle().create_device(self.handle, &device_create_info, None)
                 .expect("Failed to create a virtual device")
@@ -130,7 +123,13 @@ impl PhysicalDevice {
             (0..*count).map(|index| Queue::new(*family, index, &device))
         }).collect::<Vec<_>>();
 
-        Arc::new(LogicalDevice::new(instance, device, self.clone(), queues_objs))
+        Arc::new(LogicalDevice::new(instance,
+            device,
+            self.clone(),
+            queues_objs,
+            physical_device_features2.features,
+            IndexingFeatures::new(physical_device_descriptor_indexing_features),
+        ))
     }
 
     /// Creates a new [`PhysicalDevice`].
