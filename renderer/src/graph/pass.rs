@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
-use super::{manager::{Identifiable, Identifier}, resource::ResourceID, Graph};
+use ash::vk::Queue;
+
+use crate::QueueAffinity;
+
+use super::{manager::{Identifiable, Identifier}, resource::{Resource, ResourceID, ResourceUsage}, Graph};
 
 pub struct Pass {
     pub(in self) id : PassID,
     name : &'static str,
+    affinity : QueueAffinity,
 
-    pub(in self) inputs : HashMap<&'static str, ResourceID /* remote */>,
-    pub(in self) outputs : HashMap<&'static str, ResourceID /* remote */>,
+    resources : HashMap<&'static str, (ResourceID, ResourceUsage)>,
 }
 
 impl Pass {
@@ -15,35 +19,58 @@ impl Pass {
         Self {
             name,
             id : PassID(usize::MAX),
+            affinity : QueueAffinity::none(),
 
-            inputs : HashMap::new(),
-            outputs : HashMap::new(),
+            resources : HashMap::new(),
         }
     }
 
     pub fn name(&self) -> &'static str { self.name }
 
-    /// Adds an input to this pass.
+    pub(in crate) fn affinity(&self) -> QueueAffinity { self.affinity }
+
+    /// Adds a resource to this pass.
+    /// 
+    /// # Example
+    /// 
+    /// The following code works fine and pass B will correctly refer to **backbuffer_resource** after pass A is done executing.
+    /// ```
+    /// pub fn register_pass(&self, graph : &mut Graph, backbuffer_resource : ResourceID) {
+    ///     let a = Pass::new("A")
+    ///         .add_resource("Backbuffer", backbuffer_resource, ResourceUsage::ReadWrite)
+    ///         .register(graph);
+    /// 
+    ///     let b = Pass::new("B")
+    ///         .add_input("Backbuffer", a.output("Backbuffer"))
+    ///         .register(graph);
+    /// }
+    /// ```
+    /// 
+    /// This one has pass A read from a resource, write to another one, and has B read from the latter resource.
+    /// ```
+    /// pub fn register_pass(&self, graph : &mut Graph, backbuffer_resource : ResourceID, some_unrelated_resource : ResourceID) {
+    ///     let a = Pass::new("A")
+    ///         .add_resource("Backbuffer", backbuffer_resource, ResourceUsage::ReadOnly)
+    ///         .add_resource("Backbuffer", some_unrelated_resource, ResourceUsage::WriteOnly)
+    ///         .register(graph);
+    /// 
+    ///     let b = Pass::new("B")
+    ///         .add_resource("Backbuffer", a.output("Backbuffer")) 
+    ///         .register(graph);
+    /// }
+    /// ```
+    /// 
+    /// Users are heavily encouraged to name their resources with naming conventions that allow them to differ between read-only
+    /// resources (such as "BackbufferRead"), write-only resources (such as "BackbufferWrite"), and read-write resources (such as
+    /// "BackBuffer"), to minimize confusion.
     /// 
     /// # Arguments
     /// 
     /// * `name` - The name of this input. Locally to the pass, this name must be unique.
-    /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
-    #[inline]
-    pub fn add_input(mut self, name : &'static str, resource : ResourceID) -> Self {
-        self.inputs.insert(name, resource);
-        self
-    }
-    
-    /// Adds an output to this pass.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `name` - The name of this input. Locally to the pass, this name must be unique.
-    /// * `resource` - A [`ResourceID`] identifying the input [`Resource`].
-    #[inline]
-    pub fn add_output(mut self, name : &'static str, resource : ResourceID) -> Self {
-        self.inputs.insert(name, resource);
+    /// * `resource` - A [`ResourceID`] identifying the input resource.
+    /// * `usage` - An access mask for the resource.
+    pub fn add_resource(mut self, name : &'static str, resource : ResourceID, usage : ResourceUsage) -> Self {
+        self.resources.insert(name, (resource, usage));
         self
     }
 
@@ -56,18 +83,20 @@ impl Pass {
     pub fn register(self, manager : &mut Graph) -> PassID {
         let registered_self = manager.passes.register(self, |instance, id| instance.id = PassID(id));
 
-        for (_, input_id) in &registered_self.inputs {
-            match manager.resources.find_mut(input_id.clone()) {
-                Some(resource) => resource.register_reader(registered_self.id),
+        for (resource_id, usage) in registered_self.resources.values() {
+            match manager.resources.find_mut(resource_id.clone()) {
+                Some(resource) => {
+                    match usage {
+                        ResourceUsage::ReadOnly => resource.register_reader(registered_self.id),
+                        ResourceUsage::WriteOnly => resource.register_writer(registered_self.id),
+                        ResourceUsage::ReadWrite => {
+                            resource.register_reader(registered_self.id);
+                            resource.register_writer(registered_self.id);
+                        },
+                    }
+                },
                 None => panic!("Inconsistent state"),
-            }
-        }
-
-        for (_, input_id) in &registered_self.outputs {
-            match manager.resources.find_mut(input_id.clone()) {
-                Some(resource) => resource.register_writer(registered_self.id),
-                None => panic!("Inconsistent state"),
-            }
+            };
         }
 
         registered_self.id()
@@ -80,9 +109,10 @@ impl Pass {
     /// 
     /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
     pub fn input(&self, name : &'static str) -> ResourceID {
-        match self.inputs.get(name) {
-            None => ResourceID::None,
-            Some(value) => ResourceID::Virtual(self.id(), Box::new(value.clone())),
+        match self.resources.get(name) {
+            Some((resource, usage)) if *usage == ResourceUsage::ReadOnly || *usage == ResourceUsage::ReadWrite
+                => ResourceID::Virtual(self.id(), Box::new(resource.clone())),
+            _ => ResourceID::None,
         }
     }
 
@@ -92,20 +122,31 @@ impl Pass {
     /// # Arguments
     /// 
     /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
-    pub fn output(&self, name : &'static str,) -> ResourceID {
-        match self.outputs.get(name) {
-            None => ResourceID::None,
-            Some(value) => ResourceID::Virtual(self.id(), Box::new(value.clone())),
+    pub fn output(&self, name : &'static str) -> ResourceID {
+        match self.resources.get(name) {
+            Some((resource, usage)) if *usage == ResourceUsage::WriteOnly || *usage == ResourceUsage::ReadWrite
+                => ResourceID::Virtual(self.id(), Box::new(resource.clone())),
+            _ => ResourceID::None,
         }
     }
 
     /// Returns all the inputs of this pass.
-    pub fn inputs(&self) -> Vec<ResourceID> { self.inputs.values().cloned().collect::<Vec<_>>() }
+    pub fn inputs(&self) -> Vec<ResourceID> {
+        self.resources.values().filter_map(|(resource, usage)| {
+            match usage {
+                ResourceUsage::WriteOnly => None,
+                _ => Some(resource.clone()),
+            }
+        }).collect::<Vec<_>>()
+    }
 
     /// Returns all the outputs of this pass.
     pub fn outputs(&self) -> Vec<ResourceID> {
-        self.outputs.values().map(|resource| {
-            ResourceID::Virtual(self.id(), Box::new(resource.clone()))
+        self.resources.values().filter_map(|(resource, usage)| {
+            match usage {
+                ResourceUsage::WriteOnly => None,
+                _ => Some(ResourceID::Virtual(self.id, Box::new(resource.clone()))),
+            }
         }).collect::<Vec<_>>()
     }
     

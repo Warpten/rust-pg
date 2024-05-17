@@ -77,6 +77,8 @@ impl From<TextureID> for Identifier {
     fn from(value: TextureID) -> Self { value.0 }
 }
 
+impl nohash_hasher::IsEnabled for TextureID { }
+
 #[derive(Clone)]
 pub struct TextureUsage {
     pub access_flags : ResourceAccessFlags,

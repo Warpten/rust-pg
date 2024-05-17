@@ -92,7 +92,10 @@ pub struct Renderer {
     swapchain : Arc<Swapchain>,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
-    graph : Graph,
+    // One or many rendering graphs
+    // The application driving the renderer is in charge of adding as many graphs as needed. They will be
+    // baked, invalidated, scheduled and executed in order.
+    graphs : Vec<Graph>,
 }
 
 impl Renderer {
@@ -101,6 +104,7 @@ impl Renderer {
     #[inline] pub fn pipeline_cache(&self) -> &Arc<PipelinePool> { &self.pipeline_cache }
     #[inline] pub fn surface(&self) -> &Arc<Surface> { &self.surface }
     #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
+    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
     pub fn new(settings : &RendererOptions, window : &Window) -> Self {
         let context = unsafe {
@@ -149,15 +153,13 @@ impl Renderer {
             buffer_device_address: false,
         }).unwrap();
 
-        let graph = Graph::new();
-
         Self {
             context,
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
             logical_device,
             surface,
             swapchain,
-            graph,
+            graphs : vec![],
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }
     }

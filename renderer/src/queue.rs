@@ -1,5 +1,7 @@
 use std::{hash::Hash, sync::Arc};
 
+use bitmask_enum::bitmask;
+
 use crate::{traits::{BorrowHandle, Handle}, CommandPool, LogicalDevice, PhysicalDevice, Surface};
 
 /// A logical queue associated with a logical device.
@@ -7,6 +9,13 @@ pub struct Queue {
     handle : ash::vk::Queue,
     index : u32,
     family : QueueFamily,
+}
+
+#[bitmask(u8)]
+pub enum QueueAffinity {
+    Compute = 0x01,
+    Graphics = 0x02,
+    Transfer = 0x04
 }
 
 impl Queue {
@@ -18,6 +27,14 @@ impl Queue {
                 device.get_device_queue(family.index as u32, index)
             }
         }
+    }
+
+    pub fn affinity(&self) -> QueueAffinity {
+        let mut affinity = QueueAffinity::none();
+        if self.family.is_compute() { affinity = affinity.and(QueueAffinity::Compute) };
+        if self.family.is_graphics() { affinity = affinity.and(QueueAffinity::Graphics) };
+        if self.family.is_transfer() { affinity = affinity.and(QueueAffinity::Transfer) };
+        affinity
     }
 
     #[inline] pub fn index(&self) -> u32 { self.index }

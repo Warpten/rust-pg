@@ -24,6 +24,8 @@ impl BufferID {
     }
 }
 
+impl nohash_hasher::IsEnabled for BufferID { }
+
 impl From<BufferID> for Identifier {
     fn from(value: BufferID) -> Self { value.0 }
 }

@@ -13,6 +13,13 @@ pub enum Resource {
     Buffer(Buffer),
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
+pub enum ResourceUsage {
+    ReadOnly = 0x01,
+    WriteOnly = 0x02,
+    ReadWrite = 0x04,
+}
+
 impl Resource {
     pub fn register_reader(&mut self, pass_id : PassID) {
         match self {

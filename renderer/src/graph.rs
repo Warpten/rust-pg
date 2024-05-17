@@ -5,6 +5,5 @@ pub mod buffer;
 
 mod manager;
 mod graph;
-mod scheduler;
 
 pub use graph::*;
