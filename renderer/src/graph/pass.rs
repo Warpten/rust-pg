@@ -33,36 +33,33 @@ impl Pass {
     /// 
     /// # Example
     /// 
-    /// The following code works fine and pass B will correctly refer to **backbuffer_resource** after pass A is done executing.
+    /// In the following example:
+    /// - Pass A read-writes from a resource and reads from another one
+    /// - Pass B reads from pass A's output.
+    /// - Pass C reads from a resource.
+    /// 
+    /// As a consequence the passes can either sequence as `(A, C, B)`, `(B, A, C)`, or `(A, B, C)`:
+    /// - `(A, C, B)`: C explicitely synchronizes on A's output.
+    /// - `(B, A, C)`: B is independant from A and C and can execute either before or after both of them.
+    /// - `(A, B, C)`: B is independant from A but can execute after A and before C to reduce stalls caused by a possible
+    ///   layout transition caused by C reading from A's output.
+    /// 
     /// ```
-    /// pub fn register_pass(&self, graph : &mut Graph, backbuffer_resource : ResourceID) {
+    /// pub fn register_pass(&self, graph : &mut Graph, resources : &Vec<ResourceID>) {
     ///     let a = Pass::new("A")
-    ///         .add_resource("Backbuffer", backbuffer_resource, ResourceUsage::ReadWrite)
+    ///         .add_resource("Resource 0", resources[0], ResourceUsage::ReadWrite)
+    ///         .add_resource("Resource 1", resources[1], ResourceUsage::ReadOnly)
     ///         .register(graph);
     /// 
     ///     let b = Pass::new("B")
-    ///         .add_input("Backbuffer", a.output("Backbuffer"))
+    ///         .add_resource("Resource 2", a.output("Resource 0").unwrap(), ResourceUsage::ReadOnly)
+    ///         .register(graph);
+    /// 
+    ///     let c = Pass::new("C")
+    ///         .add_resource("Resource 3", resources[1], ResourceUsage::ReadOnly)
     ///         .register(graph);
     /// }
     /// ```
-    /// 
-    /// This one has pass A read from a resource, write to another one, and has B read from the latter resource.
-    /// ```
-    /// pub fn register_pass(&self, graph : &mut Graph, backbuffer_resource : ResourceID, some_unrelated_resource : ResourceID) {
-    ///     let a = Pass::new("A")
-    ///         .add_resource("Backbuffer", backbuffer_resource, ResourceUsage::ReadOnly)
-    ///         .add_resource("Backbuffer", some_unrelated_resource, ResourceUsage::WriteOnly)
-    ///         .register(graph);
-    /// 
-    ///     let b = Pass::new("B")
-    ///         .add_resource("Backbuffer", a.output("Backbuffer")) 
-    ///         .register(graph);
-    /// }
-    /// ```
-    /// 
-    /// Users are heavily encouraged to name their resources with naming conventions that allow them to differ between read-only
-    /// resources (such as "BackbufferRead"), write-only resources (such as "BackbufferWrite"), and read-write resources (such as
-    /// "BackBuffer"), to minimize confusion.
     /// 
     /// # Arguments
     /// 
@@ -70,6 +67,8 @@ impl Pass {
     /// * `resource` - A [`ResourceID`] identifying the input resource.
     /// * `usage` - An access mask for the resource.
     pub fn add_resource(mut self, name : &'static str, resource : ResourceID, usage : ResourceUsage) -> Self {
+        debug_assert!(!self.resources.contains_key(name));
+
         self.resources.insert(name, (resource, usage));
         self
     }
@@ -107,13 +106,15 @@ impl Pass {
     /// 
     /// # Arguments
     /// 
-    /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
-    pub fn input(&self, name : &'static str) -> ResourceID {
-        match self.resources.get(name) {
-            Some((resource, usage)) if *usage == ResourceUsage::ReadOnly || *usage == ResourceUsage::ReadWrite
-                => ResourceID::Virtual(self.id(), Box::new(resource.clone())),
-            _ => ResourceID::None,
-        }
+    /// * `name` - The name of the resource. Locally to the pass, this name must be unique.
+    pub fn input(&self, name : &'static str) -> Option<ResourceID> {
+        self.resources.get(name).and_then(|(resource, usage)| {
+            if *usage == ResourceUsage::ReadOnly || *usage == ResourceUsage::ReadWrite {
+                Some(ResourceID::Virtual(self.id(), Box::new(resource.clone())))
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the [`ResourceID`] of an output identified by its name .The returned resource id is
@@ -121,13 +122,15 @@ impl Pass {
     /// 
     /// # Arguments
     /// 
-    /// * `name` - The name of the input resource. Locally to the pass, this name must be unique.
-    pub fn output(&self, name : &'static str) -> ResourceID {
-        match self.resources.get(name) {
-            Some((resource, usage)) if *usage == ResourceUsage::WriteOnly || *usage == ResourceUsage::ReadWrite
-                => ResourceID::Virtual(self.id(), Box::new(resource.clone())),
-            _ => ResourceID::None,
-        }
+    /// * `name` - The name of the resource. Locally to the pass, this name must be unique.
+    pub fn output(&self, name : &'static str) -> Option<ResourceID> {
+        self.resources.get(name).and_then(|(resource, usage)| {
+            if *usage == ResourceUsage::WriteOnly || *usage == ResourceUsage::ReadWrite {
+                Some(ResourceID::Virtual(self.id(), Box::new(resource.clone())))
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns all the inputs of this pass.
@@ -171,17 +174,12 @@ impl PassID {
     /// Retrieves the actual pass from the graph.
     pub fn get(self, graph : &Graph) -> Option<&Pass> { graph.find_pass(self) }
     
-    pub fn input(&self, graph : &Graph, name : &'static str) -> ResourceID {
-        self.get(graph).map(|pass| pass.input(name)).unwrap_or(ResourceID::None)
+    pub fn input(&self, graph : &Graph, name : &'static str) -> Option<ResourceID> {
+        self.get(graph).and_then(|pass| pass.input(name))
     }
 
-    pub fn output(&self, graph: &Graph, name : &'static str) -> ResourceID {
-        self.get(graph).map(|pass| pass.output(name)).unwrap_or(ResourceID::None)
-    }
-
-    #[deprecated = "May be removed, usage is absurd"]
-    pub fn sequencing_point(&self) -> ResourceID {
-        ResourceID::Virtual(self.clone(), Box::new(ResourceID::None))
+    pub fn output(&self, graph: &Graph, name : &'static str) -> Option<ResourceID> {
+        self.get(graph).and_then(|pass| pass.output(name))
     }
 }
 

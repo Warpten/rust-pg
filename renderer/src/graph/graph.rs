@@ -81,7 +81,6 @@ impl Graph {
 
             for pass in topological_sequence {
                 for input in pass.inputs() {
-                    
                     // Recursively look for the physical resource
                     let mut drilled_input = input;
                     while let ResourceID::Virtual(_, resource_id) = drilled_input {

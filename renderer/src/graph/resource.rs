@@ -62,8 +62,7 @@ pub enum ResourceID {
     Texture(TextureID),
     Buffer(BufferID),
     
-    Virtual(PassID, Box<ResourceID>),
-    None
+    Virtual(PassID, Box<ResourceID>)
 }
 
 impl From<ResourceID> for Identifier {
@@ -72,7 +71,6 @@ impl From<ResourceID> for Identifier {
             ResourceID::Texture(texture) => Identifier::from(texture),
             ResourceID::Buffer(buffer) => Identifier::from(buffer),
             ResourceID::Virtual(_, resource) => Identifier::from(*resource),
-            ResourceID::None => Identifier::Numeric(usize::MAX),
         }
     }
 }
