@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::hint;
 use crate::graph::attachment::{AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{BufferID, BufferOptions};
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
-use crate::graph::resource::{Identifiable, ResourceID, ResourceAccessFlags};
+use crate::graph::resource::{Identifiable, ResourceID, ResourceAccessFlags, ResourceOptions};
 use crate::graph::texture::{TextureID, TextureOptions};
 
 pub struct Pass {
@@ -15,8 +16,6 @@ pub struct Pass {
     pub(in crate) textures    : HashMap<TextureID, TextureOptions>,
     pub(in crate) buffers     : HashMap<BufferID, BufferOptions>,
     pub(in crate) attachments : HashMap<AttachmentID, AttachmentOptions>,
-
-    resources   : HashMap<ResourceID, ResourceAccessFlags>,
 }
 
 impl Pass {
@@ -27,7 +26,6 @@ impl Pass {
 
             resource_names : Default::default(),
 
-            resources   : Default::default(),
             textures    : Default::default(),
             buffers     : Default::default(),
             attachments : Default::default(),
@@ -40,25 +38,23 @@ impl Pass {
     ///
     /// * `name` - The name of this resource.
     /// * `resource` - The identifier of the [`Texture`] to add.
-    /// * `access_flags` - A set of flags indicating how this texture is used.
     /// * `options` - Options associated with the texture.
     ///
     /// # Panics
     ///
     /// * Panics if `name` is not unique for this pass.
     /// * Panics if `resource` does not end up referencing a [`Texture`].
-    pub fn add_texture(mut self, name : &'static str, resource : &ResourceID, access_flags : ResourceAccessFlags, options : TextureOptions) -> Self
+    pub fn add_texture(mut self, name : &'static str, resource : &ResourceID, options : TextureOptions) -> Self
     {
         if let ResourceID::Texture(texture) = resource.devirtualize() {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
-            self.resources.insert(resource.clone(), access_flags);
 
             self.textures.insert(*texture, options);
             self
         } else {
-            panic!("The provided resource identifier is not a resource")
+            panic!("The provided resource identifier is not a texture")
         }
     }
 
@@ -68,24 +64,22 @@ impl Pass {
     ///
     /// * `name` - The name of this resource.
     /// * `resource` - The identifier of the [`Buffer`] to add.
-    /// * `access_flags` - A set of flags indicating how this buffer is used.
     /// * `options` - Options associated with the buffer.
     ///
     /// # Panics
     ///
     /// * Panics if `name` is not unique for this pass.
     /// * Panics if `resource` does not end up referencing a [`Buffer`].
-    pub fn add_buffer(mut self, name : &'static str, resource : ResourceID, access_flags : ResourceAccessFlags, options : BufferOptions) -> Self {
+    pub fn add_buffer(mut self, name : &'static str, resource : ResourceID, options : BufferOptions) -> Self {
         if let ResourceID::Buffer(buffer) = resource.devirtualize() {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
-            self.resources.insert(resource.clone(), access_flags);
             
             self.buffers.insert(*buffer, options);
             self
         } else {
-            panic!("The provided resource identifier is not a resource")
+            panic!("The provided resource identifier is not a buffer")
         }
     }
 
@@ -102,17 +96,16 @@ impl Pass {
     ///
     /// * Panics if `name` is not unique for this pass.
     /// * Panics if `resource` does not end up referencing a [`Attachment`].
-    pub fn add_attachment(mut self, name : &'static str, resource : &ResourceID, access_flags : ResourceAccessFlags, options : AttachmentOptions) -> Self {
+    pub fn add_attachment(mut self, name : &'static str, resource : &ResourceID, options : AttachmentOptions) -> Self {
         if let ResourceID::Attachment(attachment) = resource.devirtualize() {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
-            self.resources.insert(resource.clone(), access_flags);
 
             self.attachments.insert(*attachment, options);
             self
         } else {
-            panic!("The provided resource identifier is not a resource")
+            panic!("The provided resource identifier is not an attachment")
         }
     }
 
@@ -177,10 +170,26 @@ impl Pass {
         })
     }
 
-    pub(in crate) fn inputs(&self) -> Vec<&ResourceID> {
-        self.resources.iter().filter(|(res, flags)| flags.contains(ResourceAccessFlags::Read))
-            .map(|(k, v)| k)
-            .collect()
+    pub(in crate) fn inputs(&self) -> impl Iterator<Item = &ResourceID> {
+        self.get_resources(ResourceAccessFlags::Read)
+    }
+    
+    pub(in crate) fn outputs(&self) -> impl Iterator<Item = &ResourceID> {
+        self.get_resources(ResourceAccessFlags::Write)
+    }
+    
+    fn get_resources(&self, flags : ResourceAccessFlags) -> impl Iterator<Item = &ResourceID> {
+        self.resource_names.values().filter(move |resource_name| {
+            let physical_resource = resource_name.devirtualize();
+            let options : &dyn ResourceOptions = match physical_resource {
+                ResourceID::Texture(texture) => self.textures.get(texture).unwrap(),
+                ResourceID::Buffer(buffer) => self.buffers.get(buffer).unwrap(),
+                ResourceID::Attachment(attachment) => self.attachments.get(attachment).unwrap(),
+                _ => unreachable!("Unreachable unless devirtualize fails"),
+            };
+
+            options.access_flags().contains(flags)
+        })
     }
 }
 

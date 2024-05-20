@@ -25,20 +25,18 @@ impl Graph {
         let topology = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
-                // Find all the inputs of this pass, and update the edges of the source with this pass
-                for input in pass.inputs().iter() {
-                    if let ResourceID::Virtual(incoming_edge, _) = input {
-                        sorter = sorter.add_edge(*incoming_edge, pass.id());
+                for resource in pass.inputs() {
+                    if let ResourceID::Virtual(resource, _) = resource {
+                        sorter = sorter.add_edge(*resource, pass.id());
                     }
                 }
             }
 
             match sorter.sort_kahn() {
                 Ok(sorted) => {
-                    let mut topology = sorted.iter()
+                    sorted.iter()
                         .map(|id| id.get(self))
-                        .collect::<Vec<_>>(); 
-                    self.reorder(topology)
+                        .collect::<Vec<_>>()
                 },
                 Err(_) => panic!("Cyclic graph detected"),
             }
@@ -46,8 +44,8 @@ impl Graph {
 
         // Walk the topology.
         for pass in topology {
-            for input in pass.inputs() {
-                let physical_resource = input.devirtualize();
+            for resource in pass.inputs() {
+                let physical_resource = resource.devirtualize();
                 match physical_resource {
                     ResourceID::Texture(texture) => {
                         let options = texture.get_options(pass);
@@ -65,12 +63,6 @@ impl Graph {
                 };
             }
         }
-    }
-
-    fn reorder<'a>(&'a self, mut topology : Vec<&'a Pass>) -> Vec<&'a Pass> {
-        // TODO: The whole point of this is to reorder passes that don't depend on each other
-        //       to reduce the amount of time spent stalling.
-        topology
     }
 
     pub fn find_texture(&self, texture : TextureID) -> Option<&Texture> { self.textures.find(texture) }
@@ -118,7 +110,7 @@ impl Default for Graph {
 mod tests {
     use crate::graph::attachment::Attachment;
     use crate::graph::pass::Pass;
-    use crate::graph::resource::{ResourceID, ResourceAccessFlags};
+    use crate::graph::resource::ResourceID;
     use crate::graph::texture::{Texture, TextureOptions};
 
     #[test]
@@ -132,14 +124,16 @@ mod tests {
             .register(&mut graph);
 
         let a = Pass::new("A")
-            .add_texture("A[1]", &ResourceID::Texture(tex), ResourceAccessFlags::Read | ResourceAccessFlags::Write, TextureOptions {
-                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT
+            .add_texture("A[1]", &ResourceID::Texture(tex), TextureOptions {
+                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                ..Default::default()
             })
             .register(&mut graph);
 
         let b = Pass::new("B")
-            .add_texture("B[1]", a.get(&graph).texture("A[1]").unwrap(), ResourceAccessFlags::Read, TextureOptions {
-                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT
+            .add_texture("B[1]", a.get(&graph).texture("A[1]").unwrap(), TextureOptions {
+                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                ..Default::default()
             })
             .register(&mut graph);
     }

@@ -1,7 +1,9 @@
+use std::default;
+
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceID};
+use crate::graph::resource::{Identifiable, ResourceID, ResourceOptions};
 use crate::graph::texture::TextureOptions;
 
 use super::resource::ResourceAccessFlags;
@@ -41,7 +43,7 @@ impl AttachmentID {
         graph.attachments.find(*self).unwrap()
     }
 
-    pub fn get_options(&self, pass : &Pass) -> &AttachmentOptions {
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a AttachmentOptions {
         pass.attachments.get(self).unwrap()
     }
 }
@@ -62,12 +64,57 @@ impl Identifiable for Attachment {
 }
 
 pub struct AttachmentOptions {
-    pub load_op : ash::vk::AttachmentLoadOp,
-    pub store_op : ash::vk::AttachmentStoreOp,
+    pub load_operation : AttachmentLoadOperation,
+    pub store_operation : AttachmentStoreOperation,
+    pub initial_layout : ash::vk::ImageLayout,
+    pub final_layout : ash::vk::ImageLayout,
 }
 
-impl AttachmentOptions {
-    pub fn access_flags(&self) -> ResourceAccessFlags {
-        let flags = ResourceAccessFlags::none();
+impl ResourceOptions for AttachmentOptions {
+    fn access_flags(&self) -> ResourceAccessFlags {
+        let mut flags = ResourceAccessFlags::none();
+
+        match self.load_operation {
+            AttachmentLoadOperation::Load => flags = flags.and(ResourceAccessFlags::Read),
+            AttachmentLoadOperation::Clear(_) => flags = flags.and(ResourceAccessFlags::Write),
+            AttachmentLoadOperation::DontCare => (),
+        };
+
+        match self.store_operation {
+            AttachmentStoreOperation::Store => flags = flags.and(ResourceAccessFlags::Write),
+            AttachmentStoreOperation::DontCare => (),
+        };
+
+        flags
     }
+}
+
+impl Default for AttachmentOptions {
+    fn default() -> Self {
+        Self {
+            load_operation : Default::default(),
+            store_operation : Default::default(),
+            initial_layout : Default::default(),
+            final_layout : Default::default()
+        }
+    }
+}
+
+#[derive(Default)]
+pub enum AttachmentLoadOperation {
+    Load,
+    // TODO: The clear value is passed when VkCmdBeginRenderPass happens;
+    //       but if the framebuffer has multiple attachments, we need a clear
+    //       for all of them; do we abstract the framebuffer as multiple
+    //       attachments or treat it as a single one?
+    Clear(ash::vk::ClearValue),
+    #[default]
+    DontCare,
+}
+
+#[derive(Default)]
+pub enum AttachmentStoreOperation {
+    Store,
+    #[default]
+    DontCare,
 }

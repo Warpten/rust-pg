@@ -2,7 +2,7 @@ use crate::graph::attachment::AttachmentOptions;
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceID};
+use crate::graph::resource::{Identifiable, ResourceAccessFlags, ResourceID, ResourceOptions};
 
 pub struct Buffer {
     id   : BufferID,
@@ -39,7 +39,7 @@ impl BufferID {
         graph.buffers.find(*self).unwrap()
     }
 
-    pub fn get_options(&self, pass : &Pass) -> &BufferOptions {
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a BufferOptions {
         pass.buffers.get(self).unwrap()
     }
 }
@@ -60,3 +60,9 @@ impl Identifiable for Buffer {
 }
 
 pub struct BufferOptions { }
+
+impl ResourceOptions for BufferOptions {
+    fn access_flags(&self) -> ResourceAccessFlags {
+        todo!()
+    }
+}

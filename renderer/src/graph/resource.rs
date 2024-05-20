@@ -47,3 +47,7 @@ impl ResourceID {
         drill_res
     }
 }
+
+pub trait ResourceOptions {
+    fn access_flags(&self) -> ResourceAccessFlags;
+}

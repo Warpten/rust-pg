@@ -1,7 +1,7 @@
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceID};
+use crate::graph::resource::{Identifiable, ResourceAccessFlags, ResourceID, ResourceOptions};
 
 pub struct Texture {
     id   : TextureID,
@@ -46,7 +46,7 @@ impl TextureID {
         graph.textures.find(*self).unwrap()
     }
 
-    pub fn get_options(&self, pass : &Pass) -> &TextureOptions {
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a TextureOptions {
         pass.textures.get(self).unwrap()
     }
 }
@@ -66,6 +66,13 @@ impl Identifiable for Texture {
     fn name(&self) -> &'static str { self.name }
 }
 
+#[derive(Default)]
 pub struct TextureOptions {
     pub usage_flags : ash::vk::ImageUsageFlags,
+}
+
+impl ResourceOptions for TextureOptions {
+    fn access_flags(&self) -> ResourceAccessFlags {
+        todo!()
+    }
 }

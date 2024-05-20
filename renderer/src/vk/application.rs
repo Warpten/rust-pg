@@ -181,7 +181,10 @@ impl Application {
             .register(&mut graph);
 
         let a = Pass::new("A")
-            .add_texture("Foo", &ResourceID::Texture(r), ResourceAccessFlags::Read, TextureOptions { usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT });
+            .add_texture("Foo", &ResourceID::Texture(r), TextureOptions {
+                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                ..Default::default()
+            });
 
         // let r_ = a.input("Foo");
     }
