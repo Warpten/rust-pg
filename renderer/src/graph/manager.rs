@@ -1,79 +1,69 @@
 use std::collections::HashMap;
-
-pub trait Identifiable {
-    type Key : Into<Identifier>;
-
-    fn name(&self) -> &'static str;
-    fn id(&self) -> Self::Key;
-}
+use crate::graph::resource::Identifiable;
 
 pub struct Manager<T : Identifiable> {
     entries : Vec<T>,
-    name_map : HashMap<&'static str, usize>,
+    names : HashMap<&'static str, usize>,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-#[allow(dead_code)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Identifier {
     Numeric(usize),
     Named(&'static str),
-    None,
 }
 
 impl<T : Identifiable> Manager<T> {
-    pub fn find<K>(&self, key : K) -> Option<&T>
-        where K : From<T::Key>, Identifier : From<K>
+    pub(in crate) fn register<F>(&mut self, mut value : T, setter : F) -> &T
+        where F : FnOnce(&mut T, usize)
     {
-        let identifier = Identifier::from(key);
-
-        match identifier {
-            Identifier::Numeric(index) => self.entries.get(index),
-            Identifier::Named(name) => self.name_map.get(name).and_then(|&index| self.entries.get(index)),
-            Identifier::None => None,
-        }
-    }
-
-    pub(in super) fn find_mut<K>(&mut self, key : K) -> Option<&mut T>
-        where K : From<T::Key>, Identifier : From<K>
-    {
-        match Identifier::from(key) {
-            Identifier::Numeric(index) => self.entries.get_mut(index),
-            Identifier::Named(name) => self.name_map.get(name).and_then(|&index| self.entries.get_mut(index)),
-            Identifier::None => None,
-        }
-    }
-
-    pub fn len(&self) -> usize { self.entries.len() }
-
-    pub fn iter(&self) -> std::slice::Iter<T> {
-        self.entries.iter()
-    }
-
-    pub(in super) fn register<F>(&mut self, mut entry : T, id_setter : F) -> &T
-        where F : Fn(&mut T, usize)
-    {
-        match self.name_map.get(entry.name()) {
+        match self.names.get(value.name()) {
             Some(_) => panic!("An object with this name already exists"),
             None => {
                 let index = self.entries.len();
-                id_setter(&mut entry, index);
+                setter(&mut value, index);
 
-                self.name_map.insert(entry.name(), index);
-                self.entries.push(entry);
+                self.names.insert(value.name(), index);
+                self.entries.push(value);
 
                 &self.entries[index]
             }
         }
     }
+}
+
+impl<T : Identifiable> Manager<T> {
+    pub fn find<I>(&self, identifier : I) -> Option<&T>
+        where I : Into<Identifier>
+    {
+        match identifier.into() {
+            Identifier::Numeric(index) => self.entries.get(index),
+            Identifier::Named(name) => {
+                self.names.get(name)
+                    .and_then(|idx| self.entries.get(*idx))
+            }
+        }
+    }
+
+    pub(in crate) fn find_mut<I>(&mut self, identifier : I) -> Option<&mut T>
+        where  I : Into<Identifier>
+    {
+        match identifier.into() {
+            Identifier::Numeric(index) => self.entries.get_mut(index),
+            Identifier::Named(name) => {
+                self.names.get(name)
+                    .and_then(|idx| self.entries.get_mut(*idx))
+            }
+        }
+    }
 
     pub fn clear(&mut self) {
+        self.names.clear();
         self.entries.clear();
-        self.name_map.clear();
     }
 }
 
 impl<T : Identifiable> Default for Manager<T> {
     fn default() -> Self {
-        Self { entries: vec![], name_map: Default::default() }
+        Self { entries : vec![], names : HashMap::default() }
     }
 }

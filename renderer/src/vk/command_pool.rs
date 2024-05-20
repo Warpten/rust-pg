@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{traits::{BorrowHandle, Handle}, QueueFamily};
+use crate::{traits::handle::{BorrowHandle, Handle}, vk::QueueFamily};
 
 use super::LogicalDevice;
 
@@ -33,7 +33,8 @@ impl CommandPool {
     /// * `flags` - A bitmask controlling the reset operation.
     /// 
     /// # Description
-    /// Resetting a command pool recycles all of the resources from all of the command buffers allocated from
+    ///
+    /// Resetting a command pool recycles all the resources from all the command buffers allocated from
     /// the command pool back to the command pool. All command buffers that have been allocated from the
     /// command pool are put in the initial state.
     /// 

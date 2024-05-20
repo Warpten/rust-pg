@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
-use crate::{traits::BorrowHandle, LogicalDevice};
+use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
 
 pub struct Image {
     device : Arc<LogicalDevice>,

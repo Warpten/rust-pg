@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::{renderer::{Renderer, RendererOptions}, Window};
+use crate::{graph::{Graph, pass::Pass, resource::{ResourceAccessFlags, ResourceID}, texture::{Texture, TextureOptions}}, vk::{renderer::{Renderer, RendererOptions}, Window}};
 
 #[derive(Debug)]
 pub struct ApplicationOptions {
@@ -14,7 +14,6 @@ impl Default for ApplicationOptions {
     fn default() -> Self {
         Self {
             renderer: Default::default(),
-
             title: "WorldEdit".to_owned(),
         }
     }
@@ -176,6 +175,14 @@ impl Application {
     }
 
     pub fn recreate_swapchain(&mut self) {
+        let mut graph = Graph::default();
 
+        let r = Texture::new("Texture", 1, 1, ash::vk::Format::A2B10G10R10_UNORM_PACK32)
+            .register(&mut graph);
+
+        let a = Pass::new("A")
+            .add_texture("Foo", &ResourceID::Texture(r), ResourceAccessFlags::Read, TextureOptions { usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT });
+
+        // let r_ = a.input("Foo");
     }
 }

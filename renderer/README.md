@@ -37,7 +37,7 @@ let pass_a : &Pass = graph.find_pass(a).unwrap();
 let a_inputs : Vec<ResourceID> = pass_a.inputs();
 ```
 
-In the example above (wether or not it makes sense is another topic I will not cover), `a_inputs` will contain a single `ResourceID` that
+In the example above (whether it makes sense is another topic I will not cover), `a_inputs` will contain a single `ResourceID` that
 will conceptually be equal to `ResourceID::Virtual(a, framebuffer)`. It can then be used as the input for another pass:
 
 ```rust

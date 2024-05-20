@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::traits::BorrowHandle;
-use crate::traits::Handle;
-use crate::Window;
-use crate::Context;
+use crate::traits::handle::BorrowHandle;
+use crate::traits::handle::Handle;
+use crate::vk::Window;
+use crate::vk::Context;
 
 pub struct Surface {
     context : Arc<Context>,

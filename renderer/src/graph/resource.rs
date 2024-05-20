@@ -1,85 +1,49 @@
 use bitmask_enum::bitmask;
+use crate::graph::attachment::{Attachment, AttachmentID};
+use crate::graph::buffer::{Buffer, BufferID};
+use crate::graph::manager::Identifier;
+use crate::graph::pass::PassID;
+use crate::graph::texture::{Texture, TextureID};
 
-use super::{buffer::{Buffer, BufferID}, manager::{Identifiable, Identifier}, pass::PassID, texture::{Texture, TextureID}};
+
+pub trait Identifiable {
+    /// The type of the identifier associated with this resource.
+    type IdentifierType : Into<Identifier>;
+
+    fn id(&self) -> Self::IdentifierType;
+    fn name(&self) -> &'static str;
+}
 
 #[bitmask(u8)]
 pub enum ResourceAccessFlags {
-    Read = 0x01,
-    Write = 0x02
+    /// This resource is read from.
+    Read,
+    /// This resource is written to.
+    Write
 }
 
-pub enum Resource {
-    Texture(Texture),
-    Buffer(Buffer),
+pub enum Resource<'a> {
+    Buffer(&'a Buffer),
+    Texture(&'a Texture),
+    Attachment(&'a Attachment),
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
-pub enum ResourceUsage {
-    ReadOnly = 0x01,
-    WriteOnly = 0x02,
-    ReadWrite = 0x04,
-}
 
-impl Resource {
-    pub fn register_reader(&mut self, pass_id : PassID) {
-        match self {
-            Resource::Texture(texture) => texture.register_reader(pass_id),
-            Resource::Buffer(buffer) => buffer.register_reader(pass_id),
-        }
-    }
-    pub fn register_writer(&mut self, pass_id : PassID) {
-        match self {
-            Resource::Texture(texture) => texture.register_writer(pass_id),
-            Resource::Buffer(buffer) => buffer.register_writer(pass_id),
-        }
-    }
-}
-
-impl Identifiable for Resource {
-    type Key = ResourceID;
-
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Texture(value) => value.name(),
-            Self::Buffer(value) => value.name(),
-        }
-    }
-
-    fn id(&self) -> ResourceID {
-        match self {
-            Self::Texture(value) => value.id().into(),
-            Self::Buffer(value) => value.id().into(),
-        }
-    }
-}
-
-/// Encapsulates varying types of resource.
-/// 
-/// Note that this cannot implement [`Copy`] because the [`ResourceID::Virtual`] variant is
-/// recursive and needs an indirection that is not [`Copy`]able.
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ResourceID {
     Texture(TextureID),
     Buffer(BufferID),
-    
+    Attachment(AttachmentID),
     Virtual(PassID, Box<ResourceID>)
 }
 
-impl From<ResourceID> for Identifier {
-    fn from(value: ResourceID) -> Self {
-        match value {
-            ResourceID::Texture(texture) => Identifier::from(texture),
-            ResourceID::Buffer(buffer) => Identifier::from(buffer),
-            ResourceID::Virtual(_, resource) => Identifier::from(*resource),
+impl ResourceID {
+    pub fn devirtualize(&self) -> &ResourceID {
+        let mut drill_res : &ResourceID = self;
+        while let ResourceID::Virtual(_, res) = drill_res {
+            drill_res = &**res;
         }
+
+        drill_res
     }
 }
-
-impl From<TextureID> for ResourceID {
-    fn from(val: TextureID) -> Self { ResourceID::Texture(val) }
-}
-
-impl From<BufferID> for ResourceID {
-    fn from(val: BufferID) -> Self { ResourceID::Buffer(val) }
-}
-

@@ -1,40 +1,56 @@
-use super::{manager::{Identifiable, Identifier}, pass::PassID, resource::ResourceID};
+use crate::graph::Graph;
+use crate::graph::manager::Identifier;
+use crate::graph::resource::{Identifiable, ResourceID};
 
 pub struct Buffer {
-    readers : Vec<PassID>,
-    writers : Vec<PassID>,
+    id   : BufferID,
+    name : &'static str,
 }
 
 impl Buffer {
-    pub(in super) fn register_reader(&mut self, pass_id : PassID) {
-        self.readers.push(pass_id);
+    pub fn new(name : &'static str) -> Self {
+        Self {
+            id : BufferID(usize::MAX),
+            name
+        }
     }
 
-    pub(in super) fn register_writer(&mut self, pass_id : PassID) {
-        self.writers.push(pass_id);
+    /// Registers this pass on the given graph.
+    ///
+    /// # Arguments
+    ///
+    /// * `graph` - The graph on which to register.
+    pub fn register(self, graph : &mut Graph) -> BufferID {
+        let registered_self = graph.buffers.register(self, |instance, id| instance.id = BufferID(id));
+
+        assert_ne!(registered_self.id(), BufferID(usize::MAX));
+
+        registered_self.id()
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct BufferID(pub(in super) Identifier);
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct BufferID(usize);
 
 impl BufferID {
-    pub fn to_resource(&self) -> ResourceID {
-        ResourceID::Buffer(*self)
+    pub fn get<'a>(&self, graph : &'a Graph) -> &'a Buffer {
+        graph.buffers.find(*self).unwrap()
     }
 }
 
-impl nohash_hasher::IsEnabled for BufferID { }
+impl Into<ResourceID> for BufferID {
+    fn into(self) -> ResourceID { ResourceID::Buffer(self) }
+}
 
-impl From<BufferID> for Identifier {
-    fn from(value: BufferID) -> Self { value.0 }
+impl Into<Identifier> for BufferID {
+    fn into(self) -> Identifier { Identifier::Numeric(self.0) }
 }
 
 impl Identifiable for Buffer {
-    type Key = BufferID;
+    type IdentifierType = BufferID;
 
-    fn name(&self) -> &'static str { todo!() }
-    fn id(&self) -> BufferID { todo!() }
+    fn id(&self) -> Self::IdentifierType { self.id }
+    fn name(&self) -> &'static str { self.name }
 }
 
-pub struct BufferUsage;
+pub struct BufferOptions { }

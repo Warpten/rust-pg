@@ -6,15 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui = { version = "0.27.2", features = ["callstack", "default", "extra_debug_asserts", "log"] }
-egui-winit = "0.27.2"
-anyhow = "1.0.82"
+egui = { workspace = true }
+egui-winit = { workspace = true }
+anyhow = { workspace = true }
 # gpu-allocator = { version = "0.27.0", default-features = false, features = ["vulkan"] }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan"] }
-ash = { version = "0.38.0", default-features = false, features = ["loaded", "debug"] }
+ash = { workspace = true }
 ash-window = "0.13.0"
 raw-window-handle = "0.6.1"
-derive-getters = "0.3.0"
-bitmask-enum = "2.2.3"
+derive-getters = { workspace = true }
+bitmask-enum = { workspace = true }
 shaderc = "0.8.3"
-nohash-hasher = "0.2.0"
+nohash-hasher = { workspace = true }

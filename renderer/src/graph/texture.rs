@@ -1,86 +1,66 @@
-use std::hint;
+use crate::graph::Graph;
+use crate::graph::manager::Identifier;
+use crate::graph::resource::{Identifiable, ResourceID};
 
-use super::{manager::{Identifiable, Identifier}, pass::PassID, resource::{Resource, ResourceAccessFlags, ResourceID}, Graph};
-
-/// Models a texture resource.
 pub struct Texture {
-    pub(in self) id : TextureID,
+    id   : TextureID,
     name : &'static str,
 
-    format : ash::vk::Format,
     levels : u32,
     layers : u32,
-
-    readers : Vec<PassID>,
-    writers : Vec<PassID>,
-}
-
-impl Identifiable for Texture {
-    fn name(&self) -> &'static str { self.name }
-    fn id(&self) -> TextureID { self.id }
-    
-    type Key = TextureID;
+    format : ash::vk::Format,
 }
 
 impl Texture {
-    pub fn new(name : &'static str, levels : u32, layers : u32, format : ash::vk::Format) -> Self {
+    pub fn new(name : &'static str, levels : u32, layers : u32, format : ash::vk::Format) -> Texture {
         Self {
             name,
-            id : TextureID(Identifier::None), 
-            
+            id : TextureID(usize::MAX),
+
             levels,
             layers,
-            format,
-
-            readers : vec![],
-            writers : vec![],
+            format
         }
     }
 
-    pub fn format(&self) -> ash::vk::Format { self.format }
-    pub fn levels(&self) -> u32 { self.levels }
-    pub fn layers(&self) -> u32 { self.layers }
+    /// Registers this attachment on the given graph.
+    ///
+    /// # Arguments
+    ///
+    /// * `graph` - The graph on which to register.
+    pub fn register(mut self, graph : &mut Graph) -> TextureID {
+        let registered_self = graph.textures.register(self, |instance, id| instance.id = TextureID(id));
 
-    pub fn readers(&self) -> &Vec<PassID> { &self.readers }
-    pub fn writers(&self) -> &Vec<PassID> { &self.writers }
+        assert_ne!(registered_self.id(), TextureID(usize::MAX));
 
-    pub fn register(self, manager : &mut Graph) -> ResourceID {
-        let texture = Resource::Texture(self);
-
-        manager.resources.register(texture, |instance, id| {
-            match instance {
-                Resource::Texture(texture) => texture.id = TextureID(Identifier::Numeric(id)),
-                _ => unsafe { hint::unreachable_unchecked() }
-            };
-        }).id()
-    }
-
-    pub(in super) fn register_reader(&mut self, pass_id : PassID) {
-        self.readers.push(pass_id);
-    }
-
-    pub(in super) fn register_writer(&mut self, pass_id : PassID) {
-        self.writers.push(pass_id);
+        registered_self.id()
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct TextureID(pub(in super) Identifier);
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct TextureID(usize);
 
 impl TextureID {
-    pub fn to_resource(&self) -> ResourceID {
-        ResourceID::Texture(*self)
+    pub fn get<'a>(&self, graph : &'a Graph) -> &'a Texture {
+        graph.textures.find(*self).unwrap()
     }
 }
 
-impl From<TextureID> for Identifier {
-    fn from(value: TextureID) -> Self { value.0 }
+impl Into<ResourceID> for TextureID {
+    fn into(self) -> ResourceID { ResourceID::Texture(self) }
 }
 
-impl nohash_hasher::IsEnabled for TextureID { }
+impl Into<Identifier> for TextureID {
+    fn into(self) -> Identifier { Identifier::Numeric(self.0) }
+}
 
-#[derive(Clone)]
-pub struct TextureUsage {
-    pub access_flags : ResourceAccessFlags,
-    pub usage_flags : ash::vk::ImageUsageFlags
+impl Identifiable for Texture {
+    type IdentifierType = TextureID;
+
+    fn id(&self) -> Self::IdentifierType { self.id }
+    fn name(&self) -> &'static str { self.name }
+}
+
+pub struct TextureOptions {
+    pub usage_flags : ash::vk::ImageUsageFlags,
 }

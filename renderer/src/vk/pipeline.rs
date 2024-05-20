@@ -1,10 +1,9 @@
 use std::{fs, marker::PhantomData, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
-use ash::vk;
 use gpu_allocator::vulkan::Allocator;
 use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
 
-use crate::{traits::BorrowHandle, Context, LogicalDevice};
+use crate::{traits::handle::BorrowHandle, vk::{Context, LogicalDevice}};
 
 pub struct Shader {
     device : Arc<LogicalDevice>,
@@ -108,7 +107,7 @@ pub struct PipelineInfo {
     front_face : ash::vk::FrontFace,
 
     specialization_data: Vec<u8>,
-    specialization_entries: Vec<vk::SpecializationMapEntry>,
+    specialization_entries: Vec<ash::vk::SpecializationMapEntry>,
 }
 
 pub struct DepthOptions {
@@ -160,17 +159,17 @@ impl DepthOptions {
 impl PipelineInfo {
     pub fn depth(&self) -> &DepthOptions { &self.depth }
 
-    pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
+    pub fn layout(mut self, layout : ash::vk::PipelineLayout) -> Self {
         self.layout = layout;
         self
     }
 
-    pub fn render_pass(mut self, render_pass: vk::RenderPass) -> Self {
+    pub fn render_pass(mut self, render_pass : ash::vk::RenderPass) -> Self {
         self.render_pass = Some(render_pass);
         self
     }
 
-    pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
+    pub fn add_shader(mut self, path : PathBuf, flags : ash::vk::ShaderStageFlags) -> Self {
         self.shaders.push((path, flags));
         self
     }

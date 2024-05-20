@@ -1,8 +1,8 @@
 use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
-use crate::traits::BorrowHandle;
+use crate::traits::handle::BorrowHandle;
 
-use super::PhysicalDevice;
+use crate::vk::PhysicalDevice;
 
 pub struct Context {
     entry : Arc<ash::Entry>,

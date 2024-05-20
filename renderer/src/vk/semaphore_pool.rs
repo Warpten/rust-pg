@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{traits::BorrowHandle, LogicalDevice};
+use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
 
 /// See <https://github.com/KhronosGroup/Vulkan-Samples/blob/master/framework/semaphore_pool.h>.
 pub struct SemaphorePool {
@@ -22,7 +22,7 @@ impl SemaphorePool {
         if self.active_count < self.handles.len() {
             let index = self.active_count;
             self.active_count = self.active_count + 1;
-            return self.handles[index];
+            self.handles[index]
         } else {
             unsafe {
                 let semaphore_create_info = ash::vk::SemaphoreCreateInfo::default();
@@ -33,7 +33,7 @@ impl SemaphorePool {
                     .expect("Failed to allocate a new semaphore");
 
                 self.handles.push(semaphore.clone());
-                return semaphore;
+                semaphore
             }
         }
     }

@@ -1,4 +1,4 @@
-use renderer::{renderer::{DynamicState, RendererOptions}, Application, ApplicationOptions, ApplicationRenderError};
+use renderer::vk::{renderer::{DynamicState, RendererOptions}, Application, ApplicationOptions, ApplicationRenderError};
 use winit::event::WindowEvent;
 
 mod casc;

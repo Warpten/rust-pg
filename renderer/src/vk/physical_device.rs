@@ -1,6 +1,6 @@
-use std::{cmp::min, collections::HashMap, ffi::CString, ops::{Index, Range}, sync::{Arc, Weak}};
+use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
-use crate::{traits::{BorrowHandle, Handle}, IndexingFeatures};
+use crate::{traits::handle::{BorrowHandle, Handle}, vk::IndexingFeatures};
 
 use super::{QueueFamily, Context, LogicalDevice, Queue};
 

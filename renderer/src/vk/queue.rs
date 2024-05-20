@@ -2,7 +2,7 @@ use std::{hash::Hash, sync::Arc};
 
 use bitmask_enum::bitmask;
 
-use crate::{traits::{BorrowHandle, Handle}, CommandPool, LogicalDevice, PhysicalDevice, Surface};
+use crate::{traits::handle::Handle, vk::{CommandPool, LogicalDevice, PhysicalDevice, Surface}};
 
 /// A logical queue associated with a logical device.
 pub struct Queue {
@@ -24,7 +24,7 @@ impl Queue {
             index,
             family : *family,
             handle : unsafe {
-                device.get_device_queue(family.index as u32, index)
+                device.get_device_queue(family.index, index)
             }
         }
     }
@@ -113,7 +113,7 @@ impl QueueFamily {
         unsafe {
             surface.loader.get_physical_device_surface_support(
                 device.handle(),
-                self.index as u32,
+                self.index,
                 surface.handle()
             ).expect("Failed to get physical device surface support")
         }

@@ -1,7 +1,7 @@
 use egui_winit::winit::{self, event_loop::EventLoop, window::WindowBuilder};
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
-use crate::ApplicationOptions;
+use crate::vk::ApplicationOptions;
 
 pub struct Window {
     handle : winit::window::Window,

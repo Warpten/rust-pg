@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{traits::{BorrowHandle, Handle}, LogicalDevice, RenderPass};
+use crate::{traits::handle::{BorrowHandle, Handle}, vk::{LogicalDevice, RenderPass}};
 
 // This whole file needs cleaning
 // - Device should be Arc<LogicalDevice> and stored

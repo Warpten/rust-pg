@@ -121,8 +121,8 @@ impl Encoding {
         }
 
         Ok(Encoding {
-            especs : especs,
-            content_map : content_map,
+            especs,
+            content_map,
             encoding_map : HashMap::new(),
             espec : "".to_string()
         })

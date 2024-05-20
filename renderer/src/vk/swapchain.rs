@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, ops::Range, slice::Iter, sync::Arc};
 
-use crate::{queue, traits::{BorrowHandle, Handle}, Framebuffer, Image, RenderPass};
+use crate::{traits::handle::{BorrowHandle, Handle}, vk::{Framebuffer, Image, RenderPass}};
 
 use super::{Context, LogicalDevice, QueueFamily, Surface};
 

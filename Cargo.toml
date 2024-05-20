@@ -2,6 +2,15 @@
 resolver = "2"
 
 members = [
-    "renderer", "scratch",
+    "renderer",
     "wowedit"
 ]
+
+[workspace.dependencies]
+egui = { version = "0.27.2", features = ["callstack", "default", "extra_debug_asserts", "log"] }
+egui-winit = "0.27.2"
+anyhow = "1.0.82"
+ash = { version = "0.38.0", default-features = false, features = ["loaded", "debug"] }
+derive-getters = "0.3.0"
+bitmask-enum = "2.2.3"
+nohash-hasher = "0.2.0"
