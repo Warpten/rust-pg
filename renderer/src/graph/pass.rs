@@ -12,9 +12,9 @@ pub struct Pass {
 
     resource_names : HashMap<&'static str, ResourceID>,
 
-    textures    : HashMap<TextureID, TextureOptions>,
-    buffers     : HashMap<BufferID, BufferOptions>,
-    attachments : HashMap<AttachmentID, AttachmentOptions>,
+    pub(in crate) textures    : HashMap<TextureID, TextureOptions>,
+    pub(in crate) buffers     : HashMap<BufferID, BufferOptions>,
+    pub(in crate) attachments : HashMap<AttachmentID, AttachmentOptions>,
 
     resources   : HashMap<ResourceID, ResourceAccessFlags>,
 }
@@ -176,6 +176,12 @@ impl Pass {
             }
         })
     }
+
+    pub(in crate) fn inputs(&self) -> Vec<&ResourceID> {
+        self.resources.iter().filter(|(res, flags)| flags.contains(ResourceAccessFlags::Read))
+            .map(|(k, v)| k)
+            .collect()
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -197,3 +203,5 @@ impl Identifiable for Pass {
     fn id(&self) -> Self::IdentifierType { self.id }
     fn name(&self) -> &'static str { self.name }
 }
+
+impl nohash_hasher::IsEnabled for PassID { }

@@ -1,4 +1,4 @@
-use std::{collections::{hash_map::Entry, VecDeque}, hash::Hash};
+use std::{collections::{hash_map::Entry, HashSet, VecDeque}, hash::Hash};
 
 use nohash_hasher::{IntMap, IntSet};
 
@@ -9,7 +9,7 @@ pub enum Error {
 }
 
 pub struct TopologicalSorter<T : Ord + Eq + Copy + Hash + nohash_hasher::IsEnabled> {
-    _nodes : Vec<T>,
+    _nodes : HashSet<T>,
     _edges : IntMap<T, Vec<T>>,
 }
 
@@ -21,8 +21,16 @@ impl<T : Ord + Eq + Copy + Hash + nohash_hasher::IsEnabled> Default for Topologi
 
 impl<T : Ord + Eq + Copy + Hash + nohash_hasher::IsEnabled> TopologicalSorter<T> {
     pub fn add_node(mut self, node : T, edges : Vec<T>) -> Self {
-        self._nodes.push(node);
+        self._nodes.insert(node);
         self._edges.insert(node, edges);
+        self
+    }
+
+    pub fn add_edge(mut self, from : T, to : T) -> Self {
+        self._nodes.insert(from);
+        self._edges.entry(from)
+            .and_modify(|entry| entry.push(to))
+            .or_insert(vec![to]);
         self
     }
 

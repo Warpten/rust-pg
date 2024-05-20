@@ -1,5 +1,7 @@
+use crate::graph::attachment::AttachmentOptions;
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
+use crate::graph::pass::Pass;
 use crate::graph::resource::{Identifiable, ResourceID};
 
 pub struct Buffer {
@@ -35,6 +37,10 @@ pub struct BufferID(usize);
 impl BufferID {
     pub fn get<'a>(&self, graph : &'a Graph) -> &'a Buffer {
         graph.buffers.find(*self).unwrap()
+    }
+
+    pub fn get_options(&self, pass : &Pass) -> &BufferOptions {
+        pass.buffers.get(self).unwrap()
     }
 }
 

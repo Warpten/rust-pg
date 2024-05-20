@@ -1,6 +1,10 @@
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
+use crate::graph::pass::Pass;
 use crate::graph::resource::{Identifiable, ResourceID};
+use crate::graph::texture::TextureOptions;
+
+use super::resource::ResourceAccessFlags;
 
 pub struct Attachment {
     id   : AttachmentID,
@@ -36,6 +40,10 @@ impl AttachmentID {
     pub fn get<'a>(&self, graph : &'a Graph) -> &'a Attachment {
         graph.attachments.find(*self).unwrap()
     }
+
+    pub fn get_options(&self, pass : &Pass) -> &AttachmentOptions {
+        pass.attachments.get(self).unwrap()
+    }
 }
 
 impl Into<ResourceID> for AttachmentID {
@@ -53,4 +61,13 @@ impl Identifiable for Attachment {
     fn name(&self) -> &'static str { self.name }
 }
 
-pub struct AttachmentOptions { }
+pub struct AttachmentOptions {
+    pub load_op : ash::vk::AttachmentLoadOp,
+    pub store_op : ash::vk::AttachmentStoreOp,
+}
+
+impl AttachmentOptions {
+    pub fn access_flags(&self) -> ResourceAccessFlags {
+        let flags = ResourceAccessFlags::none();
+    }
+}

@@ -1,9 +1,10 @@
 use crate::graph::attachment::{Attachment, AttachmentID};
 use crate::graph::buffer::{Buffer, BufferID};
 use crate::graph::manager::Manager;
-use crate::graph::pass::Pass;
-use crate::graph::resource::{Resource, ResourceID};
+use crate::graph::pass::{Pass, PassID};
+use crate::graph::resource::{Identifiable, Resource, ResourceID};
 use crate::graph::texture::{Texture, TextureID};
+use crate::utils::topological_sort::TopologicalSorter;
 
 pub mod attachment;
 pub mod buffer;
@@ -21,7 +22,55 @@ pub struct Graph {
 
 impl Graph {
     pub fn build(&self) {
-        unimplemented!("Fix me")
+        let topology = {
+            let mut sorter = TopologicalSorter::<PassID>::default();
+            for pass in self.passes.iter() {
+                // Find all the inputs of this pass, and update the edges of the source with this pass
+                for input in pass.inputs().iter() {
+                    if let ResourceID::Virtual(incoming_edge, _) = input {
+                        sorter = sorter.add_edge(*incoming_edge, pass.id());
+                    }
+                }
+            }
+
+            match sorter.sort_kahn() {
+                Ok(sorted) => {
+                    let mut topology = sorted.iter()
+                        .map(|id| id.get(self))
+                        .collect::<Vec<_>>(); 
+                    self.reorder(topology)
+                },
+                Err(_) => panic!("Cyclic graph detected"),
+            }
+        };
+
+        // Walk the topology.
+        for pass in topology {
+            for input in pass.inputs() {
+                let physical_resource = input.devirtualize();
+                match physical_resource {
+                    ResourceID::Texture(texture) => {
+                        let options = texture.get_options(pass);
+                        let texture = texture.get(self);
+                    },
+                    ResourceID::Buffer(buffer) => {
+                        let options = buffer.get_options(pass);
+                        let buffer = buffer.get(self);
+                    },
+                    ResourceID::Attachment(attachment) => {
+                        let options = attachment.get_options(pass);
+                        let attachment = attachment.get(self);
+                    },
+                    _ => panic!("Unreachable code")
+                };
+            }
+        }
+    }
+
+    fn reorder<'a>(&'a self, mut topology : Vec<&'a Pass>) -> Vec<&'a Pass> {
+        // TODO: The whole point of this is to reorder passes that don't depend on each other
+        //       to reduce the amount of time spent stalling.
+        topology
     }
 
     pub fn find_texture(&self, texture : TextureID) -> Option<&Texture> { self.textures.find(texture) }

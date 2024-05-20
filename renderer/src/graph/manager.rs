@@ -29,6 +29,10 @@ impl<T : Identifiable> Manager<T> {
             }
         }
     }
+
+    pub(in crate) fn iter(&self) -> std::slice::Iter<T> {
+        self.entries.iter()
+    }
 }
 
 impl<T : Identifiable> Manager<T> {

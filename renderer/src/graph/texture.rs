@@ -1,5 +1,6 @@
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
+use crate::graph::pass::Pass;
 use crate::graph::resource::{Identifiable, ResourceID};
 
 pub struct Texture {
@@ -28,7 +29,7 @@ impl Texture {
     /// # Arguments
     ///
     /// * `graph` - The graph on which to register.
-    pub fn register(mut self, graph : &mut Graph) -> TextureID {
+    pub fn register(self, graph : &mut Graph) -> TextureID {
         let registered_self = graph.textures.register(self, |instance, id| instance.id = TextureID(id));
 
         assert_ne!(registered_self.id(), TextureID(usize::MAX));
@@ -43,6 +44,10 @@ pub struct TextureID(usize);
 impl TextureID {
     pub fn get<'a>(&self, graph : &'a Graph) -> &'a Texture {
         graph.textures.find(*self).unwrap()
+    }
+
+    pub fn get_options(&self, pass : &Pass) -> &TextureOptions {
+        pass.textures.get(self).unwrap()
     }
 }
 
