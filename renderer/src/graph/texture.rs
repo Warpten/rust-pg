@@ -46,8 +46,8 @@ impl TextureID {
         graph.textures.find(*self).unwrap()
     }
 
-    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a TextureOptions {
-        pass.textures.get(self).unwrap()
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a TextureOptions> {
+        pass.textures.get(self)
     }
 }
 

@@ -2,7 +2,7 @@ use bitmask_enum::bitmask;
 use crate::graph::attachment::{Attachment, AttachmentID};
 use crate::graph::buffer::{Buffer, BufferID};
 use crate::graph::manager::Identifier;
-use crate::graph::pass::PassID;
+use crate::graph::pass::{Pass, PassID};
 use crate::graph::texture::{Texture, TextureID};
 
 
@@ -45,6 +45,16 @@ impl ResourceID {
         }
 
         drill_res
+    }
+
+    pub fn get_options(&self, pass : &Pass) -> Option<&dyn ResourceOptions> {
+        let devirtualized = self.devirtualize();
+        match devirtualized {
+            ResourceID::Texture(texture) => texture.get_options(pass),
+            ResourceID::Buffer(buffer) => buffer.get_options(pass),
+            ResourceID::Attachment(attachment) => attachment.get_options(pass),
+            _ => unreachable!("Unreachable unless devirtualize fails")
+        }
     }
 }
 

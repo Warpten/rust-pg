@@ -39,7 +39,7 @@ impl BufferID {
         graph.buffers.find(*self).unwrap()
     }
 
-    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a BufferOptions {
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a BufferOptions> {
         pass.buffers.get(self).unwrap()
     }
 }

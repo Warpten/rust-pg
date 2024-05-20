@@ -48,15 +48,15 @@ impl Graph {
                 let physical_resource = resource.devirtualize();
                 match physical_resource {
                     ResourceID::Texture(texture) => {
-                        let options = texture.get_options(pass);
+                        let options = texture.get_options(pass).unwrap();
                         let texture = texture.get(self);
                     },
                     ResourceID::Buffer(buffer) => {
-                        let options = buffer.get_options(pass);
+                        let options = buffer.get_options(pass).unwrap();
                         let buffer = buffer.get(self);
                     },
                     ResourceID::Attachment(attachment) => {
-                        let options = attachment.get_options(pass);
+                        let options = attachment.get_options(pass).unwrap();
                         let attachment = attachment.get(self);
                     },
                     _ => panic!("Unreachable code")

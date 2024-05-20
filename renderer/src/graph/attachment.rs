@@ -43,8 +43,8 @@ impl AttachmentID {
         graph.attachments.find(*self).unwrap()
     }
 
-    pub fn get_options<'a>(&self, pass : &'a Pass) -> &'a AttachmentOptions {
-        pass.attachments.get(self).unwrap()
+    pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a AttachmentOptions> {
+        pass.attachments.get(self)
     }
 }
 
