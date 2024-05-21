@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::{LogicalDevice, Swapchain}};
+use crate::{traits::handle::{BorrowHandle, Handle}, vk::LogicalDevice};
 
 pub struct RenderPass {
     handle : ash::vk::RenderPass,

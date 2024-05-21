@@ -4,7 +4,7 @@ use crate::graph::attachment::{AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{BufferID, BufferOptions};
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
-use crate::graph::resource::{Identifiable, ResourceAccessFlags, ResourceID, ResourceOptions};
+use crate::graph::resource::{Identifiable, PhysicalResourceID, ResourceAccessFlags, ResourceID, ResourceOptions};
 use crate::graph::texture::{TextureID, TextureOptions};
 
 pub struct Pass {
@@ -46,7 +46,8 @@ impl Pass {
     /// * Panics if `resource` does not end up referencing a [`Texture`].
     pub fn add_texture(mut self, name : &'static str, resource : &ResourceID, options : TextureOptions) -> Self
     {
-        if let ResourceID::Texture(texture) = resource.devirtualize() {
+        let physical_texture = resource.devirtualize();
+        if let PhysicalResourceID::Texture(texture) = physical_texture {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
@@ -71,7 +72,8 @@ impl Pass {
     /// * Panics if `name` is not unique for this pass.
     /// * Panics if `resource` does not end up referencing a [`Buffer`].
     pub fn add_buffer(mut self, name : &'static str, resource : ResourceID, options : BufferOptions) -> Self {
-        if let ResourceID::Buffer(buffer) = resource.devirtualize() {
+        let physical_texture = resource.devirtualize();
+        if let PhysicalResourceID::Buffer(buffer) = physical_texture {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
@@ -97,7 +99,8 @@ impl Pass {
     /// * Panics if `name` is not unique for this pass.
     /// * Panics if `resource` does not end up referencing a [`Attachment`].
     pub fn add_attachment(mut self, name : &'static str, resource : &ResourceID, options : AttachmentOptions) -> Self {
-        if let ResourceID::Attachment(attachment) = resource.devirtualize() {
+        let physical_texture = resource.devirtualize();
+        if let PhysicalResourceID::Attachment(attachment) = physical_texture {
             assert!(!self.resource_names.contains_key(name), "A resource with this name already exists");
 
             self.resource_names.insert(name, resource.clone());
@@ -130,7 +133,7 @@ impl Pass {
     /// * `name` - The name of the texture.
     pub fn texture(&self, name : &'static str) -> Option<&ResourceID> {
         return self.resource_names.get(name).filter(|resource| {
-            if let ResourceID::Texture(_) = resource.devirtualize() {
+            if let PhysicalResourceID::Texture(_) = resource.devirtualize() {
                 true
             } else {
                 false
@@ -146,7 +149,7 @@ impl Pass {
     /// * `name` - The name of the buffer.
     pub fn buffer(&self, name : &'static str) -> Option<&ResourceID> {
         return self.resource_names.get(name).filter(|resource| {
-            if let ResourceID::Buffer(_) = resource.devirtualize() {
+            if let PhysicalResourceID::Buffer(_) = resource.devirtualize() {
                 true
             } else {
                 false
@@ -162,7 +165,7 @@ impl Pass {
     /// * `name` - The name of the attachment.
     pub fn attachment(&self, name : &'static str) -> Option<&ResourceID> {
         return self.resource_names.get(name).filter(|resource| {
-            if let ResourceID::Attachment(_) = resource.devirtualize() {
+            if let PhysicalResourceID::Attachment(_) = resource.devirtualize() {
                 true
             } else {
                 false
@@ -177,15 +180,18 @@ impl Pass {
     pub(in crate) fn outputs(&self) -> impl Iterator<Item = &ResourceID> {
         self.get_resources(ResourceAccessFlags::Write)
     }
+
+    pub(in crate) fn resources(&self) -> impl Iterator<Item = &ResourceID> {
+        self.resource_names.values()
+    }
     
     fn get_resources(&self, flags : ResourceAccessFlags) -> impl Iterator<Item = &ResourceID> {
         self.resource_names.values().filter(move |resource_name| {
             let physical_resource = resource_name.devirtualize();
             let options : &dyn ResourceOptions = match physical_resource {
-                ResourceID::Texture(texture) => self.textures.get(texture).unwrap(),
-                ResourceID::Buffer(buffer) => self.buffers.get(buffer).unwrap(),
-                ResourceID::Attachment(attachment) => self.attachments.get(attachment).unwrap(),
-                _ => unreachable!("Unreachable unless devirtualize fails"),
+                PhysicalResourceID::Texture(texture) => self.textures.get(texture).unwrap(),
+                PhysicalResourceID::Buffer(buffer) => self.buffers.get(buffer).unwrap(),
+                PhysicalResourceID::Attachment(attachment) => self.attachments.get(attachment).unwrap()
             };
 
             options.access_flags().contains(flags)

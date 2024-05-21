@@ -1,7 +1,7 @@
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceAccessFlags, ResourceID, ResourceOptions};
+use crate::graph::resource::{Identifiable, PhysicalResourceID, ResourceAccessFlags, ResourceID, ResourceOptions};
 
 pub struct Texture {
     id   : TextureID,
@@ -42,17 +42,47 @@ impl Texture {
 pub struct TextureID(usize);
 
 impl TextureID {
-    pub fn get<'a>(&self, graph : &'a Graph) -> &'a Texture {
-        graph.textures.find(*self).unwrap()
+    /// Returns the actual texture associated with this ID in the given graph.
+    ///
+    /// # Arguments
+    ///
+    /// * `graph` - The graph in which to search for the texture identified by this ID.
+    pub fn get<'a>(&self, graph : &'a Graph) -> Option<&'a Texture> {
+        graph.textures.find(*self)
     }
 
+    /// Returns the options of this texture in the given pass.
+    ///
+    /// # Arguments
+    ///
+    /// * `pass` - The pass in which to look for options.
     pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a TextureOptions> {
         pass.textures.get(self)
+    }
+
+    /// Returns a virtual resource ID associated with this texture and the given pass if
+    /// said pass has this resource as input.
+    ///
+    /// # Arguments
+    ///
+    /// * `pass` - The pass in which to search.
+    pub fn of_pass(&self, pass : &Pass) -> Option<ResourceID> {
+        pass.resources().find(move |res| {
+            if let ResourceID::Virtual(_, res) = res {
+                if let PhysicalResourceID::Texture(tex) = res {
+                    tex == self
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        }).cloned()
     }
 }
 
 impl Into<ResourceID> for TextureID {
-    fn into(self) -> ResourceID { ResourceID::Texture(self) }
+    fn into(self) -> ResourceID { ResourceID::Physical(PhysicalResourceID::Texture(self)) }
 }
 
 impl Into<Identifier> for TextureID {
@@ -69,6 +99,7 @@ impl Identifiable for Texture {
 #[derive(Default)]
 pub struct TextureOptions {
     pub usage_flags : ash::vk::ImageUsageFlags,
+    pub layout : Option<ash::vk::ImageLayout>,
 }
 
 impl ResourceOptions for TextureOptions {

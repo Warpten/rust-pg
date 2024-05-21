@@ -1,21 +1,27 @@
-use std::default;
-
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceID, ResourceOptions, ResourceAccessFlags};
+use crate::graph::resource::{Identifiable, ResourceID, ResourceOptions, ResourceAccessFlags, PhysicalResourceID};
 
 pub struct Attachment {
     id   : AttachmentID,
     name : &'static str,
+
+    samples : u32,
 }
 
 impl Attachment {
     pub fn new(name : &'static str) -> Self {
         Self {
             id : AttachmentID(usize::MAX),
-            name
+            name,
+            samples : 1,
         }
+    }
+
+    pub fn samples(mut self, samples : u32) -> Self {
+        self.samples = samples;
+        self
     }
 
     /// Registers this attachment on the given graph.
@@ -36,8 +42,8 @@ impl Attachment {
 pub struct AttachmentID(usize);
 
 impl AttachmentID {
-    pub fn get<'a>(&self, graph : &'a Graph) -> &'a Attachment {
-        graph.attachments.find(*self).unwrap()
+    pub fn get<'a>(&self, graph : &'a Graph) -> Option<&'a Attachment> {
+        graph.attachments.find(*self)
     }
 
     pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a AttachmentOptions> {
@@ -46,7 +52,7 @@ impl AttachmentID {
 }
 
 impl Into<ResourceID> for AttachmentID {
-    fn into(self) -> ResourceID { ResourceID::Attachment(self) }
+    fn into(self) -> ResourceID { ResourceID::Physical(PhysicalResourceID::Attachment(self)) }
 }
 
 impl Into<Identifier> for AttachmentID {

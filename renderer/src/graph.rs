@@ -1,10 +1,13 @@
-use crate::graph::attachment::{Attachment, AttachmentID};
-use crate::graph::buffer::{Buffer, BufferID};
+use std::sync::Arc;
+use crate::graph::attachment::{Attachment, AttachmentID, AttachmentOptions};
+use crate::graph::buffer::{Buffer, BufferID, BufferOptions};
 use crate::graph::manager::Manager;
 use crate::graph::pass::{Pass, PassID};
-use crate::graph::resource::{Identifiable, Resource, ResourceID};
-use crate::graph::texture::{Texture, TextureID};
+use crate::graph::resource::{Identifiable, PhysicalResourceID, Resource, ResourceID};
+use crate::graph::texture::{Texture, TextureID, TextureOptions};
+use crate::traits::handle::BorrowHandle;
 use crate::utils::topological_sort::TopologicalSorter;
+use crate::vk::{CommandPool, Image, LogicalDevice};
 
 pub mod attachment;
 pub mod buffer;
@@ -18,10 +21,15 @@ pub struct Graph {
     pub(in crate) textures : Manager<Texture>,
     pub(in crate) buffers : Manager<Buffer>,
     pub(in crate) attachments : Manager<Attachment>,
+
+    device : Arc<LogicalDevice>,
+    command_pool : CommandPool,
 }
 
+// Crate API
 impl Graph {
-    pub fn build(&self) {
+    /// Builds this graph into a render pass.
+    pub fn build(&mut self) {
         let topology = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
@@ -42,27 +50,70 @@ impl Graph {
             }
         };
 
-        // Walk the topology.
+        // Walk the topology and process resources
         for pass in topology {
-            for resource in pass.inputs() {
+            for resource in pass.resources() {
                 let physical_resource = resource.devirtualize();
                 match physical_resource {
-                    ResourceID::Texture(texture) => {
+                    PhysicalResourceID::Texture(texture) => {
                         let options = texture.get_options(pass).unwrap();
-                        let texture = texture.get(self);
+                        let texture = texture.get(self).unwrap();
+                        self.process_texture(pass, texture, options);
                     },
-                    ResourceID::Buffer(buffer) => {
+                    PhysicalResourceID::Buffer(buffer) => {
                         let options = buffer.get_options(pass).unwrap();
-                        let buffer = buffer.get(self);
+                        let buffer = buffer.get(self).unwrap();
+                        self.process_buffer(pass, buffer, options);
                     },
-                    ResourceID::Attachment(attachment) => {
+                    PhysicalResourceID::Attachment(attachment) => {
                         let options = attachment.get_options(pass).unwrap();
-                        let attachment = attachment.get(self);
-                    },
-                    _ => panic!("Unreachable code")
+                        let attachment = attachment.get(self).unwrap();
+                        self.process_attachment(pass, attachment, options);
+                    }
                 };
             }
         }
+    }
+
+    fn process_texture(&mut self, pass: &Pass, texture: &Texture, options: &TextureOptions) {
+        // TODO: this needs to persist across calls and is specific to the texture
+        let state = TextureState {
+            id: Default::default(),
+            layout: Default::default(),
+            command_buffer : self.command_pool.rent(ash::vk::CommandBufferLevel::SECONDARY, 1)[0],
+            // This one is tricky, this is where aliasing happens - we need a pool of images
+            // and their associated memory and rent/return from/to it.
+            handle : Default::default(),
+        };
+
+        // If a layout was requested and it differs from the current one, update the state and
+        // record a layout transition command.
+        if let Some(new_layout) = options.layout{
+            if new_layout != state.layout {
+                state.handle.layout_transition(state.command_buffer, state.layout, new_layout, 1);
+            }
+        }
+    }
+
+    fn process_buffer(&mut self, pass: &Pass, buffer: &Buffer, options: &BufferOptions) {}
+}
+
+// Public API
+impl Graph {
+    pub fn new(device : &Arc<LogicalDevice>) -> Self {
+        Self {
+            passes: Default::default(),
+            textures: Default::default(),
+            buffers: Default::default(),
+            attachments: Default::default(),
+
+            device : device.clone(),
+            command_pool : CommandPool::create(todo!(), device),
+        }
+    }
+
+    fn process_attachment(&mut self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {
+
     }
 
     pub fn find_texture(&self, texture : TextureID) -> Option<&Texture> { self.textures.find(texture) }
@@ -72,38 +123,31 @@ impl Graph {
     pub fn find_attachment(&self, attachment : AttachmentID) -> Option<&Attachment> { self.attachments.find(attachment) }
 
     pub fn find_resource<'a>(&'a self, resource : ResourceID) -> Option<Resource<'a>> {
-        match resource {
-            ResourceID::Texture(texture) => {
-                self.find_texture(texture).map(|tex : &'a Texture| {
+        match resource.devirtualize() {
+            PhysicalResourceID::Texture(texture) => {
+                self.find_texture(*texture).map(|tex : &'a Texture| {
                     Resource::Texture(tex)
                 })
             },
-            ResourceID::Buffer(buffer) => {
-                self.find_buffer(buffer).map(|buf : &'a Buffer| {
+            PhysicalResourceID::Buffer(buffer) => {
+                self.find_buffer(*buffer).map(|buf : &'a Buffer| {
                     Resource::Buffer(buf)
                 })
             },
-            ResourceID::Attachment(attachment) => {
-                self.find_attachment(attachment).map(|att : &'a Attachment| {
+            PhysicalResourceID::Attachment(attachment) => {
+                self.find_attachment(*attachment).map(|att : &'a Attachment| {
                     Resource::Attachment(att)
                 })
             }
-            ResourceID::Virtual(_, resource) => {
-                self.find_resource(*resource)
-            },
         }
     }
 }
 
-impl Default for Graph {
-    fn default() -> Self {
-        Self {
-            passes : Default::default(),
-            textures : Default::default(),
-            buffers : Default::default(),
-            attachments : Default::default(),
-        }
-    }
+struct TextureState {
+    pub id : TextureID,
+    pub layout : ash::vk::ImageLayout,
+    pub command_buffer : ash::vk::CommandBuffer,
+    pub handle : Image,
 }
 
 #[cfg(test)]
@@ -115,7 +159,7 @@ mod tests {
 
     #[test]
     pub fn test_graph() {
-        let mut graph = crate::graph::Graph::default();
+        let mut graph = crate::graph::Graph::new();
 
         let tex = Texture::new("Texture 1", 1, 1, ash::vk::Format::A1R5G5B5_UNORM_PACK16)
             .register(&mut graph);
@@ -124,7 +168,7 @@ mod tests {
             .register(&mut graph);
 
         let a = Pass::new("A")
-            .add_texture("A[1]", &ResourceID::Texture(tex), TextureOptions {
+            .add_texture("A[1]", &ResourceID::texture(tex), TextureOptions {
                 usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
                 ..Default::default()
             })
