@@ -40,7 +40,7 @@ impl BufferID {
     }
 
     pub fn get_options<'a>(&self, pass : &'a Pass) -> Option<&'a BufferOptions> {
-        pass.buffers.get(self).unwrap()
+        pass.buffers.get(self)
     }
 }
 

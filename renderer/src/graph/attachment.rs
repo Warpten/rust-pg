@@ -3,10 +3,7 @@ use std::default;
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, ResourceID, ResourceOptions};
-use crate::graph::texture::TextureOptions;
-
-use super::resource::ResourceAccessFlags;
+use crate::graph::resource::{Identifiable, ResourceID, ResourceOptions, ResourceAccessFlags};
 
 pub struct Attachment {
     id   : AttachmentID,

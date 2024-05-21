@@ -5,10 +5,9 @@ use crate::graph::manager::Identifier;
 use crate::graph::pass::{Pass, PassID};
 use crate::graph::texture::{Texture, TextureID};
 
-
 pub trait Identifiable {
     /// The type of the identifier associated with this resource.
-    type IdentifierType : Into<Identifier>;
+    type IdentifierType : Into<Identifier> + Copy;
 
     fn id(&self) -> Self::IdentifierType;
     fn name(&self) -> &'static str;
@@ -27,7 +26,6 @@ pub enum Resource<'a> {
     Texture(&'a Texture),
     Attachment(&'a Attachment),
 }
-
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ResourceID {
@@ -53,7 +51,7 @@ impl ResourceID {
             ResourceID::Texture(texture) => texture.get_options(pass),
             ResourceID::Buffer(buffer) => buffer.get_options(pass),
             ResourceID::Attachment(attachment) => attachment.get_options(pass),
-            _ => unreachable!("Unreachable unless devirtualize fails")
+            ResourceID::Virtual(_, _) => unreachable!("Unreachable unless devirtualize fails")
         }
     }
 }
