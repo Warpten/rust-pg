@@ -12,6 +12,10 @@ pub struct CommandPool {
 impl CommandPool {
     pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
 
+    pub(in crate) fn rent_one(&self, level : ash::vk::CommandBufferLevel) -> ash::vk::CommandBuffer {
+        self.rent(level, 1)[0]
+    }
+
     pub(in crate) fn rent(&self, level : ash::vk::CommandBufferLevel, count : u32) -> Vec<ash::vk::CommandBuffer> {
         let options = ash::vk::CommandBufferAllocateInfo::default()
             .command_pool(self.handle)

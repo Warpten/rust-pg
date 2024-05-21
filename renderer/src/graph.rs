@@ -26,8 +26,7 @@ pub struct Graph {
     command_pool : CommandPool,
 }
 
-// Crate API
-impl Graph {
+impl Graph { // Graph compilation functions
     /// Builds this graph into a render pass.
     pub fn build(&mut self) {
         let topology = {
@@ -77,7 +76,7 @@ impl Graph {
 
     fn process_texture(&mut self, pass: &Pass, texture: &Texture, options: &TextureOptions) {
         // TODO: this needs to persist across calls and is specific to the texture
-        let state = TextureState {
+        let mut state = TextureState {
             id: Default::default(),
             layout: Default::default(),
             command_buffer : self.command_pool.rent(ash::vk::CommandBufferLevel::SECONDARY, 1)[0],
@@ -88,18 +87,20 @@ impl Graph {
 
         // If a layout was requested and it differs from the current one, update the state and
         // record a layout transition command.
-        if let Some(new_layout) = options.layout{
+        if let Some(new_layout) = options.layout {
             if new_layout != state.layout {
                 state.handle.layout_transition(state.command_buffer, state.layout, new_layout, 1);
+                state.layout = new_layout;
             }
         }
     }
 
     fn process_buffer(&mut self, pass: &Pass, buffer: &Buffer, options: &BufferOptions) {}
+
+    fn process_attachment(&mut self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
-// Public API
-impl Graph {
+impl Graph { // Public API
     pub fn new(device : &Arc<LogicalDevice>) -> Self {
         Self {
             passes: Default::default(),
@@ -110,10 +111,6 @@ impl Graph {
             device : device.clone(),
             command_pool : CommandPool::create(todo!(), device),
         }
-    }
-
-    fn process_attachment(&mut self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {
-
     }
 
     pub fn find_texture(&self, texture : TextureID) -> Option<&Texture> { self.textures.find(texture) }
@@ -148,6 +145,21 @@ struct TextureState {
     pub layout : ash::vk::ImageLayout,
     pub command_buffer : ash::vk::CommandBuffer,
     pub handle : Image,
+}
+
+impl TextureState {
+    pub fn new(texture : &Texture, device : &Arc<LogicalDevice>, pool : &CommandPool) -> Self {
+        Self {
+            id : texture.id(),
+            layout : ash::vk::ImageLayout::UNDEFINED,
+            handle : Image::new(texture.name(),
+                device,
+                ash::vk::ImageCreateInfo::default(),
+                ash::vk::ImageAspectFlags::empty(),
+                1),
+            command_buffer : pool.rent_one(ash::vk::CommandBufferLevel::SECONDARY)
+        }
+    }
 }
 
 #[cfg(test)]
