@@ -14,21 +14,42 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn layout(&self) -> ash::vk::ImageLayout { self.layout }
-    pub fn format(&self) -> ash::vk::Format { self.format }
-    pub fn levels(&self) -> u32 { self.levels }
-    pub fn layers(&self) -> u32 { self.layers }
+    pub fn create_info(&self) -> ash::vk::ImageCreateInfo {
+        ash::vk::ImageCreateInfo::default()
+            .mip_levels(self.levels)
+            .array_layers(self.layers)
+            .format(self.format)
+            .initial_layout(self.layout)
+    }
 
-    pub fn new(name : &'static str, levels : u32, layers : u32, format : ash::vk::Format, layout : ash::vk::ImageLayout) -> Texture {
+    pub fn new(name : &'static str) -> Texture {
         Self {
             name,
             id : TextureID(usize::MAX),
 
-            layout,
-            levels,
-            layers,
-            format
+            layout : ash::vk::ImageLayout::UNDEFINED,
+            levels : 1,
+            layers : 1,
+            format : ash::vk::Format::UNDEFINED
         }
+    }
+
+    #[inline] pub fn layout(&self) -> ash::vk::ImageLayout { self.layout }
+    #[inline] pub fn with_layout(mut self, layout : ash::vk::ImageLayout) -> Self {
+        self.layout = layout;
+        self
+    }
+
+    #[inline] pub fn levels(&self) -> u32 { self.levels }
+    #[inline] pub fn with_levels(mut self, levels : u32) -> Self {
+        self.levels = levels;
+        self
+    }
+
+    #[inline] pub fn layers(&self) -> u32 { self.layers }
+    #[inline] pub fn with_layers(mut self, layers : u32) -> Self {
+        self.layers = layers;
+        self
     }
 
     /// Registers this attachment on the given graph.

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use crate::graph::attachment::{Attachment, AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{Buffer, BufferID, BufferOptions};
@@ -5,7 +6,6 @@ use crate::graph::manager::Manager;
 use crate::graph::pass::{Pass, PassID};
 use crate::graph::resource::{Identifiable, PhysicalResourceID, Resource, ResourceID};
 use crate::graph::texture::{Texture, TextureID, TextureOptions};
-use crate::traits::handle::BorrowHandle;
 use crate::utils::topological_sort::TopologicalSorter;
 use crate::vk::{CommandPool, Image, LogicalDevice};
 
@@ -28,7 +28,7 @@ pub struct Graph {
 
 impl Graph { // Graph compilation functions
     /// Builds this graph into a render pass.
-    pub fn build(&mut self) {
+    pub fn build(&self) {
         let topology = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
@@ -41,27 +41,40 @@ impl Graph { // Graph compilation functions
 
             match sorter.sort_kahn() {
                 Ok(sorted) => {
-                    sorted.iter()
-                        .map(|id| id.get(self))
-                        .collect::<Vec<_>>()
+                    let mut sorted_passes = Vec::with_capacity(sorted.len());
+                    for sorted_id in sorted {
+                        sorted_passes.push(self.passes.find(sorted_id));
+                    }
+                    sorted_passes
                 },
                 Err(_) => panic!("Cyclic graph detected"),
             }
         };
 
         // Walk the topology and process resources
+        let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in topology {
+            let pass = pass.unwrap();
+            let command_buffer = self.command_pool.rent_one(ash::vk::CommandBufferLevel::SECONDARY);
+
             for resource in pass.resources() {
                 let physical_resource = resource.devirtualize();
                 match physical_resource {
                     PhysicalResourceID::Texture(texture) => {
                         let options = texture.get_options(pass).unwrap();
                         let texture = texture.get(self).unwrap();
-                        self.process_texture(pass, texture, options);
+
+                        // Create the tracking state for this resource if it doesn't exist yet.
+                        let state = texture_state_tracker.entry(texture.id())
+                            .or_insert_with(|| TextureState::new(texture, self.device.clone()));
+
+                        // Process the update.
+                        self.process_texture(command_buffer, options, state);
                     },
                     PhysicalResourceID::Buffer(buffer) => {
                         let options = buffer.get_options(pass).unwrap();
                         let buffer = buffer.get(self).unwrap();
+
                         self.process_buffer(pass, buffer, options);
                     },
                     PhysicalResourceID::Attachment(attachment) => {
@@ -71,20 +84,17 @@ impl Graph { // Graph compilation functions
                     }
                 };
             }
+
+            // Persist the command buffer here.
         }
     }
 
-    fn process_texture(&mut self, pass: &Pass, texture: &Texture, options: &TextureOptions) {
-        // TODO: this needs to persist across calls and is specific to the texture
-        let mut state = TextureState {
-            id: Default::default(),
-            layout: Default::default(),
-            command_buffer : self.command_pool.rent(ash::vk::CommandBufferLevel::SECONDARY, 1)[0],
-            // This one is tricky, this is where aliasing happens - we need a pool of images
-            // and their associated memory and rent/return from/to it.
-            handle : Default::default(),
-        };
-
+    fn process_texture(
+        &self,
+        command_buffer : ash::vk::CommandBuffer,
+        options: &TextureOptions,
+        state : &mut TextureState)
+    {
         // If a layout was requested and it differs from the current one, update the state and
         // record a layout transition command.
         // TODO: Accumulate barriers and schedule the layout transitions as late as possible ?
@@ -92,17 +102,15 @@ impl Graph { // Graph compilation functions
         //       In that case, the first transition could be considered redundant and we could effectively
         //       collapse the intermediary layout, I guess...
         //       Something to keep in mind for V2.
+
         if let Some(new_layout) = options.layout {
-            if new_layout != state.layout {
-                state.handle.layout_transition(state.command_buffer, state.layout, new_layout);
-                state.layout = new_layout;
-            }
+            state.emit_transition(command_buffer, new_layout);
         }
     }
 
-    fn process_buffer(&mut self, pass: &Pass, buffer: &Buffer, options: &BufferOptions) {}
+    fn process_buffer(&self, pass: &Pass, buffer: &Buffer, options: &BufferOptions) {}
 
-    fn process_attachment(&mut self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
+    fn process_attachment(&self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
 impl Graph { // Public API
@@ -146,24 +154,93 @@ impl Graph { // Public API
 }
 
 /// Tracks the properties of a texture during the compilation of a render graph.
-struct TextureState {
-    pub id : TextureID,
-    pub layout : ash::vk::ImageLayout,
-    pub command_buffer : ash::vk::CommandBuffer,
-    pub handle : Image,
+struct TextureState<'a> {
+    /// The current layout of the texture. This value is used to track necessary layout transitions
+    /// when walking the graph topology.
+    pub current_layout : ash::vk::ImageLayout,
+
+    pub device : Arc<LogicalDevice>,
+    /// The initial state of this texture, as defined in the graph.
+    pub texture_info : &'a Texture,
+
+    /// The actual image handle.
+    pub handle : Option<Image>
 }
 
-impl TextureState {
-    pub fn new(texture : &Texture, device : &Arc<LogicalDevice>, pool : &CommandPool) -> Self {
-        Self {
-            id : texture.id(),
-            layout : texture.layout(),
-            handle : Image::new(texture.name(),
-                device,
-                ash::vk::ImageCreateInfo::default(),
-                ash::vk::ImageAspectFlags::empty(),
-                texture.levels()),
-            command_buffer : pool.rent_one(ash::vk::CommandBufferLevel::SECONDARY)
+impl TextureState<'_> {
+    pub fn new<'a>(texture : &'a Texture, device : Arc<LogicalDevice>) -> TextureState<'a> {
+        TextureState {
+            device,
+            texture_info : texture,
+            current_layout : texture.layout(),
+            handle : None,
         }
+    }
+
+    /// Records a layout transition command on the provided command buffer from the current image layout
+    /// to the given layout.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `command_buffer` - The command buffer on which to record the layout transition.
+    /// * `to` - The layout to transition to.
+    pub fn emit_transition(&mut self, command_buffer : ash::vk::CommandBuffer , to : ash::vk::ImageLayout) {
+        self.emit_layout_transition(command_buffer, self.current_layout, to);
+    }
+
+    /// Records a layout transition command on the provided command buffer between the given image layouts.
+    /// 
+    /// # Description
+    /// 
+    /// This function does nothing if both layouts are identical.
+    /// 
+    /// If the texture was not yet allocated on the device, it will be before recording the command.
+    /// On top of this, if the initial state of the texture was not defined when it was added to the graph,
+    /// the first layout transition is suppressed; the image is created with the final layout as its initial
+    /// layout.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `command_buffer` - The command buffer on which to record commands.
+    /// * `from` - The layout to transition from.
+    /// * `to` - The layout to transition to.
+    pub fn emit_layout_transition(&mut self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout) {
+        // Nothing to be done if the layout does not change.
+        if from == to {
+            return;
+        }
+
+        // Create the image now if it doesn't exist. This has the added benefit of not creating the image
+        // if it is never used in the graph.
+        let record_command_transition = if self.handle.is_none() {
+            let mut create_info = self.texture_info.create_info();
+
+            // Only record a layout transition if the image's layout wasn't undefined.
+            // If it was undefined, we pretend the image was initially created with the
+            // final layout of the transition.
+            let mut record_command_transition = true;
+            if self.current_layout == ash::vk::ImageLayout::UNDEFINED {
+                create_info.initial_layout = to;
+
+                record_command_transition = false;
+            }
+
+            let aspect_mask = Image::derive_aspect_flags(to, create_info.format);
+
+            self.handle = Image::new(self.texture_info.name(),
+                &self.device,
+                create_info,
+                aspect_mask).into();
+            
+            record_command_transition
+        } else { true };
+
+        if record_command_transition {
+            // Record the layout transition command on the provided command buffer.
+            self.handle.as_ref()
+                .unwrap()
+                .layout_transition(command_buffer, from, to);
+        }
+        self.current_layout = to;
     }
 }
