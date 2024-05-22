@@ -169,7 +169,7 @@ impl Image { // Utilities
     /// * `to` - The new layout.
     /// * `mip_levels` - The mipmap levels that should be transitioned.
     pub fn layout_transition(&self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout) {
-        let mut aspect_flags = Image::derive_aspect_flags(to, self.format);
+        let aspect_flags = Image::derive_aspect_flags(to, self.format);
 
         let src_access_mask = match from {
             ash::vk::ImageLayout::TRANSFER_DST_OPTIMAL => ash::vk::AccessFlags::TRANSFER_WRITE,

@@ -3,30 +3,73 @@ use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
 use crate::graph::resource::{Identifiable, PhysicalResourceID, ResourceAccessFlags, ResourceID, ResourceOptions};
 
-pub struct Texture {
+pub struct Texture { // Graph wrapper for ash::vk::Image
     id   : TextureID,
     name : &'static str,
 
+    extent : ash::vk::Extent3D,
+    tiling : ash::vk::ImageTiling,
+    image_type : ash::vk::ImageType,
     layout : ash::vk::ImageLayout,
     levels : u32,
     layers : u32,
     format : ash::vk::Format,
 }
 
-impl Texture {
+/// A trait that provides image extent and image type.
+pub trait ImageExtent {
+    fn extent(&self) -> ash::vk::Extent3D;
+    fn image_type(&self) -> ash::vk::ImageType;
+}
+
+impl ImageExtent for ash::vk::Extent2D {
+    fn extent(&self) -> ash::vk::Extent3D {
+        ash::vk::Extent3D::default()
+            .width(self.width)
+            .height(self.height)
+            .depth(1)
+    }
+
+    fn image_type(&self) -> ash::vk::ImageType { ash::vk::ImageType::TYPE_2D }
+}
+
+impl ImageExtent for ash::vk::Extent3D {
+    fn extent(&self) -> ash::vk::Extent3D { *self }
+
+    fn image_type(&self) -> ash::vk::ImageType { ash::vk::ImageType::TYPE_3D }
+}
+
+impl Texture { // Vulkan API exposed
+    /// Returns an instance of [`ash::vk::ImageCreateInfo`] tailored for this texture.
     pub fn create_info(&self) -> ash::vk::ImageCreateInfo {
         ash::vk::ImageCreateInfo::default()
             .mip_levels(self.levels)
             .array_layers(self.layers)
             .format(self.format)
             .initial_layout(self.layout)
+            .extent(self.extent)
+            .image_type(self.image_type)
+            .tiling(self.tiling)
     }
+}
 
-    pub fn new(name : &'static str) -> Texture {
+impl Texture {
+    /// Creates a new texture.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of this texture.
+    /// * `extent` - An extent (either [`ash::vk::Extent2D`] or [`ash::vk::Extent3D`]) describing
+    ///              the dimensions of the resource. Users can implement the [`ImageExtent`] trait on
+    ///              their own types if they wish to.
+    pub fn new(name : &'static str, extent : &impl ImageExtent) -> Texture {
         Self {
             name,
             id : TextureID(usize::MAX),
 
+            extent : extent.extent(),
+            image_type : extent.image_type(),
+            tiling : ash::vk::ImageTiling::OPTIMAL,
             layout : ash::vk::ImageLayout::UNDEFINED,
             levels : 1,
             layers : 1,
@@ -49,6 +92,12 @@ impl Texture {
     #[inline] pub fn layers(&self) -> u32 { self.layers }
     #[inline] pub fn with_layers(mut self, layers : u32) -> Self {
         self.layers = layers;
+        self
+    }
+
+    #[inline] pub fn tiling(&self) -> ash::vk::ImageTiling { self.tiling }
+    #[inline] pub fn with_tiling(mut self, tiling : ash::vk::ImageTiling) -> Self {
+        self.tiling = tiling;
         self
     }
 

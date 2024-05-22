@@ -2,12 +2,13 @@ use std::time::SystemTime;
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::vk::{renderer::{Renderer, RendererOptions}, Window};
+use crate::vk::renderer::{Renderer, RendererOptions};
+use crate::window::Window;
 
 #[derive(Debug)]
 pub struct ApplicationOptions {
-    pub(in crate) title : String,
-    pub(in crate) renderer : RendererOptions,
+    pub(crate) title : String,
+    pub(crate) renderer : RendererOptions,
 }
 
 impl Default for ApplicationOptions {
@@ -74,7 +75,7 @@ impl<T> ApplicationBuilder<T> {
         main_loop(self);
     }
 
-    pub(in crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
+    pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
         if let Some(render_fn) = self.render {
             match render_fn(application, data) {
                 Err(ApplicationRenderError::InvalidSwapchain) => true,

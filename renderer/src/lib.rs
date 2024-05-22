@@ -1,7 +1,9 @@
 // Public modules
-pub mod vk;
+pub mod application;
 pub mod graph;
 pub mod traits;
+pub mod vk;
+pub mod window;
 
 // Private modules
 mod utils;

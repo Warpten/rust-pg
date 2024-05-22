@@ -4,8 +4,8 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::traits::handle::BorrowHandle;
 use crate::traits::handle::Handle;
-use crate::vk::Window;
 use crate::vk::Context;
+use crate::window::Window;
 
 pub struct Surface {
     context : Arc<Context>,
