@@ -88,10 +88,6 @@ impl PhysicalDevice {
                 .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
         }
 
-        let physical_device_features = unsafe {
-            instance.handle().get_physical_device_features(self.handle)
-        };
-
         let enabled_extension_names = extensions
             .iter()
             .map(|s| s.as_ptr())
@@ -109,7 +105,6 @@ impl PhysicalDevice {
         let device_create_info = ash::vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .push_next(&mut physical_device_features2)
-            .enabled_features(&physical_device_features)
             .enabled_extension_names(&enabled_extension_names);
 
     
@@ -161,5 +156,16 @@ impl PhysicalDevice {
             properties : physical_device_properties,
             queue_families
         }
+    }
+
+    pub fn get_format_properties(&self, format : ash::vk::Format) -> Option<ash::vk::FormatProperties> {
+        unsafe {
+            let context = self.context.upgrade();
+            if let Some(context) = context {
+                return context.handle().get_physical_device_format_properties(self.handle, format).into();
+            }
+        }
+        
+        None
     }
 }

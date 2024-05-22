@@ -53,18 +53,6 @@ impl LogicalDevice {
         }
     }
 
-    /// Creates a new framebuffer for this logical device.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `render_pass` - 
-    /// * `extent` - 
-    /// * `views` - A slice of image views used to create this framebuffer.
-    /// * `layers` - 
-    pub fn create_framebuffer(self : &Arc<Self>, render_pass : &Arc<RenderPass>, extent : ash::vk::Extent2D, views : &[ash::vk::ImageView], layers : u32) -> Framebuffer {
-        return Framebuffer::new(extent, views, layers, self, render_pass)
-    }
-
     pub fn find_memory_type(&self, memory_type_bits : u32, flags : ash::vk::MemoryPropertyFlags) -> u32 {
         for (i, memory_type) in self.physical_device().memory_properties().memory_types.iter().enumerate() {
             if (memory_type_bits & (1 << i)) != 0 && (memory_type.property_flags & flags) == flags {

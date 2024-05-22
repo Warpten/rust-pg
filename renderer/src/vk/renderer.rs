@@ -5,6 +5,8 @@ use nohash_hasher::IntMap;
 
 use crate::{window::Window, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}};
 
+use super::{Framebuffer, RenderPass};
+
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
     Fixed(T),
@@ -26,6 +28,8 @@ pub struct RendererOptions {
     pub(in crate) resolution :[u32; 2],
     pub(in crate) get_queue_count : fn(&QueueFamily) -> u32,
     pub(in crate) get_pipeline_cache_file : fn() -> PathBuf,
+    pub(in crate) depth : bool,
+    pub(in crate) stencil : bool,
 }
 
 impl RendererOptions {
@@ -58,6 +62,16 @@ impl RendererOptions {
         self.get_pipeline_cache_file = getter;
         self
     }
+
+    #[inline] pub fn depth(mut self, depth : bool) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    #[inline] pub fn stencil(mut self, stencil : bool) -> Self {
+        self.stencil = stencil;
+        self
+    }
 }
 
 impl Default for RendererOptions {
@@ -69,6 +83,8 @@ impl Default for RendererOptions {
             resolution : [1280, 720],
             get_queue_count : |&_| 1,
             get_pipeline_cache_file : || "pipelines.dat".into(),
+            depth : true,
+            stencil : true,
         }
     }
 }
@@ -82,6 +98,9 @@ impl SwapchainOptions for RendererOptions {
     fn height(&self) -> u32 { self.resolution[1] }
 
     fn present_mode(&self) -> ash::vk::PresentModeKHR { ash::vk::PresentModeKHR::MAILBOX }
+
+    fn depth(&self) -> bool { self.depth }
+    fn stencil(&self) -> bool { self.stencil }
 }
 
 pub struct Renderer {
@@ -90,6 +109,8 @@ pub struct Renderer {
     pipeline_cache : Arc<PipelinePool>,
     surface : Arc<Surface>,
     swapchain : Arc<Swapchain>,
+    render_pass : RenderPass,
+    framebuffers : Vec<Framebuffer>,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     // One or many rendering graphs
@@ -139,8 +160,10 @@ impl Renderer {
             &logical_device,
             &surface,
             settings,
-            queue_families
+            queue_families,
         );
+        let render_pass = swapchain.create_render_pass();
+        let framebuffers = swapchain.create_framebuffers(&render_pass);
 
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: context.handle().clone(),
@@ -159,6 +182,8 @@ impl Renderer {
             logical_device,
             surface,
             swapchain,
+            render_pass,
+            framebuffers,
             graphs : vec![],
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
         }

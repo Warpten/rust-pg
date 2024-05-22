@@ -2,21 +2,20 @@ use std::{borrow::Borrow, ops::Range, slice::Iter, sync::Arc};
 
 use crate::{traits::handle::{BorrowHandle, Handle}, vk::{Framebuffer, Image, RenderPass}};
 
-use super::{Context, LogicalDevice, QueueFamily, Surface};
+use super::{Context, LogicalDevice, QueueFamily, RenderPassInfo, Surface};
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
-    render_pass : Arc<RenderPass>,
 
     handle : ash::vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
     
     pub extent : ash::vk::Extent2D,
-    pub images : Vec<Image>,
-    layer_count : u32,
+    pub present_images : Vec<Image>,
+    pub depth_images   : Vec<Image>,
     pub queue_families : Vec<QueueFamily>,
-    framebuffer : Framebuffer,
+    layer_count : u32,
 
     surface_format : ash::vk::SurfaceFormatKHR,
 }
@@ -59,6 +58,9 @@ pub trait SwapchainOptions {
     fn mip_range(&self) -> Range<u32> {
         return Range { start : 0, end : 1 }
     }
+
+    fn depth(&self) -> bool;
+    fn stencil(&self) -> bool;
 }
 
 impl Drop for Swapchain {
@@ -150,7 +152,6 @@ impl Swapchain {
             // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
             .image_usage(ash::vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
-            // .queue_family_indices(&queue_family_indices)
             .pre_transform(if surface_capabilities.supported_transforms.contains(ash::vk::SurfaceTransformFlagsKHR::IDENTITY) {
                 ash::vk::SurfaceTransformFlagsKHR::IDENTITY
             } else {
@@ -172,20 +173,41 @@ impl Swapchain {
                 .expect(format!("Failed to create swapchain with options {:?}", swapchain_create_info).borrow())
         };
 
-        let swapchain_images = unsafe {
-            swapchain_loader
+        let present_images = unsafe {
+            let swapchain_images = swapchain_loader
                 .get_swapchain_images(handle)
-                .expect("Failed to get swapchain images")
+                .expect("Failed to get swapchain images");
+
+            Image::from_swapchain(&surface_extent, &device, surface_format.format, swapchain_images)
         };
+        let present_views = present_images.iter().map(Image::view).collect::<Vec<_>>();
 
-        let swapchain_images = Image::from_swapchain(&surface_extent, &device, surface_format.format, swapchain_images);
-        let swapchain_image_views = swapchain_images.iter().map(Image::view).collect::<Vec<_>>();
+        let depth_images = if options.depth() {
+            let mut depth_images = vec![];
+            for _ in 0..present_images.len() {
+                depth_images.push(Image::new("Swapchain Depth Stencil",
+                    device,
+                    ash::vk::ImageCreateInfo::default()
+                        .image_type(ash::vk::ImageType::TYPE_2D)
+                        .format(ash::vk::Format::D16_UNORM)
+                        .extent(ash::vk::Extent3D {
+                            width : surface_extent.width,
+                            height : surface_extent.height,
+                        depth : 1
+                        })
+                        .mip_levels(1)
+                        .array_layers(1)
+                        .samples(ash::vk::SampleCountFlags::TYPE_1)
+                        .tiling(ash::vk::ImageTiling::OPTIMAL)
+                        .usage(ash::vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+                        .sharing_mode(image_sharing_mode),
+                    ash::vk::ImageAspectFlags::DEPTH | ash::vk::ImageAspectFlags::STENCIL
+                ));
+            }
+            depth_images
+        } else { vec![] };
 
-        let render_pass = Arc::new(RenderPass::new(&device, surface_format.format));
-
-        let framebuffer = {
-            Framebuffer::new(surface_extent, &swapchain_image_views[..], options.layers().len() as _, &device, &render_pass)
-        };
+        // TODO: Add resolve images here for multisampling
 
         Arc::new(Self {
             device : device.clone(),
@@ -194,26 +216,62 @@ impl Swapchain {
             surface : surface.clone(),
             layer_count : options.layers().len() as _,
             loader : swapchain_loader,
-            images : swapchain_images,
-            framebuffer,
+            present_images,
+            depth_images,
             queue_families,
-            render_pass,
 
             surface_format
         })
     }
 
-    pub fn format(&self) -> ash::vk::Format { self.surface_format.format }
+    pub fn create_render_pass(&self) -> RenderPass {
+        let color_images = match self.present_images.get(0) {
+            Some(image) => vec![image],
+            None => vec![]
+        };
+        let depth_images = match self.depth_images.get(0) {
+            Some(image) => vec![image],
+            None => vec![]
+        };
 
-    pub fn color_space(&self) -> ash::vk::ColorSpaceKHR { self.surface_format.color_space}
-
-    pub fn framebuffer(&self) -> &Framebuffer { &self.framebuffer }
-
-    pub fn layer_count(&self) -> u32 { self.layer_count }
-
-    pub fn image_count(&self) -> usize { self.images.len() }
-
-    pub fn images(&self) -> Iter<Image> {
-        self.images.iter()
+        RenderPass::new(
+            &self.device,
+            RenderPassInfo {
+                color_images,
+                depth_images,
+                present : true,
+                final_layout : ash::vk::ImageLayout::PRESENT_SRC_KHR
+            }
+        )
     }
+
+    pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
+        let mut framebuffers = Vec::<Framebuffer>::with_capacity(self.present_images.len());
+        for i in 0..self.present_images.len() {
+            let mut attachment = Vec::<ash::vk::ImageView>::new();
+            
+            attachment.push(self.present_images[i].view());
+            if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
+                attachment.push(depth_image);
+            }
+
+            let create_info = ash::vk::FramebufferCreateInfo::default()
+                .render_pass(render_pass.handle())
+                .attachments(&attachment)
+                .width(self.extent.width)
+                .height(self.extent.height)
+                .layers(self.layer_count);
+
+            unsafe {
+                framebuffers.push(Framebuffer::new(&self.device, create_info));
+            }
+        }
+
+        framebuffers
+    }
+
+    pub fn format(&self) -> ash::vk::Format { self.surface_format.format }
+    pub fn color_space(&self) -> ash::vk::ColorSpaceKHR { self.surface_format.color_space}
+    pub fn layer_count(&self) -> u32 { self.layer_count }
+    pub fn image_count(&self) -> usize { self.present_images.len() }
 }
