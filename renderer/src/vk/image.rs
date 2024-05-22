@@ -10,6 +10,7 @@ pub struct Image {
     allocation : Option<Allocation>,
     view : ash::vk::ImageView,
 
+    levels : u32,
     layout : ash::vk::ImageLayout,
     format : ash::vk::Format,
     extent : ash::vk::Extent3D,
@@ -76,7 +77,8 @@ impl Image { // Construction
             layout: create_info.initial_layout,
             format: create_info.format,
             view: image_view,
-            extent: create_info.extent
+            extent: create_info.extent,
+            levels
         }
     }
 
@@ -149,7 +151,7 @@ impl Image { // Utilities
     /// * `from` - The old layout.
     /// * `to` - The new layout.
     /// * `mip_levels` - The mipmap levels that should be transitioned.
-    pub fn layout_transition(&self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout, mip_levels : u32) {
+    pub fn layout_transition(&self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout) {
         let mut aspect_flags = ash::vk::ImageAspectFlags::COLOR;
         if to == ash::vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
             aspect_flags = ash::vk::ImageAspectFlags::DEPTH;
@@ -206,7 +208,7 @@ impl Image { // Utilities
                 .subresource_range(ash::vk::ImageSubresourceRange::default()
                     .aspect_mask(aspect_flags)
                     .layer_count(1)
-                    .level_count(mip_levels));
+                    .level_count(self.levels));
 
             unsafe {
                 self.device.handle().cmd_pipeline_barrier(command_buffer,

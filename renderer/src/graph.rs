@@ -94,7 +94,7 @@ impl Graph { // Graph compilation functions
         //       Something to keep in mind for V2.
         if let Some(new_layout) = options.layout {
             if new_layout != state.layout {
-                state.handle.layout_transition(state.command_buffer, state.layout, new_layout, 1);
+                state.handle.layout_transition(state.command_buffer, state.layout, new_layout);
                 state.layout = new_layout;
             }
         }
@@ -145,6 +145,7 @@ impl Graph { // Public API
     }
 }
 
+/// Tracks the properties of a texture during the compilation of a render graph.
 struct TextureState {
     pub id : TextureID,
     pub layout : ash::vk::ImageLayout,
