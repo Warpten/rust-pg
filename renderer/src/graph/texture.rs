@@ -7,17 +7,24 @@ pub struct Texture {
     id   : TextureID,
     name : &'static str,
 
+    layout : ash::vk::ImageLayout,
     levels : u32,
     layers : u32,
     format : ash::vk::Format,
 }
 
 impl Texture {
-    pub fn new(name : &'static str, levels : u32, layers : u32, format : ash::vk::Format) -> Texture {
+    pub fn layout(&self) -> ash::vk::ImageLayout { self.layout }
+    pub fn format(&self) -> ash::vk::Format { self.format }
+    pub fn levels(&self) -> u32 { self.levels }
+    pub fn layers(&self) -> u32 { self.layers }
+
+    pub fn new(name : &'static str, levels : u32, layers : u32, format : ash::vk::Format, layout : ash::vk::ImageLayout) -> Texture {
         Self {
             name,
             id : TextureID(usize::MAX),
 
+            layout,
             levels,
             layers,
             format
@@ -87,6 +94,10 @@ impl Into<ResourceID> for TextureID {
 
 impl Into<Identifier> for TextureID {
     fn into(self) -> Identifier { Identifier::Numeric(self.0) }
+}
+
+impl Default for TextureID {
+    fn default() -> Self { Self(usize::MAX) }
 }
 
 impl Identifiable for Texture {

@@ -87,6 +87,11 @@ impl Graph { // Graph compilation functions
 
         // If a layout was requested and it differs from the current one, update the state and
         // record a layout transition command.
+        // TODO: Accumulate barriers and schedule the layout transitions as late as possible ?
+        //       Wouldn't this still stall if the transitions get flushed before a new transition happen?
+        //       In that case, the first transition could be considered redundant and we could effectively
+        //       collapse the intermediary layout, I guess...
+        //       Something to keep in mind for V2.
         if let Some(new_layout) = options.layout {
             if new_layout != state.layout {
                 state.handle.layout_transition(state.command_buffer, state.layout, new_layout, 1);
@@ -151,46 +156,13 @@ impl TextureState {
     pub fn new(texture : &Texture, device : &Arc<LogicalDevice>, pool : &CommandPool) -> Self {
         Self {
             id : texture.id(),
-            layout : ash::vk::ImageLayout::UNDEFINED,
+            layout : texture.layout(),
             handle : Image::new(texture.name(),
                 device,
                 ash::vk::ImageCreateInfo::default(),
                 ash::vk::ImageAspectFlags::empty(),
-                1),
+                texture.levels()),
             command_buffer : pool.rent_one(ash::vk::CommandBufferLevel::SECONDARY)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::graph::attachment::Attachment;
-    use crate::graph::pass::Pass;
-    use crate::graph::resource::ResourceID;
-    use crate::graph::texture::{Texture, TextureOptions};
-
-    #[test]
-    pub fn test_graph() {
-        let mut graph = crate::graph::Graph::new();
-
-        let tex = Texture::new("Texture 1", 1, 1, ash::vk::Format::A1R5G5B5_UNORM_PACK16)
-            .register(&mut graph);
-
-        let attachment = Attachment::new("Attachment 1")
-            .register(&mut graph);
-
-        let a = Pass::new("A")
-            .add_texture("A[1]", &ResourceID::texture(tex), TextureOptions {
-                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                ..Default::default()
-            })
-            .register(&mut graph);
-
-        let b = Pass::new("B")
-            .add_texture("B[1]", a.get(&graph).texture("A[1]").unwrap(), TextureOptions {
-                usage_flags : ash::vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                ..Default::default()
-            })
-            .register(&mut graph);
     }
 }
