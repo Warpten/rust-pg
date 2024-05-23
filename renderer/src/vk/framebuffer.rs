@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use ash::vk;
 use crate::{traits::handle::{BorrowHandle, Handle}, vk::LogicalDevice};
 
 // This whole file needs cleaning
@@ -9,11 +10,11 @@ use crate::{traits::handle::{BorrowHandle, Handle}, vk::LogicalDevice};
 
 pub struct Framebuffer {
     device : Arc<LogicalDevice>,
-    handle : ash::vk::Framebuffer,
+    handle : vk::Framebuffer,
 }
 
 impl Framebuffer {
-    pub fn new(device : &Arc<LogicalDevice>, create_info : ash::vk::FramebufferCreateInfo) -> Framebuffer {
+    pub fn new(device : &Arc<LogicalDevice>, create_info : vk::FramebufferCreateInfo) -> Framebuffer {
         let handle = unsafe {
             device.handle().create_framebuffer(&create_info, None)
                 .expect("Creating the framebuffer failed")
@@ -24,7 +25,7 @@ impl Framebuffer {
 }
 
 impl Handle for Framebuffer {
-    type Target = ash::vk::Framebuffer;
+    type Target = vk::Framebuffer;
 
     fn handle(&self) -> Self::Target { self.handle }
 }

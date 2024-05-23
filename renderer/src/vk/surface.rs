@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::traits::handle::BorrowHandle;
@@ -9,14 +10,14 @@ use crate::window::Window;
 
 pub struct Surface {
     context : Arc<Context>,
-    handle : ash::vk::SurfaceKHR,
+    handle : vk::SurfaceKHR,
     pub loader : ash::khr::surface::Instance,
     // pub format : vk::SurfaceFormatKHR,
     // pub resolution : vk::Extent2D,
 }
 
 impl Handle for Surface {
-    type Target = ash::vk::SurfaceKHR;
+    type Target = vk::SurfaceKHR;
 
     fn handle(&self) -> Self::Target { self.handle }
 }

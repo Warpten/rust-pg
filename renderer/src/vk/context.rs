@@ -4,15 +4,16 @@ use std::ptr::null;
 use std::{hint, slice};
 use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
-use crate::traits::handle::BorrowHandle;
+use ash::vk;
 
-use crate::vk::{queue, PhysicalDevice};
+use crate::traits::handle::BorrowHandle;
+use crate::vk::PhysicalDevice;
 
 pub struct Context {
     entry : Arc<ash::Entry>,
     handle : ash::Instance,
     debug_utils : ash::ext::debug_utils::Instance,
-    debug_messenger : ash::vk::DebugUtilsMessengerEXT,
+    debug_messenger : vk::DebugUtilsMessengerEXT,
     
 }
 
@@ -33,22 +34,22 @@ impl Drop for Context {
 
 impl Context {
     unsafe extern "system" fn vulkan_debug_utils_callback(
-        message_severity : ash::vk::DebugUtilsMessageSeverityFlagsEXT,
-        message_types : ash::vk::DebugUtilsMessageTypeFlagsEXT,
-        p_callback_data : *const ash::vk::DebugUtilsMessengerCallbackDataEXT,
+        message_severity : vk::DebugUtilsMessageSeverityFlagsEXT,
+        message_types : vk::DebugUtilsMessageTypeFlagsEXT,
+        p_callback_data : *const vk::DebugUtilsMessengerCallbackDataEXT,
         _p_user_data : *mut std::ffi::c_void,
-    ) -> ash::vk::Bool32 {
+    ) -> vk::Bool32 {
         let severity = match message_severity {
-            ash::vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
-            ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
-            ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
-            ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[VERBOSE]",
+            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
+            vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
             _ => hint::unreachable_unchecked()
         };
         let types = match message_types {
-            ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
-            ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
-            ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
+            vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
+            vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
             _ => hint::unreachable_unchecked()
         };
         let callback_data = &*p_callback_data;
@@ -60,9 +61,9 @@ impl Context {
         #[cfg(debug_assertions)]
         println!("The Rust stack trace follows:");
         #[cfg(debug_assertions)]
-        println!("  {:?}", Backtrace::capture());
+        println!("  {}", Backtrace::capture());
 
-        if callback_data.p_queue_labels != null() { // Print queue labels
+        if callback_data.p_queue_labels != null() && callback_data.queue_label_count != 0 { // Print queue labels
             let queue_labels = slice::from_raw_parts(
                 callback_data.p_queue_labels,
                 callback_data.queue_label_count as _
@@ -76,7 +77,7 @@ impl Context {
             }
         }
 
-        if callback_data.p_cmd_buf_labels != null() { // Print command buffer labels
+        if callback_data.p_cmd_buf_labels != null() && callback_data.cmd_buf_label_count != 0 { // Print command buffer labels
             let labels = slice::from_raw_parts(
                 callback_data.p_cmd_buf_labels,
                 callback_data.cmd_buf_label_count as _
@@ -90,7 +91,7 @@ impl Context {
             }
         }
 
-        if callback_data.p_objects != null() { // Print object labels
+        if callback_data.p_objects != null() && callback_data.object_count != 0 { // Print object labels
             let labels = slice::from_raw_parts(
                 callback_data.p_objects,
                 callback_data.object_count as _
@@ -100,12 +101,14 @@ impl Context {
             for label in labels {
                 if let Some(label_str) = label.object_name_as_c_str() {
                     println!("  - 0x{:#016x} : {:?}", label.object_handle, label_str);
+                } else {
+                    println!("  - 0x{:#016x}", label.object_handle);
                 }
             }
         }
         println!("======================================================");
 
-        ash::vk::FALSE
+        vk::FALSE
     }
 
     pub fn entry(&self) -> &Arc<ash::Entry> { &self.entry }
@@ -148,23 +151,23 @@ impl Context {
     /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
     pub fn new(app_name : CString, instance_extensions: Vec<CString>) -> Self {
         let entry = Arc::new(unsafe { ash::Entry::load().unwrap() });
-        let mut debug_utils_messenger_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
-            .flags(ash::vk::DebugUtilsMessengerCreateFlagsEXT::empty())
+        let mut debug_utils_messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
+            .flags(vk::DebugUtilsMessengerCreateFlagsEXT::empty())
             .message_severity(
-                ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
             )
             .message_type(
-                ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                    | ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
             )
             .pfn_user_callback(Some(Self::vulkan_debug_utils_callback));
 
-        let app_info = ash::vk::ApplicationInfo::default()
+        let app_info = vk::ApplicationInfo::default()
             .application_name(&app_name)
-            .application_version(ash::vk::make_api_version(1, 0, 0, 0))
-            .api_version(ash::vk::API_VERSION_1_3);
+            .application_version(vk::make_api_version(1, 0, 0, 0))
+            .api_version(vk::API_VERSION_1_3);
 
         const VALIDATION: [&'static str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
@@ -176,7 +179,7 @@ impl Context {
             .map(|l| l.as_ptr())
             .collect::<Vec<_>>();
         
-        let instance_create_info = ash::vk::InstanceCreateInfo::default()
+        let instance_create_info = vk::InstanceCreateInfo::default()
             .push_next(&mut debug_utils_messenger_create_info)
             .application_info(&app_info)
             .enabled_extension_names(&extension_names)

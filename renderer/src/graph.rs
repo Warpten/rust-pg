@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use ash::vk;
 use crate::graph::attachment::{Attachment, AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{Buffer, BufferID, BufferOptions};
 use crate::graph::manager::Manager;
@@ -55,7 +56,7 @@ impl Graph { // Graph compilation functions
         let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in topology {
             let pass = pass.unwrap();
-            let command_buffer = self.command_pool.rent_one(ash::vk::CommandBufferLevel::SECONDARY);
+            let command_buffer = self.command_pool.rent_one(vk::CommandBufferLevel::SECONDARY);
 
             for resource in pass.resources() {
                 let physical_resource = resource.devirtualize();
@@ -95,7 +96,7 @@ impl Graph { // Graph compilation functions
 
     fn process_texture(
         &self,
-        command_buffer : ash::vk::CommandBuffer,
+        command_buffer : vk::CommandBuffer,
         options: &TextureOptions,
         state : &mut TextureState)
     {
@@ -161,7 +162,7 @@ impl Graph { // Public API
 struct TextureState<'a> {
     /// The current layout of the texture. This value is used to track necessary layout transitions
     /// when walking the graph topology.
-    pub current_layout : ash::vk::ImageLayout,
+    pub current_layout : vk::ImageLayout,
 
     pub device : Arc<LogicalDevice>,
     /// The initial state of this texture, as defined in the graph.
@@ -188,7 +189,7 @@ impl TextureState<'_> {
     /// 
     /// * `command_buffer` - The command buffer on which to record the layout transition.
     /// * `to` - The layout to transition to.
-    pub fn emit_transition(&mut self, command_buffer : ash::vk::CommandBuffer , to : ash::vk::ImageLayout) {
+    pub fn emit_transition(&mut self, command_buffer : vk::CommandBuffer , to : vk::ImageLayout) {
         self.emit_layout_transition(command_buffer, self.current_layout, to);
     }
 
@@ -208,7 +209,7 @@ impl TextureState<'_> {
     /// * `command_buffer` - The command buffer on which to record commands.
     /// * `from` - The layout to transition from.
     /// * `to` - The layout to transition to.
-    pub fn emit_layout_transition(&mut self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout) {
+    pub fn emit_layout_transition(&mut self, command_buffer : vk::CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout) {
         // Nothing to be done if the layout does not change.
         if from == to {
             return;
@@ -223,7 +224,7 @@ impl TextureState<'_> {
             // If it was undefined, we pretend the image was initially created with the
             // final layout of the transition.
             let mut record_command_transition = true;
-            if self.current_layout == ash::vk::ImageLayout::UNDEFINED {
+            if self.current_layout == vk::ImageLayout::UNDEFINED {
                 create_info.initial_layout = to;
 
                 record_command_transition = false;

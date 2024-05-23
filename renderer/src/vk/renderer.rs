@@ -1,12 +1,12 @@
 use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, path::PathBuf, sync::{Arc, Mutex}};
 
-use ash::vk;
+use ash::vk::{self, ClearValue};
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 
 use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}, window::Window};
 
-use super::{frame_data::FrameData, Framebuffer, QueueAffinity, RenderPass, SemaphorePool};
+use super::{frame_data::FrameData, semaphore_pool, Framebuffer, QueueAffinity, RenderPass, SemaphorePool};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -32,6 +32,8 @@ pub struct RendererOptions {
     pub(in crate) depth : bool,
     pub(in crate) stencil : bool,
     pub(in crate) separate_depth_stencil : bool, // NYI
+    pub(in crate) clear_color : [f32; 4],
+    pub(in crate) multisampling : vk::SampleCountFlags,
 }
 
 impl RendererOptions {
@@ -74,13 +76,25 @@ impl RendererOptions {
         self.stencil = stencil;
         self
     }
+
+    #[inline] pub fn clear_color(mut self, clear_color : [f32; 4]) -> Self {
+        self.clear_color = clear_color;
+        self
+    }
+
+    #[inline] pub fn multisampling(mut self, samples : vk::SampleCountFlags) -> Self {
+        self.multisampling = samples;
+        self
+    }
 }
 
 impl Default for RendererOptions {
     fn default() -> Self {
         Self {
             line_width: DynamicState::Fixed(1.0f32),
-            device_extensions: vec![ash::khr::swapchain::NAME.to_owned()],
+            device_extensions: vec![
+                ash::khr::swapchain::NAME.to_owned(),
+            ],
             instance_extensions: vec![],
             resolution : [1280, 720],
             get_queue_count : |&_| 1,
@@ -88,22 +102,25 @@ impl Default for RendererOptions {
             depth : true,
             stencil : true,
             separate_depth_stencil : false,
+            clear_color : [0.0f32, 0.0f32, 0.0f32, 0.0f32],
+            multisampling : vk::SampleCountFlags::TYPE_1,
         }
     }
 }
 
 impl SwapchainOptions for RendererOptions {
-    fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool {
-        format.format == ash::vk::Format::B8G8R8A8_SRGB && format.color_space == ash::vk::ColorSpaceKHR::SRGB_NONLINEAR
+    fn select_surface_format(&self, format : &vk::SurfaceFormatKHR) -> bool {
+        format.format == vk::Format::B8G8R8A8_SRGB && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
     }
 
     fn width(&self) -> u32 { self.resolution[0] }
     fn height(&self) -> u32 { self.resolution[1] }
 
-    fn present_mode(&self) -> ash::vk::PresentModeKHR { ash::vk::PresentModeKHR::MAILBOX }
+    fn present_mode(&self) -> vk::PresentModeKHR { vk::PresentModeKHR::MAILBOX }
 
     fn depth(&self) -> bool { self.depth }
     fn stencil(&self) -> bool { self.stencil }
+    fn multisampling(&self) -> vk::SampleCountFlags { self.multisampling }
 }
 
 pub struct Renderer {
@@ -114,10 +131,11 @@ pub struct Renderer {
     surface : Arc<Surface>,
     swapchain : Arc<Swapchain>,
     render_pass : RenderPass,
-    framebuffers : Vec<Framebuffer>,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     // Actual application stuff
+    framebuffers : Vec<Framebuffer>,
+    clear_values : [vk::ClearValue; 2],
     frames : Vec<FrameData>,
     active_frame_index : usize,
 
@@ -170,12 +188,7 @@ impl Renderer {
             let mut frames = Vec::<FrameData>::new();
 
             for i in 0..swapchain.image_count() {
-                let frame = FrameData {
-                    index : i,
-                    render_fence : logical_device.create_fence(ash::vk::FenceCreateFlags::SIGNALED),
-                    semaphore_pool : SemaphorePool::new(&logical_device)
-                };
-                frames.push(frame);
+                frames.push(FrameData::new(i, &logical_device));
             }
 
             frames
@@ -201,6 +214,19 @@ impl Renderer {
             render_pass,
             framebuffers,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
+            clear_values : [
+                vk::ClearValue {
+                    color : vk::ClearColorValue {
+                        float32: settings.clear_color,
+                    },
+                },
+                vk::ClearValue {
+                    depth_stencil : vk::ClearDepthStencilValue {
+                        depth : 1.0f32,
+                        stencil : 0,
+                    }
+                }
+            ],
 
             graphs : vec![],
             frames,
@@ -208,58 +234,167 @@ impl Renderer {
         }
     }
 
-    pub fn acquire_next_image(&mut self) -> Result<(ash::vk::Semaphore, usize), ApplicationRenderError> {
+    pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
+        let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
+        self.logical_device.set_handle_name(acquired_semaphore, format!("Acquisition Semaphore [{}]", self.active_frame_index));
+
+        let image_index = match self.swapchain().acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
+            Ok((image_index, _)) => image_index,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                return Err(ApplicationRenderError::InvalidSwapchain);
+            },
+            Err(vk::Result::SUBOPTIMAL_KHR) => {
+                return Err(ApplicationRenderError::InvalidSwapchain);
+            },
+            Err(error) => panic!("Error while acquiring next image: {:?}", error)
+        };
+
+        assert!((image_index as usize) < self.frames.len());
+
+        self.active_frame_index = image_index as _;
+        self.frames[self.active_frame_index].semaphore_pool.reset();
+        self.wait_and_reset(self.frames[self.active_frame_index].in_flight);
+
+        Ok((acquired_semaphore, self.active_frame_index))
+    }
+
+    pub fn wait_and_reset(&self, fence : vk::Fence) {
+        self.wait_for_fence(fence);
+        self.reset_fence(fence);
+    }
+
+    pub fn wait_for_fence(&self, fence : vk::Fence) {
         unsafe {
-            let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.rent_semaphore();
-            
-            let image_index = match self.swapchain().acquire_image(acquired_semaphore, ash::vk::Fence::null()) {
-                Ok((image_index, _)) => image_index,
-                Err(ash::vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    return Err(ApplicationRenderError::InvalidSwapchain);
-                },
-                Err(ash::vk::Result::SUBOPTIMAL_KHR) => {
-                    return Err(ApplicationRenderError::InvalidSwapchain);
-                },
-                Err(error) => panic!("Error while acquiring next image: {:?}", error)
-            };
-
-            self.active_frame_index = image_index;
-            self.frames[self.active_frame_index].semaphore_pool.reset();
-
-            let next_frame = &self.frames[self.active_frame_index];
-            
-            self.logical_device().handle().wait_for_fences(&[next_frame.render_fence], true, u64::MAX);
-            self.logical_device().handle().reset_fences(&[next_frame.render_fence]);
-
-            Ok((acquired_semaphore, self.active_frame_index))
+            self.logical_device().handle().wait_for_fences(&[fence], true, u64::MAX)
+                .expect("Waiting for the fence failed");
         }
     }
 
-    pub fn submit_and_present(&mut self, command_buffer : ash::vk::CommandBuffer, semaphore : ash::vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let rendering_complete_semaphore = self.submit_frame(&[command_buffer],
-            &[semaphore],
-            &[ash::vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
-        );
-
-        self.present_frame(rendering_complete_semaphore)?;
-        Ok(())
+    pub fn reset_fence(&self, fence : vk::Fence) {
+        unsafe {
+            self.logical_device().handle().reset_fences(&[fence])
+                .expect("Resetting the fence failed");
+        }
     }
 
-    pub fn present_frame(&mut self, semaphore : ash::vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let present_info = ash::vk::PresentInfoKHR::default()
-            .wait_semaphores(&[semaphore])
-            .swapchains(&[self.swapchain.handle()])
-            .image_indices(&[self.active_frame_index as u32]);
+    pub fn submit_and_present(&mut self, command_buffer : vk::CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let rendering_complete_semaphore = self.submit_frame(&[command_buffer],
+            &[wait_semaphore],
+            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
+        );
+        self.logical_device.set_handle_name(rendering_complete_semaphore, format!("Presentation Semaphore [{}]", self.active_frame_index));
+
+        self.present_frame(rendering_complete_semaphore)
+    }
+
+    pub fn begin_render_pass(&self, command_buffer : vk::CommandBuffer, extent : vk::Extent2D) {
+        unsafe {
+            let render_pass_begin_info = vk::RenderPassBeginInfo::default()
+                .render_area(vk::Rect2D {
+                    offset : vk::Offset2D { x: 0, y : 0 },
+                    extent
+                })
+                .framebuffer(self.framebuffers[self.active_frame_index].handle())
+                .render_pass(self.render_pass.handle())
+                .clear_values(&self.clear_values);
+
+            self.logical_device.handle().cmd_begin_render_pass(command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
+        }
+    }
+
+    pub fn end_render_pass(&self, command_buffer : vk::CommandBuffer) {
+        unsafe {
+            self.logical_device.handle().cmd_end_render_pass(command_buffer);
+        }
+    }
+
+    pub fn run_frame(&mut self, handler : fn(&ash::Device, vk::CommandBuffer)) -> Result<(), ApplicationRenderError> {
+        let (image_acquired, _) = self.acquire_next_image().expect("Image acquisition failed");
+        let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+        self.begin_render_pass(cmd, self.swapchain.extent);
+
+        handler(self.logical_device.handle(), cmd);
+
+        self.end_render_pass(cmd);
+        self.end_command_buffer(cmd);
+        self.submit_and_present(cmd, image_acquired)
+    }
+
+    pub fn begin_command_buffer(&mut self, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
+        let graphics_queue = self.logical_device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
+
+        let cmd = self.frames[self.active_frame_index].get_command_buffer(graphics_queue.family(),
+            vk::CommandBufferLevel::PRIMARY,
+            1)[0];
 
         unsafe {
-            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present)[0];
+            let begin_info = vk::CommandBufferBeginInfo::default()
+                .flags(flags);
+
+            self.logical_device.handle()
+                .begin_command_buffer(cmd, &begin_info)
+                .expect("Failed to begin frame commands");
+        };
+
+        cmd
+    }
+
+    pub fn end_command_buffer(&mut self, cmd : vk::CommandBuffer) {
+        unsafe {
+            self.logical_device.handle().end_command_buffer(cmd)
+                .expect("Failed to end frame commands")
+        };
+    }
+
+    /// Submits a frame.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `command_buffers` - A slice of command buffers to execute in batch.
+    /// * `semaphores` - Semaphores upon which to wait before executing the command buffers.
+    /// * `flags` - An array of pipeline stages at which each corresponding semaphore wait will occur.
+    /// 
+    /// # Returns
+    /// 
+    /// A [`vk::Semaphore`] that will be signalled when all command buffers have completed execution.
+    pub fn submit_frame(&mut self, command_buffers : &[vk::CommandBuffer], semaphores : &[vk::Semaphore], flags : &[vk::PipelineStageFlags]) -> vk::Semaphore {
+        let signal_semaphore = [
+            self.frames[self.active_frame_index].semaphore_pool.request()
+        ];
+        self.logical_device.set_handle_name(signal_semaphore[0], format!("Signal semaphore [{}]", self.active_frame_index));
+
+        let submit_info = vk::SubmitInfo::default()
+            .wait_semaphores(semaphores)
+            .command_buffers(command_buffers)
+            .wait_dst_stage_mask(flags)
+            .signal_semaphores(&signal_semaphore);
+
+        let graphics_queue = self.logical_device().get_queues(QueueAffinity::Graphics, self.surface())[0];
+        self.logical_device().submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
+    
+        signal_semaphore[0]
+    }
+
+    pub fn present_frame(&mut self, semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let semaphores = [semaphore];
+        let swapchains = [self.swapchain().handle()];
+        let image_indices = [self.active_frame_index as u32];
+
+        let present_info = vk::PresentInfoKHR::default()
+            .wait_semaphores(&semaphores)
+            .swapchains(&swapchains)
+            .image_indices(&image_indices);
+
+        unsafe {
+            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present, self.surface())[0];
             let result = self.swapchain.loader
                 .queue_present(presentation_queue.handle(), &present_info);
 
             match result {
                 Ok(_) => Ok(()),
-                Err(ash::vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
-                Err(ash::vk::Result::SUBOPTIMAL_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
+                Err(vk::Result::SUBOPTIMAL_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
                 Err(error) => panic!("Error while presenting frame: {:?}", error)
             }
         }
@@ -270,11 +405,11 @@ impl Renderer {
 /// 
 /// Device selection is done according to its classification, with the following order:
 /// 
-/// 1. [`ash::vk::PhysicalDeviceType::DISCRETE_GPU`]
-/// 2. [`ash::vk::PhysicalDeviceType::INTEGRATED_GPU`]
-/// 3. [`ash::vk::PhysicalDeviceType::VIRTUAL_GPU`]
-/// 4. [`ash::vk::PhysicalDeviceType::CPU`]
-/// 5. [`ash::vk::PhysicalDeviceType::OTHER`]
+/// 1. [`vk::PhysicalDeviceType::DISCRETE_GPU`]
+/// 2. [`vk::PhysicalDeviceType::INTEGRATED_GPU`]
+/// 3. [`vk::PhysicalDeviceType::VIRTUAL_GPU`]
+/// 4. [`vk::PhysicalDeviceType::CPU`]
+/// 5. [`vk::PhysicalDeviceType::OTHER`]
 /// 
 /// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
 /// 
@@ -287,25 +422,25 @@ fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &Renderer
                 (a, b) if a == b => Ordering::Equal,
 
                 // DISCRETE_GPU > ALL
-                (ash::vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
+                (vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
 
                 // DISCRETE > INTEGRATED > ALL
-                (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
+                (vk::PhysicalDeviceType::INTEGRATED_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
 
                 // DISCRETE, INTEGRATED > VIRTUAL > ALL
-                (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
 
                 // DISCRETE, INTEGRATED, VIRTUAL > CPU > ALL
-                (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::CPU, ash::vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
-                (ash::vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
 
                 // ALL > OTHER
-                (ash::vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
+                (vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
 
                 // Default case for branch solver
                 (_, _) => unsafe { hint::unreachable_unchecked() },

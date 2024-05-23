@@ -1,3 +1,4 @@
+use ash::vk;
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
@@ -69,8 +70,8 @@ impl Identifiable for Attachment {
 pub struct AttachmentOptions {
     pub load_operation : AttachmentLoadOperation,
     pub store_operation : AttachmentStoreOperation,
-    pub initial_layout : ash::vk::ImageLayout,
-    pub final_layout : ash::vk::ImageLayout,
+    pub initial_layout : vk::ImageLayout,
+    pub final_layout : vk::ImageLayout,
 }
 
 impl ResourceOptions for AttachmentOptions {
@@ -110,7 +111,7 @@ pub enum AttachmentLoadOperation {
     //       but if the framebuffer has multiple attachments, we need a clear
     //       for all of them; do we abstract the framebuffer as multiple
     //       attachments or treat it as a single one?
-    Clear(ash::vk::ClearValue),
+    Clear(vk::ClearValue),
     #[default]
     DontCare,
 }

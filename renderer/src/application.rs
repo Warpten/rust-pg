@@ -1,4 +1,4 @@
-use std::{ffi::{CStr, CString}, mem::MaybeUninit, sync::Arc, time::SystemTime};
+use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
@@ -32,6 +32,7 @@ impl ApplicationOptions {
     }
 }
 
+#[derive(Debug)]
 pub enum ApplicationRenderError {
     InvalidSwapchain,
 }
@@ -139,7 +140,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => app.renderer().logical_device().wait_idle(),
+                Event::LoopExiting => app.renderer.logical_device().wait_idle(),
                 _ => { }
             }
         }
@@ -148,14 +149,12 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 
 pub struct Application {
-    context : Arc<Context>,
-    renderer : MaybeUninit<Renderer>,
+    pub context : Arc<Context>,
+    pub renderer : Renderer,
     window : Window,
 }
 
 impl Application {
-    #[inline] pub fn renderer(&self) -> &Renderer { unsafe { self.renderer.assume_init_ref() } }
-
     pub fn build<T>(setup: SetupFn<T>) -> ApplicationBuilder<T> {
         ApplicationBuilder {
             prepare: None,
@@ -177,14 +176,11 @@ impl Application {
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         });
 
-        let mut this = Self {
-            context,
-            renderer : MaybeUninit::uninit(),
+        Self {
+            context : context.clone(),
+            renderer : Renderer::new(&settings.renderer, &context, &window),
             window,
-        };
-
-        this.renderer.write(Renderer::new(&settings.renderer, &this.context, &this.window));
-        this
+        }
     }
 
     pub fn recreate_swapchain(&mut self) {

@@ -1,10 +1,10 @@
-use std::{mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{ffi::CString, mem::ManuallyDrop, sync::{Arc, Mutex}};
 
+use ash::{ext::debug_utils, vk};
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
 use crate::traits::handle::{BorrowHandle, Handle};
-
-use super::{Context, PhysicalDevice, Queue, QueueAffinity};
+use crate::vk::{Context, PhysicalDevice, Queue, QueueAffinity, Surface};
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
@@ -12,10 +12,11 @@ pub struct LogicalDevice {
     context : Arc<Context>,
     physical_device : PhysicalDevice,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+    debug_utils : Option<debug_utils::Device>,
 
     pub queues : Vec<Queue>,
 
-    pub features : ash::vk::PhysicalDeviceFeatures,
+    pub features : vk::PhysicalDeviceFeatures,
     pub indexing_features : IndexingFeatures,
 }
 
@@ -24,15 +25,25 @@ impl LogicalDevice {
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn get_queues(&self, affinity : QueueAffinity) -> Vec<&Queue> {
-        self.queues.iter().filter(|queue| queue.affinity().contains(affinity)).collect()
+    pub fn get_queues(&self, affinity : QueueAffinity, surface : &Arc<Surface>) -> Vec<&Queue> {
+        self.queues.iter().filter(|queue| {
+            let queue_affinity = queue.affinity();
+
+            if affinity.contains(QueueAffinity::Present) {
+                let filtered = affinity.and(QueueAffinity::not(QueueAffinity::Present));
+
+                queue.family().can_present(surface, &self.physical_device) && queue_affinity.contains(filtered)
+            } else {
+                queue_affinity.contains(affinity)
+            }
+        }).collect()
     }
 
     pub fn new(context : &Arc<Context>,
         device : ash::Device,
         physical_device : PhysicalDevice,
         queues : Vec<Queue>,
-        features : ash::vk::PhysicalDeviceFeatures,
+        features : vk::PhysicalDeviceFeatures,
         indexing_features : IndexingFeatures,
     )  -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
@@ -47,17 +58,50 @@ impl LogicalDevice {
         }).expect("Error creating an allocator");
 
         Self {
-            handle : device,
+            handle : device.clone(),
+            context : context.clone(),
+            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
             physical_device,
             features,
             indexing_features,
-            context : context.clone(),
             queues,
-            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
+            // TODO: Fix this being optional if the extension is not available
+            // debug_utils : Some(debug_utils::Device::new(&context.handle(), &device.clone())),
+            debug_utils : None,
         }
     }
 
-    pub fn find_memory_type(&self, memory_type_bits : u32, flags : ash::vk::MemoryPropertyFlags) -> u32 {
+    /// Sets the name of a vulkan handle.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `handle` - A handle to the object to name.
+    /// * `name` - The name to assign to that object.
+    pub(in crate) fn set_handle_name<T : ash::vk::Handle, S : Into<String>>(&self, handle : T, name : S) {
+        if let Some(debug_utils) = &self.debug_utils {
+            let cname = CString::new(Into::<String>::into(name)).unwrap();
+
+            let marker_info = vk::DebugUtilsObjectNameInfoEXT::default()
+                .object_name(cname.as_c_str())
+                .object_handle(handle);
+
+            unsafe {
+                _ = debug_utils.set_debug_utils_object_name(&marker_info);
+            }
+        }
+    }
+
+    /// Sets the name of an object encapsulating a vulkan handle.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `nameable` - An object that exposes a handle.
+    /// * `name` - The name to assign to that handle.
+    pub fn set_name<T : Handle, S : Into<String>>(&self, nameable : &T, name : S) {
+        self.set_handle_name(nameable.handle(), name);
+    }
+
+    pub fn find_memory_type(&self, memory_type_bits : u32, flags : vk::MemoryPropertyFlags) -> u32 {
         for (i, memory_type) in self.physical_device().memory_properties().memory_types.iter().enumerate() {
             if (memory_type_bits & (1 << i)) != 0 && (memory_type.property_flags & flags) == flags {
                 return i as _;
@@ -87,15 +131,16 @@ impl LogicalDevice {
     /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
     /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
     ///             completed execution.
-    pub fn submit(&self, queue : &Queue, submit_infos : &[ash::vk::SubmitInfo], fence : ash::vk::Fence) {
+    pub fn submit(&self, queue : &Queue, submit_infos : &[vk::SubmitInfo], fence : vk::Fence) {
         unsafe {
             self.handle.queue_submit(queue.handle(), submit_infos, fence)
                 .expect("Submission failed")
         }
     }
 
-    pub fn create_fence(&self, flags : ash::vk::FenceCreateFlags) -> ash::vk::Fence {
-        let create_info = ash::vk::FenceCreateInfo::default()
+    /// Creates a new fence.
+    pub fn create_fence(&self, flags : vk::FenceCreateFlags) -> vk::Fence {
+        let create_info = vk::FenceCreateInfo::default()
             .flags(flags);
 
         unsafe {
@@ -226,7 +271,7 @@ pub struct IndexingFeatures {
 }
 
 impl IndexingFeatures {
-    pub fn new(features : ash::vk::PhysicalDeviceDescriptorIndexingFeatures) -> Self {
+    pub fn new(features : vk::PhysicalDeviceDescriptorIndexingFeatures) -> Self {
         Self {
             shader_input_attachment_array_dynamic_indexing : features.shader_input_attachment_array_dynamic_indexing != 0,
             shader_uniform_texel_buffer_array_dynamic_indexing : features.shader_uniform_texel_buffer_array_dynamic_indexing != 0,

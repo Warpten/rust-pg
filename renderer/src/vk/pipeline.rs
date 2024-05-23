@@ -1,5 +1,6 @@
 use std::{fs, marker::PhantomData, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
+use ash::vk;
 use gpu_allocator::vulkan::Allocator;
 use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
 
@@ -7,24 +8,24 @@ use crate::{traits::handle::BorrowHandle, vk::{Context, LogicalDevice}};
 
 pub struct Shader {
     device : Arc<LogicalDevice>,
-    module : ash::vk::ShaderModule,
-    flags : ash::vk::ShaderStageFlags,
+    module : vk::ShaderModule,
+    flags : vk::ShaderStageFlags,
     path : PathBuf,
 }
 
-fn translate_shader_kind(stage : ash::vk::ShaderStageFlags) -> ShaderKind {
+fn translate_shader_kind(stage : vk::ShaderStageFlags) -> ShaderKind {
     match stage {
-        ash::vk::ShaderStageFlags::VERTEX => ShaderKind::Vertex,
-        ash::vk::ShaderStageFlags::FRAGMENT => ShaderKind::Fragment,
-        ash::vk::ShaderStageFlags::COMPUTE => ShaderKind::Compute,
-        ash::vk::ShaderStageFlags::TESSELLATION_CONTROL => ShaderKind::TessControl,
-        ash::vk::ShaderStageFlags::TESSELLATION_EVALUATION => ShaderKind::TessEvaluation,
-        ash::vk::ShaderStageFlags::GEOMETRY => ShaderKind::Geometry,
-        ash::vk::ShaderStageFlags::RAYGEN_KHR => ShaderKind::RayGeneration,
-        ash::vk::ShaderStageFlags::ANY_HIT_KHR => ShaderKind::AnyHit,
-        ash::vk::ShaderStageFlags::CLOSEST_HIT_KHR => ShaderKind::ClosestHit,
-        ash::vk::ShaderStageFlags::MISS_KHR => ShaderKind::Miss,
-        ash::vk::ShaderStageFlags::INTERSECTION_KHR => ShaderKind::Intersection,
+        vk::ShaderStageFlags::VERTEX => ShaderKind::Vertex,
+        vk::ShaderStageFlags::FRAGMENT => ShaderKind::Fragment,
+        vk::ShaderStageFlags::COMPUTE => ShaderKind::Compute,
+        vk::ShaderStageFlags::TESSELLATION_CONTROL => ShaderKind::TessControl,
+        vk::ShaderStageFlags::TESSELLATION_EVALUATION => ShaderKind::TessEvaluation,
+        vk::ShaderStageFlags::GEOMETRY => ShaderKind::Geometry,
+        vk::ShaderStageFlags::RAYGEN_KHR => ShaderKind::RayGeneration,
+        vk::ShaderStageFlags::ANY_HIT_KHR => ShaderKind::AnyHit,
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR => ShaderKind::ClosestHit,
+        vk::ShaderStageFlags::MISS_KHR => ShaderKind::Miss,
+        vk::ShaderStageFlags::INTERSECTION_KHR => ShaderKind::Intersection,
         _ => panic!("Unsupported shader stage"),
     }
 }
@@ -32,7 +33,7 @@ fn translate_shader_kind(stage : ash::vk::ShaderStageFlags) -> ShaderKind {
 impl Shader {
     #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
 
-    pub fn new(device : Arc<LogicalDevice>, path : PathBuf, flags : ash::vk::ShaderStageFlags) -> Self {
+    pub fn new(device : Arc<LogicalDevice>, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         let compiler = Compiler::new().expect("Failed to initialize shader compiler");
         let mut options = CompileOptions::new().unwrap();
         #[cfg(debug_assertions)]
@@ -55,7 +56,7 @@ impl Shader {
             Some(&options)
         ).unwrap();
 
-        let shader_info = ash::vk::ShaderModuleCreateInfo::default()
+        let shader_info = vk::ShaderModuleCreateInfo::default()
             .code(code.as_binary());
 
         let module = unsafe {
@@ -71,8 +72,8 @@ impl Shader {
         }
     }
 
-    pub fn stage_info(&self, spec : Option<ash::vk::SpecializationInfo>) -> ash::vk::PipelineShaderStageCreateInfo {
-        let create_info = ash::vk::PipelineShaderStageCreateInfo::default()
+    pub fn stage_info(&self, spec : Option<vk::SpecializationInfo>) -> vk::PipelineShaderStageCreateInfo {
+        let create_info = vk::PipelineShaderStageCreateInfo::default()
             .stage(self.flags)
             .module(self.module);
 
@@ -85,7 +86,7 @@ impl Shader {
 }
  
 impl BorrowHandle for Shader {
-    type Target = ash::vk::ShaderModule;
+    type Target = vk::ShaderModule;
 
     fn handle(&self) -> &Self::Target { &self.module }
 }
@@ -99,15 +100,15 @@ impl Drop for Shader {
 }
 
 pub struct PipelineInfo {
-    layout : ash::vk::PipelineLayout,
-    render_pass : Option<ash::vk::RenderPass>,
-    shaders : Vec<(PathBuf, ash::vk::ShaderStageFlags)>,
+    layout : vk::PipelineLayout,
+    render_pass : Option<vk::RenderPass>,
+    shaders : Vec<(PathBuf, vk::ShaderStageFlags)>,
     depth : DepthOptions,
-    cull_mode : ash::vk::CullModeFlags,
-    front_face : ash::vk::FrontFace,
+    cull_mode : vk::CullModeFlags,
+    front_face : vk::FrontFace,
 
     specialization_data: Vec<u8>,
-    specialization_entries: Vec<ash::vk::SpecializationMapEntry>,
+    specialization_entries: Vec<vk::SpecializationMapEntry>,
 }
 
 pub struct DepthOptions {
@@ -137,11 +138,11 @@ impl DepthOptions {
         self
     }
 
-    pub fn build(&self) -> ash::vk::PipelineDepthStencilStateCreateInfo {
-        let info = ash::vk::PipelineDepthStencilStateCreateInfo::default()
+    pub fn build(&self) -> vk::PipelineDepthStencilStateCreateInfo {
+        let info = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(self.test)
             .depth_write_enable(self.write)
-            .depth_compare_op(ash::vk::CompareOp::LESS);
+            .depth_compare_op(vk::CompareOp::LESS);
 
         match &self.bounds {
             Some(bounds) => {
@@ -159,17 +160,17 @@ impl DepthOptions {
 impl PipelineInfo {
     pub fn depth(&self) -> &DepthOptions { &self.depth }
 
-    pub fn layout(mut self, layout : ash::vk::PipelineLayout) -> Self {
+    pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
         self.layout = layout;
         self
     }
 
-    pub fn render_pass(mut self, render_pass : ash::vk::RenderPass) -> Self {
+    pub fn render_pass(mut self, render_pass : vk::RenderPass) -> Self {
         self.render_pass = Some(render_pass);
         self
     }
 
-    pub fn add_shader(mut self, path : PathBuf, flags : ash::vk::ShaderStageFlags) -> Self {
+    pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         self.shaders.push((path, flags));
         self
     }
@@ -181,7 +182,7 @@ impl PipelineInfo {
 
         let offset = self.specialization_data.len();
         self.specialization_data.append(&mut slice.to_vec());
-        self.specialization_entries.push(ash::vk::SpecializationMapEntry::default()
+        self.specialization_entries.push(vk::SpecializationMapEntry::default()
             .constant_id(constant_id)
             .offset(offset as _)
             .size(self.specialization_data.len()));
@@ -192,7 +193,7 @@ impl PipelineInfo {
 impl Default for PipelineInfo {
     fn default() -> Self {
         Self {
-            layout: ash::vk::PipelineLayout::default(),
+            layout: vk::PipelineLayout::default(),
             render_pass: None,
             shaders: vec![],
             depth : DepthOptions {
@@ -200,8 +201,8 @@ impl Default for PipelineInfo {
                 write : true,
                 bounds : None
             },
-            cull_mode: ash::vk::CullModeFlags::BACK,
-            front_face: ash::vk::FrontFace::COUNTER_CLOCKWISE,
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
 
             specialization_data : vec![],
             specialization_entries : vec![],
@@ -212,14 +213,14 @@ impl Default for PipelineInfo {
 struct Pipeline<V : VertexType> {
     device : Arc<LogicalDevice>,
     info : PipelineInfo,
-    handle : ash::vk::Pipeline,
+    handle : vk::Pipeline,
 
     _marker : PhantomData<V>,
 }
 
 pub trait VertexType {
-    fn attributes() -> Vec<ash::vk::VertexInputAttributeDescription>;
-    fn bindings() -> Vec<ash::vk::VertexInputBindingDescription>;
+    fn attributes() -> Vec<vk::VertexInputAttributeDescription>;
+    fn bindings() -> Vec<vk::VertexInputBindingDescription>;
 }
 
 impl<V : VertexType> Pipeline<V> {
@@ -237,53 +238,53 @@ impl<V : VertexType> Pipeline<V> {
             if info.specialization_entries.is_empty() {
                 shader.stage_info(None)
             } else {
-                shader.stage_info(ash::vk::SpecializationInfo::default()
+                shader.stage_info(vk::SpecializationInfo::default()
                     .map_entries(&info.specialization_entries)
                     .data(&info.specialization_data)
                     .into())
             }
         }).collect::<Vec<_>>();
 
-        let viewport_state = ash::vk::PipelineViewportStateCreateInfo::default()
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
             .scissor_count(1)
             .viewport_count(1);
 
-        let dynamic_state = ash::vk::PipelineDynamicStateCreateInfo::default()
+        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
             .dynamic_states(&[
-                ash::vk::DynamicState::VIEWPORT,
-                ash::vk::DynamicState::SCISSOR
+                vk::DynamicState::VIEWPORT,
+                vk::DynamicState::SCISSOR
             ]);
 
         let vertex_attributes = V::attributes();
         let vertex_bindings = V::bindings();
-        let vertex_input_state = ash::vk::PipelineVertexInputStateCreateInfo::default()
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_attribute_descriptions(&vertex_attributes)
             .vertex_binding_descriptions(&vertex_bindings);
 
-        let input_assembly_state = ash::vk::PipelineInputAssemblyStateCreateInfo::default()
+        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
             .primitive_restart_enable(false)
-            .topology(ash::vk::PrimitiveTopology::TRIANGLE_LIST);
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
         // TODO: Allow for depth bias configuration
-        let rasterization_state = ash::vk::PipelineRasterizationStateCreateInfo::default()
+        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
             .cull_mode(info.cull_mode)
             .line_width(1.0f32) // Any value larger than 1 requires a GPU feature
-            .polygon_mode(ash::vk::PolygonMode::FILL)
+            .polygon_mode(vk::PolygonMode::FILL)
             .front_face(info.front_face);
         
-        let multisample_state = ash::vk::PipelineMultisampleStateCreateInfo::default()
+        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
             .sample_shading_enable(false)
-            .rasterization_samples(ash::vk::SampleCountFlags::TYPE_1)
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
             .min_sample_shading(1.0f32)
             .alpha_to_coverage_enable(false)
             .alpha_to_one_enable(false);
 
         let depth_stencil_state = info.depth().build();
 
-        let color_blend_state = ash::vk::PipelineColorBlendStateCreateInfo::default()
-            .logic_op(ash::vk::LogicOp::CLEAR);
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+            .logic_op(vk::LogicOp::CLEAR);
 
-        let create_info = ash::vk::GraphicsPipelineCreateInfo::default()
+        let create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stage_create_infos[..])
             .viewport_state(&viewport_state)
             .dynamic_state(&dynamic_state)
@@ -293,13 +294,13 @@ impl<V : VertexType> Pipeline<V> {
             .multisample_state(&multisample_state)
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blend_state)
-            .render_pass(ash::vk::RenderPass::default())
+            .render_pass(vk::RenderPass::default())
             .layout(info.layout);
 
         let pipelines = unsafe {
             let pool_handle = pool.map(|p| p.handle())
                 .copied()
-                .unwrap_or(ash::vk::PipelineCache::null());
+                .unwrap_or(vk::PipelineCache::null());
 
             device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
                 .expect("Creating a graphics pipeline failed")
@@ -317,7 +318,7 @@ impl<V : VertexType> Pipeline<V> {
 
 pub struct PipelinePool {
     device : Arc<LogicalDevice>,
-    cache : ash::vk::PipelineCache,
+    cache : vk::PipelineCache,
 
     path : PathBuf,
 }
@@ -326,7 +327,7 @@ impl PipelinePool {
     pub fn new(device : Arc<LogicalDevice>, path : PathBuf) -> Self {
         let data = fs::read(path.as_path()).unwrap_or(vec![]);
         
-        let create_info = ash::vk::PipelineCacheCreateInfo::default()
+        let create_info = vk::PipelineCacheCreateInfo::default()
             .initial_data(&data);
 
         let cache = unsafe {
@@ -347,7 +348,7 @@ impl PipelinePool {
 }
 
 impl BorrowHandle for PipelinePool {
-    type Target = ash::vk::PipelineCache;
+    type Target = vk::PipelineCache;
 
     fn handle(&self) -> &Self::Target { &self.cache }
 }

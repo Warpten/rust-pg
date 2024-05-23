@@ -1,35 +1,35 @@
 use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
+use ash::vk;
 use crate::{traits::handle::{BorrowHandle, Handle}, vk::IndexingFeatures};
-
-use super::{QueueFamily, Context, LogicalDevice, Queue};
+use crate::vk::{QueueFamily, Context, LogicalDevice, Queue};
 
 #[derive(Clone)]
 pub struct PhysicalDevice {
-    handle : ash::vk::PhysicalDevice,
+    handle : vk::PhysicalDevice,
     context : Weak<Context>,
-    memory_properties : ash::vk::PhysicalDeviceMemoryProperties,
-    properties : ash::vk::PhysicalDeviceProperties,
+    memory_properties : vk::PhysicalDeviceMemoryProperties,
+    properties : vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
 }
 
 impl Handle for PhysicalDevice {
-    type Target = ash::vk::PhysicalDevice;
+    type Target = vk::PhysicalDevice;
 
-    fn handle(&self) -> ash::vk::PhysicalDevice { self.handle }
+    fn handle(&self) -> vk::PhysicalDevice { self.handle }
 }
 
 impl PhysicalDevice {
     #[inline] pub fn context(&self) -> &Weak<Context> { &self.context }
-    #[inline] pub fn memory_properties(&self) -> &ash::vk::PhysicalDeviceMemoryProperties { &self.memory_properties }
-    #[inline] pub fn properties(&self) -> &ash::vk::PhysicalDeviceProperties { &self.properties }
+    #[inline] pub fn memory_properties(&self) -> &vk::PhysicalDeviceMemoryProperties { &self.memory_properties }
+    #[inline] pub fn properties(&self) -> &vk::PhysicalDeviceProperties { &self.properties }
 
     /// Returns the extensions available on this [`PhysicalDevice`].
     ///
     /// # Panics
     ///
     /// Panics if [`vkEnumerateDeviceExtensionProperties`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumerateDeviceExtensionProperties.html) fails.
-    pub fn get_extensions(&self) -> Vec<ash::vk::ExtensionProperties> {
+    pub fn get_extensions(&self) -> Vec<vk::ExtensionProperties> {
         unsafe {
             self.context.upgrade()
                 .expect("Instance released too early")
@@ -83,7 +83,7 @@ impl PhysicalDevice {
             };
             priority_index += count;
             
-            queue_create_infos.push(ash::vk::DeviceQueueCreateInfo::default()
+            queue_create_infos.push(vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(family.index())
                 .queue_priorities(&flat_queue_priorities[queue_priorities_range]));
         }
@@ -94,15 +94,15 @@ impl PhysicalDevice {
             .collect::<Vec<_>>();
 
         
-        let mut physical_device_descriptor_indexing_features = ash::vk::PhysicalDeviceDescriptorIndexingFeatures::default();
+        let mut physical_device_descriptor_indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
 
-        let mut physical_device_features2 = ash::vk::PhysicalDeviceFeatures2::default()
+        let mut physical_device_features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut physical_device_descriptor_indexing_features);
         unsafe {
             instance.handle().get_physical_device_features2(self.handle, &mut physical_device_features2);
         }
 
-        let device_create_info = ash::vk::DeviceCreateInfo::default()
+        let device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .push_next(&mut physical_device_features2)
             .enabled_extension_names(&enabled_extension_names);
@@ -134,7 +134,7 @@ impl PhysicalDevice {
     /// * `device` - The physical device backing this logical device.
     /// * `instance` - The global Vulkan instance.
     pub fn new(
-        device : ash::vk::PhysicalDevice,
+        device : vk::PhysicalDevice,
         instance : &Arc<Context>
     ) -> Self {
         let physical_device_memory_properties = unsafe {
@@ -158,7 +158,7 @@ impl PhysicalDevice {
         }
     }
 
-    pub fn get_format_properties(&self, format : ash::vk::Format) -> Option<ash::vk::FormatProperties> {
+    pub fn get_format_properties(&self, format : vk::Format) -> Option<vk::FormatProperties> {
         unsafe {
             let context = self.context.upgrade();
             if let Some(context) = context {

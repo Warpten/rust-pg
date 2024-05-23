@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
+use ash::vk;
+
 use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
 
 /// See <https://github.com/KhronosGroup/Vulkan-Samples/blob/master/framework/semaphore_pool.h>.
 pub struct SemaphorePool {
     device: Arc<LogicalDevice>,
-    handles: Vec<ash::vk::Semaphore>,
+    handles: Vec<vk::Semaphore>,
     active_count: usize,
 }
 
@@ -18,14 +20,15 @@ impl SemaphorePool {
         }
     }
 
-    pub fn rent_semaphore(&mut self) -> ash::vk::Semaphore {
+    /// Requests a semaphore from the pool. If no semaphore is available, a new semaphore will be created and managed.
+    pub fn request(&mut self) -> vk::Semaphore {
         if self.active_count < self.handles.len() {
             let index = self.active_count;
             self.active_count = self.active_count + 1;
             self.handles[index]
         } else {
             unsafe {
-                let semaphore_create_info = ash::vk::SemaphoreCreateInfo::default();
+                let semaphore_create_info = vk::SemaphoreCreateInfo::default();
                 let semaphore = self
                     .device
                     .handle()
@@ -42,6 +45,7 @@ impl SemaphorePool {
         self.active_count
     }
 
+    /// Signals to this pool that all semaphores are free to use.
     pub fn reset(&mut self) {
         self.active_count = 0;
     }

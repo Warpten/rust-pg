@@ -1,20 +1,21 @@
 use std::sync::{Arc, Mutex};
 
+use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
 use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
 
 pub struct Image {
     device : Arc<LogicalDevice>,
-    handle : ash::vk::Image,
+    handle : vk::Image,
     allocation : Option<Allocation>,
-    view : ash::vk::ImageView,
+    view : vk::ImageView,
 
     levels : u32,
     layers : u32,
-    layout : ash::vk::ImageLayout,
-    format : ash::vk::Format,
-    extent : ash::vk::Extent3D,
+    layout : vk::ImageLayout,
+    format : vk::Format,
+    extent : vk::Extent3D,
 }
 
 impl Image { // Construction
@@ -31,8 +32,8 @@ impl Image { // Construction
     pub fn new(
         name : &'static str,
         device : &Arc<LogicalDevice>,
-        create_info : ash::vk::ImageCreateInfo,
-        aspect_mask : ash::vk::ImageAspectFlags,
+        create_info : vk::ImageCreateInfo,
+        aspect_mask : vk::ImageAspectFlags,
     ) -> Self
     {
         let image = unsafe {
@@ -57,9 +58,9 @@ impl Image { // Construction
 
         unsafe { device.handle().bind_image_memory(image, allocation.memory(), allocation.offset()).expect("Memory binding failed") };
 
-        let image_view_info = ash::vk::ImageViewCreateInfo::default()
-            .view_type(ash::vk::ImageViewType::TYPE_2D)
-            .subresource_range(ash::vk::ImageSubresourceRange::default()
+        let image_view_info = vk::ImageViewCreateInfo::default()
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .subresource_range(vk::ImageSubresourceRange::default()
                 .aspect_mask(aspect_mask)
                 .level_count(create_info.mip_levels)
                 .layer_count(create_info.array_layers))
@@ -84,20 +85,20 @@ impl Image { // Construction
         }
     }
 
-    pub fn from_swapchain(extent: &ash::vk::Extent2D, device: &Arc<LogicalDevice>, format: ash::vk::Format, images: Vec<ash::vk::Image>) -> Vec<Image> {
+    pub fn from_swapchain(extent: &vk::Extent2D, device: &Arc<LogicalDevice>, format: vk::Format, images: Vec<vk::Image>) -> Vec<Image> {
         images.iter().map(|&image| {
             unsafe {
-                let image_view_info = ash::vk::ImageViewCreateInfo::default()
-                    .view_type(ash::vk::ImageViewType::TYPE_2D)
+                let image_view_info = vk::ImageViewCreateInfo::default()
+                    .view_type(vk::ImageViewType::TYPE_2D)
                     .format(format)
-                    .components(ash::vk::ComponentMapping {
-                        r: ash::vk::ComponentSwizzle::R,
-                        g: ash::vk::ComponentSwizzle::G,
-                        b: ash::vk::ComponentSwizzle::B,
-                        a: ash::vk::ComponentSwizzle::A,
+                    .components(vk::ComponentMapping {
+                        r: vk::ComponentSwizzle::R,
+                        g: vk::ComponentSwizzle::G,
+                        b: vk::ComponentSwizzle::B,
+                        a: vk::ComponentSwizzle::A,
                     })
-                    .subresource_range(ash::vk::ImageSubresourceRange {
-                        aspect_mask: ash::vk::ImageAspectFlags::COLOR,
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
                         base_mip_level: 0,
                         level_count: 1,
                         base_array_layer: 0,
@@ -113,7 +114,7 @@ impl Image { // Construction
                 Self {
                     device: device.clone(),
                     handle: image,
-                    extent: ash::vk::Extent3D {
+                    extent: vk::Extent3D {
                         width: extent.width,
                         height: extent.height,
                         depth: 1
@@ -121,7 +122,7 @@ impl Image { // Construction
                     allocation: None,
                     view: image_view,
                     format,
-                    layout: ash::vk::ImageLayout::UNDEFINED,
+                    layout: vk::ImageLayout::UNDEFINED,
                     levels : 1,
                     layers : 1,
                 }
@@ -137,23 +138,23 @@ impl Image { // Getters
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.logical_device().allocator() }
 
     #[inline]
-    pub fn layout(&self) -> ash::vk::ImageLayout { self.layout }
+    pub fn layout(&self) -> vk::ImageLayout { self.layout }
     #[inline]
-    pub fn extent(&self) -> &ash::vk::Extent3D { &self.extent }
+    pub fn extent(&self) -> &vk::Extent3D { &self.extent }
 
-    pub fn view(&self) -> ash::vk::ImageView { self.view }
+    pub fn view(&self) -> vk::ImageView { self.view }
 
-    pub fn format(&self) -> ash::vk::Format { self.format }
+    pub fn format(&self) -> vk::Format { self.format }
 }
 
 impl Image { // Utilities
-    pub fn derive_aspect_flags(layout : ash::vk::ImageLayout, format : ash::vk::Format) -> ash::vk::ImageAspectFlags {
-        let mut aspect_flags = ash::vk::ImageAspectFlags::COLOR;
-        if layout == ash::vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
-            aspect_flags = ash::vk::ImageAspectFlags::DEPTH;
+    pub fn derive_aspect_flags(layout : vk::ImageLayout, format : vk::Format) -> vk::ImageAspectFlags {
+        let mut aspect_flags = vk::ImageAspectFlags::COLOR;
+        if layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+            aspect_flags = vk::ImageAspectFlags::DEPTH;
             match format {
-                ash::vk::Format::D32_SFLOAT_S8_UINT => aspect_flags |= ash::vk::ImageAspectFlags::STENCIL,
-                ash::vk::Format::D24_UNORM_S8_UINT => aspect_flags |= ash::vk::ImageAspectFlags::STENCIL,
+                vk::Format::D32_SFLOAT_S8_UINT => aspect_flags |= vk::ImageAspectFlags::STENCIL,
+                vk::Format::D24_UNORM_S8_UINT => aspect_flags |= vk::ImageAspectFlags::STENCIL,
                 _ => ()
             }
         }
@@ -168,54 +169,54 @@ impl Image { // Utilities
     /// * `from` - The old layout.
     /// * `to` - The new layout.
     /// * `mip_levels` - The mipmap levels that should be transitioned.
-    pub fn layout_transition(&self, command_buffer : ash::vk::CommandBuffer, from : ash::vk::ImageLayout, to : ash::vk::ImageLayout) {
+    pub fn layout_transition(&self, command_buffer : vk::CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout) {
         let aspect_flags = Image::derive_aspect_flags(to, self.format);
 
         let src_access_mask = match from {
-            ash::vk::ImageLayout::TRANSFER_DST_OPTIMAL => ash::vk::AccessFlags::TRANSFER_WRITE,
-            ash::vk::ImageLayout::PREINITIALIZED => ash::vk::AccessFlags::HOST_WRITE,
-            ash::vk::ImageLayout::GENERAL => ash::vk::AccessFlags::MEMORY_WRITE | ash::vk::AccessFlags::SHADER_WRITE,
-            _ => ash::vk::AccessFlags::default(),
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::PREINITIALIZED => vk::AccessFlags::HOST_WRITE,
+            vk::ImageLayout::GENERAL => vk::AccessFlags::MEMORY_WRITE | vk::AccessFlags::SHADER_WRITE,
+            _ => vk::AccessFlags::default(),
         };
 
         let dst_access_mask = match to {
-            ash::vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => ash::vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            ash::vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                => ash::vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | ash::vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-            ash::vk::ImageLayout::GENERAL => ash::vk::AccessFlags::empty(),
-            ash::vk::ImageLayout::PRESENT_SRC_KHR => ash::vk::AccessFlags::empty(),
-            ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => ash::vk::AccessFlags::SHADER_READ,
-            ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL => ash::vk::AccessFlags::TRANSFER_READ,
-            ash::vk::ImageLayout::TRANSFER_DST_OPTIMAL => ash::vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                => vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            vk::ImageLayout::GENERAL => vk::AccessFlags::empty(),
+            vk::ImageLayout::PRESENT_SRC_KHR => vk::AccessFlags::empty(),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => vk::AccessFlags::SHADER_READ,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => vk::AccessFlags::TRANSFER_READ,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::AccessFlags::TRANSFER_WRITE,
             _ => panic!("Incomprehensible layout transition"),
         };
 
         let src_stage = match from {
-            ash::vk::ImageLayout::GENERAL => ash::vk::PipelineStageFlags::ALL_COMMANDS,
-            ash::vk::ImageLayout::PREINITIALIZED => ash::vk::PipelineStageFlags::HOST,
-            ash::vk::ImageLayout::TRANSFER_DST_OPTIMAL => ash::vk::PipelineStageFlags::TRANSFER,
-            ash::vk::ImageLayout::UNDEFINED => ash::vk::PipelineStageFlags::TOP_OF_PIPE,
-            _ => ash::vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::ImageLayout::GENERAL => vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::ImageLayout::PREINITIALIZED => vk::PipelineStageFlags::HOST,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::PipelineStageFlags::TRANSFER,
+            vk::ImageLayout::UNDEFINED => vk::PipelineStageFlags::TOP_OF_PIPE,
+            _ => vk::PipelineStageFlags::ALL_COMMANDS,
         };
 
         let dst_stage = match to {
-            ash::vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => ash::vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            ash::vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => ash::vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-            ash::vk::ImageLayout::GENERAL => ash::vk::PipelineStageFlags::HOST,
-            ash::vk::ImageLayout::PRESENT_SRC_KHR => ash::vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-            ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
-            ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL => ash::vk::PipelineStageFlags::TRANSFER,
-            ash::vk::ImageLayout::TRANSFER_DST_OPTIMAL => ash::vk::PipelineStageFlags::TRANSFER,
-            _ => ash::vk::PipelineStageFlags::ALL_COMMANDS,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+            vk::ImageLayout::GENERAL => vk::PipelineStageFlags::HOST,
+            vk::ImageLayout::PRESENT_SRC_KHR => vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL => vk::PipelineStageFlags::TRANSFER,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::PipelineStageFlags::TRANSFER,
+            _ => vk::PipelineStageFlags::ALL_COMMANDS,
         };
 
-        let barrier = ash::vk::ImageMemoryBarrier::default()
+        let barrier = vk::ImageMemoryBarrier::default()
             .image(self.handle)
             .src_access_mask(src_access_mask)
             .dst_access_mask(dst_access_mask)
             .new_layout(to)
             .old_layout(from)
-            .subresource_range(ash::vk::ImageSubresourceRange::default()
+            .subresource_range(vk::ImageSubresourceRange::default()
                 .aspect_mask(aspect_flags)
                 .layer_count(self.layers)
                 .level_count(self.levels));
@@ -224,7 +225,7 @@ impl Image { // Utilities
             self.device.handle().cmd_pipeline_barrier(command_buffer,
                 src_stage,
                 dst_stage,
-                ash::vk::DependencyFlags::empty(), // No idea
+                vk::DependencyFlags::empty(), // No idea
                 &[],
                 &[],
                 &[barrier]);

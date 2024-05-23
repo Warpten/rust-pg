@@ -1,3 +1,4 @@
+use ash::vk;
 use egui_winit::winit::{self, event_loop::EventLoop, window::WindowBuilder};
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
@@ -30,7 +31,6 @@ impl Window {
             .expect("Failed to enumerate required display extensions")
             .to_vec();
 
-        surface_extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
         surface_extension_names
     }
 
@@ -39,9 +39,9 @@ impl Window {
         self.handle.set_title(title)
     }
 
-    pub fn size(&self) -> ash::vk::Extent2D {
+    pub fn size(&self) -> vk::Extent2D {
         let size = self.handle.inner_size();
-        ash::vk::Extent2D { width : size.width, height : size.height }
+        vk::Extent2D { width : size.width, height : size.height }
     }
 
     pub fn width(&self) -> u32 { self.handle.inner_size().width }

@@ -13,6 +13,7 @@ mod pipeline;
 mod render_pass;
 
 pub mod renderer;
+mod pool;
 
 pub use render_pass::*;
 pub use pipeline::*;

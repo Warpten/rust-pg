@@ -1,5 +1,5 @@
 pub trait Handle {
-    type Target;
+    type Target : ash::vk::Handle;
 
     fn handle(&self) -> Self::Target;
 }

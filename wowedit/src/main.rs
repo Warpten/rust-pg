@@ -1,6 +1,8 @@
-use renderer::vk::{renderer::{DynamicState, RendererOptions}};
+use renderer::vk::{renderer::{DynamicState, RendererOptions}, SwapchainOptions};
 use winit::event::WindowEvent;
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
+
+use ash::vk;
 
 mod casc;
 
@@ -18,19 +20,14 @@ fn prepare() -> ApplicationOptions {
         .renderer(RendererOptions::default()
             .line_width(DynamicState::Fixed(1.0f32))
             .resolution([1280, 720])
+            .multisampling(vk::SampleCountFlags::TYPE_1)
         )
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
-    let renderer = app.renderer();
-    let (semaphore, frame_index) = renderer.acquire_next_image()?;
-
-    // 1. Acquire a command buffer.
-    // 2. Begin the render pass.
-    // 3. 
-
-    renderer.submit_and_present(ash::vk::CommandBuffer::null(), semaphore);
-    Ok(()) 
+    app.renderer.run_frame(|_device, _cmd| {
+        // Do stuff here.
+    })
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {

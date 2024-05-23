@@ -1,25 +1,28 @@
 use std::{borrow::Borrow, ops::Range, sync::Arc};
 
+use ash::vk;
 use ash::prelude::VkResult;
 
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::{Framebuffer, Image, RenderPass}};
-
-use super::{Context, LogicalDevice, QueueFamily, RenderPassInfo, Surface};
+use crate::traits::handle::{BorrowHandle, Handle};
+use crate::vk::{Context, Framebuffer, Image, LogicalDevice, QueueFamily, RenderPass, RenderPassInfo, Surface};
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
     pub surface : Arc<Surface>,
 
-    handle : ash::vk::SwapchainKHR,
+    handle : vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
     
-    pub extent : ash::vk::Extent2D,
+    pub extent : vk::Extent2D,
     pub present_images : Vec<Image>,
     pub depth_images   : Vec<Image>,
+    pub resolve_images : Vec<Image>,
+    pub sample_count   : vk::SampleCountFlags,
+
     pub queue_families : Vec<QueueFamily>,
     layer_count : u32,
 
-    surface_format : ash::vk::SurfaceFormatKHR,
+    surface_format : vk::SurfaceFormatKHR,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -35,7 +38,7 @@ pub trait SwapchainOptions {
     /// This function should return `true` in one exact case; if it doesn't, whatever format is tested
     /// `true` first will be selected. If no format returns true, the first available format for will
     /// be selected.
-    fn select_surface_format(&self, format : &ash::vk::SurfaceFormatKHR) -> bool;
+    fn select_surface_format(&self, format : &vk::SurfaceFormatKHR) -> bool;
 
     /// Returns the width of the swapchain's images.
     fn width(&self) -> u32;
@@ -44,10 +47,10 @@ pub trait SwapchainOptions {
     fn height(&self) -> u32;
 
     /// Returns the composite flags to be used by the swapchain's images.
-    fn composite_alpha(&self) -> ash::vk::CompositeAlphaFlagsKHR { ash::vk::CompositeAlphaFlagsKHR::OPAQUE }
+    fn composite_alpha(&self) -> vk::CompositeAlphaFlagsKHR { vk::CompositeAlphaFlagsKHR::OPAQUE }
 
     /// Returns the presentation mode of this swapchain.
-    fn present_mode(&self) -> ash::vk::PresentModeKHR;
+    fn present_mode(&self) -> vk::PresentModeKHR;
 
     /// Returns the amount of layers of each texture of this swapchain.
     /// By default, there is only one layer.
@@ -63,6 +66,8 @@ pub trait SwapchainOptions {
 
     fn depth(&self) -> bool;
     fn stencil(&self) -> bool;
+
+    fn multisampling(&self) -> vk::SampleCountFlags { vk::SampleCountFlags::TYPE_1 }
 }
 
 impl Drop for Swapchain {
@@ -120,7 +125,7 @@ impl Swapchain {
         let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
             surface_capabilities.current_extent
         } else {
-            ash::vk::Extent2D {
+            vk::Extent2D {
                 width: options.width()
                     .clamp(surface_capabilities.min_image_extent.width, surface_capabilities.max_image_extent.width),
                 height: options.height()
@@ -138,12 +143,12 @@ impl Swapchain {
         let queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
 
         let image_sharing_mode = if queue_family_indices.len() == 1 {
-            ash::vk::SharingMode::EXCLUSIVE
+            vk::SharingMode::EXCLUSIVE
         } else {
-            ash::vk::SharingMode::CONCURRENT
+            vk::SharingMode::CONCURRENT
         };
 
-        let swapchain_create_info = ash::vk::SwapchainCreateInfoKHR::default()
+        let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface.handle())
             .min_image_count(image_count)
             .image_format(surface_format.format)
@@ -152,10 +157,10 @@ impl Swapchain {
             // Number of views in a multiview/stereo surface. For non-stereoscopic-3D applications, this value is 1.
             .image_array_layers(1)
             // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
-            .image_usage(ash::vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
-            .pre_transform(if surface_capabilities.supported_transforms.contains(ash::vk::SurfaceTransformFlagsKHR::IDENTITY) {
-                ash::vk::SurfaceTransformFlagsKHR::IDENTITY
+            .pre_transform(if surface_capabilities.supported_transforms.contains(vk::SurfaceTransformFlagsKHR::IDENTITY) {
+                vk::SurfaceTransformFlagsKHR::IDENTITY
             } else {
                 surface_capabilities.current_transform
             })
@@ -164,7 +169,7 @@ impl Swapchain {
             .composite_alpha(options.composite_alpha())
             // Presentation mode the swapchain will use. A swapchain’s present mode determines how incoming present
             // requests will be processed and queued internally.
-            .present_mode(ash::vk::PresentModeKHR::FIFO)
+            .present_mode(vk::PresentModeKHR::FIFO)
             // Specifies whether the Vulkan implementation is allowed to discard rendering operations that affect
             // regions of the surface that are not visible.
             .clipped(true);
@@ -188,37 +193,37 @@ impl Swapchain {
 
             let depth_format = RenderPass::find_supported_format(device,
                 &[
-                    ash::vk::Format::D32_SFLOAT,         // This has no stencil component soooo.. ???
-                    ash::vk::Format::D32_SFLOAT_S8_UINT,
-                    ash::vk::Format::D24_UNORM_S8_UINT,
-                    // ash::vk::Format::D16_UNORM_S8_UINT, // Not supported on my hardware
-                    // ash::vk::Format::S8_UINT is exclusively stencil
+                    vk::Format::D32_SFLOAT,         // This has no stencil component soooo.. ???
+                    vk::Format::D32_SFLOAT_S8_UINT,
+                    vk::Format::D24_UNORM_S8_UINT,
+                    // vk::Format::D16_UNORM_S8_UINT, // Not supported on my hardware
+                    // vk::Format::S8_UINT is exclusively stencil
                 ],
-                ash::vk::ImageTiling::OPTIMAL,
-                ash::vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
+                vk::ImageTiling::OPTIMAL,
+                vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
             ).expect("Failed to find an usable depth format");
 
-            let mut depth_aspect_flags = ash::vk::ImageAspectFlags::DEPTH;
-            if depth_format == ash::vk::Format::D32_SFLOAT_S8_UINT || depth_format == ash::vk::Format::D24_UNORM_S8_UINT {
-                depth_aspect_flags |= ash::vk::ImageAspectFlags::STENCIL;
+            let mut depth_aspect_flags = vk::ImageAspectFlags::DEPTH;
+            if depth_format == vk::Format::D32_SFLOAT_S8_UINT || depth_format == vk::Format::D24_UNORM_S8_UINT {
+                depth_aspect_flags |= vk::ImageAspectFlags::STENCIL;
             }
 
             for _ in 0..present_images.len() {
                 depth_images.push(Image::new("Swapchain Depth Stencil",
                     device,
-                    ash::vk::ImageCreateInfo::default()
-                        .image_type(ash::vk::ImageType::TYPE_2D)
+                    vk::ImageCreateInfo::default()
+                        .image_type(vk::ImageType::TYPE_2D)
                         .format(depth_format)
-                        .extent(ash::vk::Extent3D {
+                        .extent(vk::Extent3D {
                             width : surface_extent.width,
                             height : surface_extent.height,
                             depth : 1
                         })
                         .mip_levels(1)
                         .array_layers(1)
-                        .samples(ash::vk::SampleCountFlags::TYPE_1)
-                        .tiling(ash::vk::ImageTiling::OPTIMAL)
-                        .usage(ash::vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+                        .samples(options.multisampling())
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
                         .sharing_mode(image_sharing_mode),
                     depth_aspect_flags
                 ));
@@ -226,7 +231,32 @@ impl Swapchain {
             depth_images
         } else { vec![] };
 
-        // TODO: Add resolve images here for multisampling
+        let resolve_images = {
+            let mut resolve_images = Vec::<Image>::new();
+            if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
+                for i in 0..present_images.len() {
+                    resolve_images.push(Image::new("Swapchain Multisampling Resolve",
+                        device,
+                        vk::ImageCreateInfo::default()
+                            .image_type(vk::ImageType::TYPE_2D)
+                            .format(surface_format.format)
+                            .extent(vk::Extent3D {
+                                width : surface_extent.width,
+                                height : surface_extent.height,
+                                depth : 1
+                            })
+                            .mip_levels(1)
+                            .array_layers(1)
+                            .samples(options.multisampling())
+                            .tiling(vk::ImageTiling::OPTIMAL)
+                            .usage(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                            .sharing_mode(image_sharing_mode),
+                        vk::ImageAspectFlags::COLOR
+                    ));
+                }
+            }
+            resolve_images
+        };
 
         Arc::new(Self {
             device : device.clone(),
@@ -237,7 +267,9 @@ impl Swapchain {
             loader : swapchain_loader,
             present_images,
             depth_images,
+            resolve_images,
             queue_families,
+            sample_count : options.multisampling(),
 
             surface_format
         })
@@ -252,14 +284,21 @@ impl Swapchain {
             Some(image) => vec![image],
             None => vec![]
         };
+        let resolve_images = match self.resolve_images.get(0) {
+            Some(image) => vec![image],
+            None => vec![]
+        };
 
         RenderPass::new(
             &self.device,
             RenderPassInfo {
                 color_images,
                 depth_images,
+                resolve_images,
+
                 present : true,
-                final_layout : ash::vk::ImageLayout::PRESENT_SRC_KHR
+                sample_count : self.sample_count,
+                final_layout : vk::ImageLayout::PRESENT_SRC_KHR
             }
         )
     }
@@ -267,14 +306,21 @@ impl Swapchain {
     pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
         let mut framebuffers = Vec::<Framebuffer>::with_capacity(self.present_images.len());
         for i in 0..self.present_images.len() {
-            let mut attachment = Vec::<ash::vk::ImageView>::new();
-            
-            attachment.push(self.present_images[i].view());
-            if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
-                attachment.push(depth_image);
+            let mut attachment = Vec::<vk::ImageView>::new();
+            if self.resolve_images.is_empty() {
+                attachment.push(self.present_images[i].view());
+                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
+                    attachment.push(depth_image);
+                }
+            } else {
+                attachment.push(self.resolve_images[i].view());
+                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
+                    attachment.push(depth_image);
+                }
+                attachment.push(self.present_images[i].view());
             }
 
-            let create_info = ash::vk::FramebufferCreateInfo::default()
+            let create_info = vk::FramebufferCreateInfo::default()
                 .render_pass(render_pass.handle())
                 .attachments(&attachment)
                 .width(self.extent.width)
@@ -288,20 +334,20 @@ impl Swapchain {
     }
 
     /// Acquires the next image. Returns the image index, and wether the swapchain is suboptimal for the surface.
-    pub(in crate) fn acquire_image(&self, semaphore : ash::vk::Semaphore, fence : ash::vk::Fence) -> VkResult<(u32, bool)> {
+    pub(in crate) fn acquire_image(&self, semaphore : vk::Semaphore, fence : vk::Fence, timeout : u64) -> VkResult<(u32, bool)> {
         unsafe {
-            self.loader.acquire_next_image(self.handle, u64::MAX, semaphore, fence)
+            self.loader.acquire_next_image(self.handle, timeout, semaphore, fence)
         }
     }
 
-    pub fn format(&self) -> ash::vk::Format { self.surface_format.format }
-    pub fn color_space(&self) -> ash::vk::ColorSpaceKHR { self.surface_format.color_space}
+    pub fn format(&self) -> vk::Format { self.surface_format.format }
+    pub fn color_space(&self) -> vk::ColorSpaceKHR { self.surface_format.color_space}
     pub fn layer_count(&self) -> u32 { self.layer_count }
     pub fn image_count(&self) -> usize { self.present_images.len() }
 }
 
 impl Handle for Swapchain {
-    type Target = ash::vk::SwapchainKHR;
+    type Target = vk::SwapchainKHR;
 
     fn handle(&self) -> Self::Target {
         self.handle

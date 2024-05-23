@@ -1,36 +1,37 @@
 use std::sync::Arc;
 
+use ash::vk;
 use crate::{traits::handle::{BorrowHandle, Handle}, vk::QueueFamily};
-
-use super::LogicalDevice;
+use crate::vk::LogicalDevice;
 
 pub struct CommandPool {
-    handle : ash::vk::CommandPool,
+    handle : vk::CommandPool,
     device : Arc<LogicalDevice>,
 }
 
 impl CommandPool {
     pub fn device(&self) -> &LogicalDevice { &self.device }
 
-    pub(in crate) fn rent_one(&self, level : ash::vk::CommandBufferLevel) -> ash::vk::CommandBuffer {
+    pub(in crate) fn rent_one(&self, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
         self.rent(level, 1)[0]
     }
 
-    pub(in crate) fn rent(&self, level : ash::vk::CommandBufferLevel, count : u32) -> Vec<ash::vk::CommandBuffer> {
-        let options = ash::vk::CommandBufferAllocateInfo::default()
+    pub(in crate) fn rent(&self, level : vk::CommandBufferLevel, count : u32) -> Vec<vk::CommandBuffer> {
+        let options = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.handle)
             .level(level)
             .command_buffer_count(count);
 
         unsafe {
-            self.device.handle().allocate_command_buffers(&options).unwrap()
+            self.device.handle().allocate_command_buffers(&options)
+                .expect("Failed to allocate command buffers")
         }
     }
 
     pub(in crate) fn create<'a>(family : &QueueFamily, device : &Arc<LogicalDevice>) -> Self {
         let handle = {
-            let command_pool_create_info = ash::vk::CommandPoolCreateInfo::default()
-                .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            let command_pool_create_info = vk::CommandPoolCreateInfo::default()
+                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
                 .queue_family_index(family.index());
             unsafe {
                 device.handle().create_command_pool(&command_pool_create_info, None)
@@ -55,7 +56,7 @@ impl CommandPool {
     /// 
     /// Any primary command buffer allocated from another VkCommandPool that is in the recording or executable
     /// state and has a secondary command buffer allocated from commandPool recorded into it, becomes invalid.
-    pub fn reset(&self, flags : ash::vk::CommandPoolResetFlags) {
+    pub fn reset(&self, flags : vk::CommandPoolResetFlags) {
         unsafe {
             let _ = self.device.handle().reset_command_pool(self.handle, flags);
         }
@@ -71,7 +72,7 @@ impl CommandPool {
     /// 
     /// Any primary command buffer that is in the recording or executable state and has any element, of any of the
     /// given command buffers, recorded into it, becomes invalid.
-    pub fn free_command_buffers(&self, command_buffers : Vec<ash::vk::CommandBuffer>) {
+    pub fn free_command_buffers(&self, command_buffers : Vec<vk::CommandBuffer>) {
         unsafe {
             self.device.handle().free_command_buffers(self.handle, &command_buffers);
         }
@@ -85,7 +86,7 @@ impl CommandPool {
     /// # Arguments
     /// 
     /// * `flags` - Reserved for future uses.
-    pub fn trim(&self, flags : ash::vk::CommandPoolTrimFlags) {
+    pub fn trim(&self, flags : vk::CommandPoolTrimFlags) {
         unsafe {
             self.device.handle().trim_command_pool(self.handle, flags);
         }
@@ -93,9 +94,9 @@ impl CommandPool {
 }
 
 impl Handle for CommandPool {
-    type Target = ash::vk::CommandPool;
+    type Target = vk::CommandPool;
 
-    fn handle(&self) -> ash::vk::CommandPool { self.handle }
+    fn handle(&self) -> vk::CommandPool { self.handle }
 }
 
 impl Drop for CommandPool {

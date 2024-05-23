@@ -1,21 +1,23 @@
 use std::{hash::Hash, sync::Arc};
 
+use ash::vk;
 use bitmask_enum::bitmask;
 
 use crate::{traits::handle::Handle, vk::{CommandPool, LogicalDevice, PhysicalDevice, Surface}};
 
 /// A logical queue associated with a logical device.
 pub struct Queue {
-    handle : ash::vk::Queue,
+    handle : vk::Queue,
     index : u32,
     family : QueueFamily,
 }
 
 #[bitmask(u8)]
 pub enum QueueAffinity {
-    Compute = 0x01,
-    Graphics = 0x02,
-    Transfer = 0x04,
+    Compute,
+    Graphics,
+    Transfer,
+    Present
 }
 
 impl Queue {
@@ -31,9 +33,15 @@ impl Queue {
 
     pub fn affinity(&self) -> QueueAffinity {
         let mut affinity = QueueAffinity::none();
-        if self.family.is_compute() { affinity = affinity.and(QueueAffinity::Compute) };
-        if self.family.is_graphics() { affinity = affinity.and(QueueAffinity::Graphics) };
-        if self.family.is_transfer() { affinity = affinity.and(QueueAffinity::Transfer) };
+        if self.family.is_compute() {
+            affinity = affinity.or(QueueAffinity::Compute);
+        }
+        if self.family.is_graphics() {
+            affinity = affinity.or(QueueAffinity::Graphics)
+        };
+        if self.family.is_transfer() {
+            affinity = affinity.or(QueueAffinity::Transfer)
+        };
         affinity
     }
 
@@ -46,9 +54,9 @@ impl Queue {
 }
 
 impl Handle for Queue {
-    type Target = ash::vk::Queue;
+    type Target = vk::Queue;
 
-    fn handle(&self) -> ash::vk::Queue { self.handle }
+    fn handle(&self) -> vk::Queue { self.handle }
 }
 
 /// A queue family.
@@ -70,26 +78,26 @@ pub struct QueueFamily {
     /// The index of this queue family.
     index : u32,
     /// An object describing properties of this queue family.
-    properties : ash::vk::QueueFamilyProperties,
+    properties : vk::QueueFamilyProperties,
 }
 
 impl QueueFamily {
-    pub fn new(index : u32, properties : ash::vk::QueueFamilyProperties) -> Self {
+    pub fn new(index : u32, properties : vk::QueueFamilyProperties) -> Self {
         Self { index, properties }
     }
 
     #[inline] pub fn index(&self) -> u32 { self.index }
 
     /// Checks if this queue family supports graphics operations.
-    #[inline] pub fn is_graphics(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::GRAPHICS) }
+    #[inline] pub fn is_graphics(&self) -> bool { self.properties.queue_flags.contains(vk::QueueFlags::GRAPHICS) }
     
     /// Checks if this queue family supports compute operations.
-    #[inline] pub fn is_compute(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::COMPUTE) }
+    #[inline] pub fn is_compute(&self) -> bool { self.properties.queue_flags.contains(vk::QueueFlags::COMPUTE) }
 
     /// Checks if this queue family supports transfer operations.
-    #[inline] pub fn is_transfer(&self) -> bool { self.properties.queue_flags.contains(ash::vk::QueueFlags::TRANSFER) || self.is_compute() || self.is_graphics() }
+    #[inline] pub fn is_transfer(&self) -> bool { self.properties.queue_flags.contains(vk::QueueFlags::TRANSFER) || self.is_compute() || self.is_graphics() }
 
-    #[inline] pub fn min_image_transfer_granularity(&self) -> ash::vk::Extent3D {
+    #[inline] pub fn min_image_transfer_granularity(&self) -> vk::Extent3D {
         self.properties.min_image_transfer_granularity
     }
 

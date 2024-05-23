@@ -1,48 +1,50 @@
+use ash::vk;
+
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::pass::Pass;
 use crate::graph::resource::{Identifiable, PhysicalResourceID, ResourceAccessFlags, ResourceID, ResourceOptions};
 
-pub struct Texture { // Graph wrapper for ash::vk::Image
+pub struct Texture { // Graph wrapper for vk::Image
     id   : TextureID,
     name : &'static str,
 
-    extent : ash::vk::Extent3D,
-    tiling : ash::vk::ImageTiling,
-    image_type : ash::vk::ImageType,
-    layout : ash::vk::ImageLayout,
+    extent : vk::Extent3D,
+    tiling : vk::ImageTiling,
+    image_type : vk::ImageType,
+    layout : vk::ImageLayout,
     levels : u32,
     layers : u32,
-    format : ash::vk::Format,
+    format : vk::Format,
 }
 
 /// A trait that provides image extent and image type.
 pub trait ImageExtent {
-    fn extent(&self) -> ash::vk::Extent3D;
-    fn image_type(&self) -> ash::vk::ImageType;
+    fn extent(&self) -> vk::Extent3D;
+    fn image_type(&self) -> vk::ImageType;
 }
 
-impl ImageExtent for ash::vk::Extent2D {
-    fn extent(&self) -> ash::vk::Extent3D {
-        ash::vk::Extent3D::default()
+impl ImageExtent for vk::Extent2D {
+    fn extent(&self) -> vk::Extent3D {
+        vk::Extent3D::default()
             .width(self.width)
             .height(self.height)
             .depth(1)
     }
 
-    fn image_type(&self) -> ash::vk::ImageType { ash::vk::ImageType::TYPE_2D }
+    fn image_type(&self) -> vk::ImageType { vk::ImageType::TYPE_2D }
 }
 
-impl ImageExtent for ash::vk::Extent3D {
-    fn extent(&self) -> ash::vk::Extent3D { *self }
+impl ImageExtent for vk::Extent3D {
+    fn extent(&self) -> vk::Extent3D { *self }
 
-    fn image_type(&self) -> ash::vk::ImageType { ash::vk::ImageType::TYPE_3D }
+    fn image_type(&self) -> vk::ImageType { vk::ImageType::TYPE_3D }
 }
 
 impl Texture { // Vulkan API exposed
-    /// Returns an instance of [`ash::vk::ImageCreateInfo`] tailored for this texture.
-    pub fn create_info(&self) -> ash::vk::ImageCreateInfo {
-        ash::vk::ImageCreateInfo::default()
+    /// Returns an instance of [`vk::ImageCreateInfo`] tailored for this texture.
+    pub fn create_info(&self) -> vk::ImageCreateInfo {
+        vk::ImageCreateInfo::default()
             .mip_levels(self.levels)
             .array_layers(self.layers)
             .format(self.format)
@@ -59,7 +61,7 @@ impl Texture {
     /// # Arguments
     ///
     /// * `name` - The name of this texture.
-    /// * `extent` - An extent (either [`ash::vk::Extent2D`] or [`ash::vk::Extent3D`]) describing
+    /// * `extent` - An extent (either [`vk::Extent2D`] or [`vk::Extent3D`]) describing
     ///              the dimensions of the resource. Users can implement the [`ImageExtent`] trait on
     ///              their own types if they wish to.
     pub fn new(name : &'static str, extent : &impl ImageExtent) -> Texture {
@@ -69,16 +71,16 @@ impl Texture {
 
             extent : extent.extent(),
             image_type : extent.image_type(),
-            tiling : ash::vk::ImageTiling::OPTIMAL,
-            layout : ash::vk::ImageLayout::UNDEFINED,
+            tiling : vk::ImageTiling::OPTIMAL,
+            layout : vk::ImageLayout::UNDEFINED,
             levels : 1,
             layers : 1,
-            format : ash::vk::Format::UNDEFINED
+            format : vk::Format::UNDEFINED
         }
     }
 
-    #[inline] pub fn layout(&self) -> ash::vk::ImageLayout { self.layout }
-    #[inline] pub fn with_layout(mut self, layout : ash::vk::ImageLayout) -> Self {
+    #[inline] pub fn layout(&self) -> vk::ImageLayout { self.layout }
+    #[inline] pub fn with_layout(mut self, layout : vk::ImageLayout) -> Self {
         self.layout = layout;
         self
     }
@@ -95,8 +97,8 @@ impl Texture {
         self
     }
 
-    #[inline] pub fn tiling(&self) -> ash::vk::ImageTiling { self.tiling }
-    #[inline] pub fn with_tiling(mut self, tiling : ash::vk::ImageTiling) -> Self {
+    #[inline] pub fn tiling(&self) -> vk::ImageTiling { self.tiling }
+    #[inline] pub fn with_tiling(mut self, tiling : vk::ImageTiling) -> Self {
         self.tiling = tiling;
         self
     }
@@ -179,8 +181,8 @@ impl Identifiable for Texture {
 
 #[derive(Default)]
 pub struct TextureOptions {
-    pub usage_flags : ash::vk::ImageUsageFlags,
-    pub layout : Option<ash::vk::ImageLayout>,
+    pub usage_flags : vk::ImageUsageFlags,
+    pub layout : Option<vk::ImageLayout>,
 }
 
 impl ResourceOptions for TextureOptions {
