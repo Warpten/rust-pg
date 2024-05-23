@@ -353,5 +353,11 @@ impl BorrowHandle for PipelinePool {
 }
 
 impl Drop for PipelinePool {
-    fn drop(&mut self) { self.save() }
+    fn drop(&mut self) {
+        self.save();
+
+        unsafe {
+            self.device.handle().destroy_pipeline_cache(self.cache, None);
+        }
+    }
 }

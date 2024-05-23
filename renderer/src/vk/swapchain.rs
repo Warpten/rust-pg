@@ -180,20 +180,37 @@ impl Swapchain {
 
             Image::from_swapchain(&surface_extent, &device, surface_format.format, swapchain_images)
         };
-        let present_views = present_images.iter().map(Image::view).collect::<Vec<_>>();
 
         let depth_images = if options.depth() {
             let mut depth_images = vec![];
+
+            let depth_format = RenderPass::find_supported_format(device,
+                &[
+                    ash::vk::Format::D32_SFLOAT,         // This has no stencil component soooo.. ???
+                    ash::vk::Format::D32_SFLOAT_S8_UINT,
+                    ash::vk::Format::D24_UNORM_S8_UINT,
+                    // ash::vk::Format::D16_UNORM_S8_UINT, // Not supported on my hardware
+                    // ash::vk::Format::S8_UINT is exclusively stencil
+                ],
+                ash::vk::ImageTiling::OPTIMAL,
+                ash::vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
+            ).expect("Failed to find an usable depth format");
+
+            let mut depth_aspect_flags = ash::vk::ImageAspectFlags::DEPTH;
+            if depth_format == ash::vk::Format::D32_SFLOAT_S8_UINT || depth_format == ash::vk::Format::D24_UNORM_S8_UINT {
+                depth_aspect_flags |= ash::vk::ImageAspectFlags::STENCIL;
+            }
+
             for _ in 0..present_images.len() {
                 depth_images.push(Image::new("Swapchain Depth Stencil",
                     device,
                     ash::vk::ImageCreateInfo::default()
                         .image_type(ash::vk::ImageType::TYPE_2D)
-                        .format(ash::vk::Format::D16_UNORM)
+                        .format(depth_format)
                         .extent(ash::vk::Extent3D {
                             width : surface_extent.width,
                             height : surface_extent.height,
-                        depth : 1
+                            depth : 1
                         })
                         .mip_levels(1)
                         .array_layers(1)
@@ -201,7 +218,7 @@ impl Swapchain {
                         .tiling(ash::vk::ImageTiling::OPTIMAL)
                         .usage(ash::vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
                         .sharing_mode(image_sharing_mode),
-                    ash::vk::ImageAspectFlags::DEPTH | ash::vk::ImageAspectFlags::STENCIL
+                    depth_aspect_flags
                 ));
             }
             depth_images
@@ -262,9 +279,7 @@ impl Swapchain {
                 .height(self.extent.height)
                 .layers(self.layer_count);
 
-            unsafe {
-                framebuffers.push(Framebuffer::new(&self.device, create_info));
-            }
+            framebuffers.push(Framebuffer::new(&self.device, create_info));
         }
 
         framebuffers

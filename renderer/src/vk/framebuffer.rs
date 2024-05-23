@@ -8,6 +8,7 @@ use crate::{traits::handle::{BorrowHandle, Handle}, vk::{LogicalDevice, RenderPa
 // - views should own, but it doens't (this is probably a leak!)
 
 pub struct Framebuffer {
+    device : Arc<LogicalDevice>,
     handle : ash::vk::Framebuffer,
 }
 
@@ -18,7 +19,7 @@ impl Framebuffer {
                 .expect("Creating the framebuffer failed")
         };
 
-        Self { handle }
+        Self { handle, device : device.clone() }
     }
 }
 
@@ -26,4 +27,12 @@ impl Handle for Framebuffer {
     type Target = ash::vk::Framebuffer;
 
     fn handle(&self) -> Self::Target { self.handle }
+}
+
+impl Drop for Framebuffer {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.handle().destroy_framebuffer(self.handle, None);
+        }
+    }
 }

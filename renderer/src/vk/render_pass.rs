@@ -17,7 +17,7 @@ pub struct RenderPassInfo<'a> {
 }
 
 impl RenderPass {
-    fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[ash::vk::Format], tiling : ash::vk::ImageTiling, flags : ash::vk::FormatFeatureFlags) -> Option<ash::vk::Format> {
+    pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[ash::vk::Format], tiling : ash::vk::ImageTiling, flags : ash::vk::FormatFeatureFlags) -> Option<ash::vk::Format> {
         for &format in formats {
             let properties = device.physical_device().get_format_properties(format);
             if let Some(properties) = properties {
@@ -44,9 +44,10 @@ impl RenderPass {
             let mut color_attachment_refs = Vec::<ash::vk::AttachmentReference>::new();
             for color_image in info.color_images {
                 let mut layout = ash::vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
-                if info.present {
-                    layout = info.final_layout;
-                }
+                // Fix this for multisampling
+                // if info.present {
+                //     layout = info.final_layout;
+                // }
 
                 descs.push(ash::vk::AttachmentDescription::default()
                     .format(color_image.format())
