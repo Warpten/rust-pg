@@ -2,9 +2,7 @@ use std::{hash::Hash, sync::Arc};
 
 use bitmask_enum::bitmask;
 
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::{CommandPool, LogicalDevice, PhysicalDevice, Surface}};
-
-use super::Context;
+use crate::{traits::handle::Handle, vk::{CommandPool, LogicalDevice, PhysicalDevice, Surface}};
 
 /// A logical queue associated with a logical device.
 pub struct Queue {
@@ -17,13 +15,7 @@ pub struct Queue {
 pub enum QueueAffinity {
     Compute = 0x01,
     Graphics = 0x02,
-    Transfer = 0x04
-}
-
-pub struct QueueDebugOptions {
-    context : Arc<Context>,
-    name : &'static str,
-    color : [f32; 4],
+    Transfer = 0x04,
 }
 
 impl Queue {

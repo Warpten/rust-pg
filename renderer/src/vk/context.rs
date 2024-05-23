@@ -1,7 +1,7 @@
 use std::backtrace::Backtrace;
 use std::ffi::CStr;
 use std::ptr::null;
-use std::slice;
+use std::{hint, slice};
 use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
 use crate::traits::handle::BorrowHandle;
@@ -43,11 +43,13 @@ impl Context {
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
+            _ => hint::unreachable_unchecked()
         };
         let types = match message_types {
             ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
             ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
             ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
+            _ => hint::unreachable_unchecked()
         };
         let callback_data = &*p_callback_data;
 

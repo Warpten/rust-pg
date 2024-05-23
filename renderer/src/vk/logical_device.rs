@@ -4,7 +4,7 @@ use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, A
 
 use crate::traits::handle::{BorrowHandle, Handle};
 
-use super::{Queue, Context, PhysicalDevice};
+use super::{Context, PhysicalDevice, Queue, QueueAffinity};
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
@@ -23,6 +23,10 @@ impl LogicalDevice {
     pub fn context(&self) -> &Arc<Context> { &self.context }
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
+
+    pub fn get_queues(&self, affinity : QueueAffinity) -> Vec<&Queue> {
+        self.queues.iter().filter(|queue| queue.affinity().contains(affinity)).collect()
+    }
 
     pub fn new(context : &Arc<Context>,
         device : ash::Device,

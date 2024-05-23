@@ -1,11 +1,12 @@
 use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, path::PathBuf, sync::{Arc, Mutex}};
 
+use ash::vk;
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 
 use crate::{window::Window, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}};
 
-use super::{Framebuffer, RenderPass};
+use super::{Framebuffer, QueueAffinity, RenderPass};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -117,6 +118,10 @@ pub struct Renderer {
     // The application driving the renderer is in charge of adding as many graphs as needed. They will be
     // baked, invalidated, scheduled and executed in order.
     graphs : Vec<Graph>,
+
+    present_semaphore : ash::vk::Semaphore,
+    render_semaphore : ash::vk::Semaphore,
+    render_fence : ash::vk::Fence,
 }
 
 impl Renderer {
@@ -169,6 +174,26 @@ impl Renderer {
             buffer_device_address: false,
         }).unwrap();
 
+        let render_fence = unsafe {
+            let create_info = ash::vk::FenceCreateInfo::default()
+                .flags(ash::vk::FenceCreateFlags::SIGNALED);
+
+            logical_device.handle().create_fence(&create_info, None)
+                .expect("Failed to create rendering fence")
+        };
+
+        let (present_semaphore, render_semaphore) = unsafe {
+            let create_info = ash::vk::SemaphoreCreateInfo::default();
+
+            let p = logical_device.handle().create_semaphore(&create_info, None)
+                .expect("Failed to create the present semaphore");
+            
+            let r = logical_device.handle().create_semaphore(&create_info, None)
+                .expect("Failed to create the present semaphore");
+
+            (p, r)
+        };
+
         Self {
             context : context.clone(),
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
@@ -178,7 +203,56 @@ impl Renderer {
             render_pass,
             framebuffers,
             graphs : vec![],
-            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator)))
+            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
+
+            render_fence,
+            present_semaphore,
+            render_semaphore
+        }
+    }
+
+    pub fn draw_frame(&self) {
+        unsafe {
+            self.logical_device().handle().wait_for_fences(&[self.render_fence], true, u64::MAX);
+            self.logical_device().handle().reset_fences(&[self.render_fence]);
+        }
+
+        // TODO: Make these comments true
+
+        // The swapchain was created by the graph, as well as the render pass and the frame buffers
+        let (image_index, suboptimal_swapchain) = self.swapchain().acquire_image(self.render_semaphore, ash::vk::Fence::null());
+
+        // We should have a command buffer prepared by the graph that we can just submit.
+        // However, it's a secondary command buffer, so can't directly be executed. This is fine,
+        // because there is some default behavior we want to inject (such as clear color) and
+        // indications to the GPU that a render pass is beginning.
+
+
+        // Prepare the submission...
+        let submit_info = ash::vk::SubmitInfo::default()
+            .wait_dst_stage_mask(&[ash::vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
+            .wait_semaphores(&[self.present_semaphore])
+            .signal_semaphores(&[self.render_semaphore])
+            .command_buffers(&[command_buffer]);
+
+        // TOOD: Should be the present queue, but a queue's affinity for presentation is relative
+        //       to the swapchain. In theory all our graphics queues are present but...
+        let queue = &self.logical_device().get_queues(QueueAffinity::Graphics)[0];
+
+        // Submit this unit of work 
+        unsafe {
+            self.logical_device().handle().queue_submit(queue.handle(), &[submit_info], self.render_fence);
+        }
+
+        // And now, present it!
+        let present_info = ash::vk::PresentInfoKHR::default()
+            .swapchains(&[self.swapchain.handle()])
+            .wait_semaphores(&[self.render_semaphore])
+            .image_indices(&[image_index]);
+
+        unsafe {
+            self.swapchain.loader.queue_present(queue.handle(), &present_info)
+                .expect("Failed to present");
         }
     }
 }

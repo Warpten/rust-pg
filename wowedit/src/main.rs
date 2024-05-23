@@ -4,7 +4,9 @@ use renderer::application::{Application, ApplicationOptions, ApplicationRenderEr
 
 mod casc;
 
-pub struct ApplicationData;
+pub struct ApplicationData {
+
+}
 
 fn setup(app : &mut Application) -> ApplicationData {
     ApplicationData { }
@@ -20,7 +22,9 @@ fn prepare() -> ApplicationOptions {
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
-    // Issue render calls here?
+    let renderer = app.renderer();
+
+    renderer.draw_frame();
     Ok(()) 
 }
 

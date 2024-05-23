@@ -285,8 +285,24 @@ impl Swapchain {
         framebuffers
     }
 
+    /// Acquires the next image. Returns the image index, and wether the swapchain is suboptimal for the surface.
+    pub fn acquire_image(&self, semaphore : ash::vk::Semaphore, fence : ash::vk::Fence) -> (u32, bool) {
+        unsafe {
+            self.loader.acquire_next_image(self.handle, u64::MAX, semaphore, fence)
+                .expect("Image acquisition failed")
+        }
+    }
+
     pub fn format(&self) -> ash::vk::Format { self.surface_format.format }
     pub fn color_space(&self) -> ash::vk::ColorSpaceKHR { self.surface_format.color_space}
     pub fn layer_count(&self) -> u32 { self.layer_count }
     pub fn image_count(&self) -> usize { self.present_images.len() }
+}
+
+impl Handle for Swapchain {
+    type Target = ash::vk::SwapchainKHR;
+
+    fn handle(&self) -> Self::Target {
+        self.handle
+    }
 }
