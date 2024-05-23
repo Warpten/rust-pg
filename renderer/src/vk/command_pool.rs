@@ -10,7 +10,7 @@ pub struct CommandPool {
 }
 
 impl CommandPool {
-    pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
+    pub fn device(&self) -> &LogicalDevice { &self.device }
 
     pub(in crate) fn rent_one(&self, level : ash::vk::CommandBufferLevel) -> ash::vk::CommandBuffer {
         self.rent(level, 1)[0]
@@ -27,7 +27,7 @@ impl CommandPool {
         }
     }
 
-    pub(in crate) fn create(family : &QueueFamily, device : &Arc<LogicalDevice>) -> Self {
+    pub(in crate) fn create<'a>(family : &QueueFamily, device : &Arc<LogicalDevice>) -> Self {
         let handle = {
             let command_pool_create_info = ash::vk::CommandPoolCreateInfo::default()
                 .flags(ash::vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)

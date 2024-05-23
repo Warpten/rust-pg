@@ -1,8 +1,12 @@
+use std::backtrace::Backtrace;
+use std::ffi::CStr;
+use std::ptr::null;
+use std::slice;
 use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
 use crate::traits::handle::BorrowHandle;
 
-use crate::vk::PhysicalDevice;
+use crate::vk::{queue, PhysicalDevice};
 
 pub struct Context {
     entry : Arc<ash::Entry>,
@@ -39,16 +43,65 @@ impl Context {
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[WARNING]",
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[ERROR]",
             ash::vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[INFO]",
-            _ => panic!("[UNKNOWN]"),
         };
         let types = match message_types {
             ash::vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[GENERAL]",
             ash::vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[PERFORMANCE]",
             ash::vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[VALIDATION]",
-            _ => panic!("[UNKNOWN]"),
         };
-        let message = std::ffi::CStr::from_ptr((*p_callback_data).p_message);
-        println!("[DEBUG]{}{}{:?}", severity, types, message);
+        let callback_data = &*p_callback_data;
+
+        let message = CStr::from_ptr(callback_data.p_message);
+        println!("======================================================");
+        println!("A validation error occured in Vulkan");
+        println!("  {} {}: {:?}", severity, types, message);
+        #[cfg(debug_assertions)]
+        println!("The Rust stack trace follows:");
+        #[cfg(debug_assertions)]
+        println!("  {:?}", Backtrace::capture());
+
+        if callback_data.p_queue_labels != null() { // Print queue labels
+            let queue_labels = slice::from_raw_parts(
+                callback_data.p_queue_labels,
+                callback_data.queue_label_count as _
+            );
+
+            println!("The active queue labels were:");
+            for queue_label in queue_labels {
+                if let Some(label) =  queue_label.label_name_as_c_str() {
+                    println!("  - {:?}", label);
+                }
+            }
+        }
+
+        if callback_data.p_cmd_buf_labels != null() { // Print command buffer labels
+            let labels = slice::from_raw_parts(
+                callback_data.p_cmd_buf_labels,
+                callback_data.cmd_buf_label_count as _
+            );
+
+            println!("The active command buffers were:");
+            for label in labels {
+                if let Some(label) = label.label_name_as_c_str() {
+                    println!("  - {:?}", label);
+                }
+            }
+        }
+
+        if callback_data.p_objects != null() { // Print object labels
+            let labels = slice::from_raw_parts(
+                callback_data.p_objects,
+                callback_data.object_count as _
+            );
+
+            println!("The active objects were:");
+            for label in labels {
+                if let Some(label_str) = label.object_name_as_c_str() {
+                    println!("  - 0x{:#016x} : {:?}", label.object_handle, label_str);
+                }
+            }
+        }
+        println!("======================================================");
 
         ash::vk::FALSE
     }
@@ -91,7 +144,7 @@ impl Context {
     ///
     /// * Panics if [`vkCreateInstance`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateInstance.html) failed.
     /// * Panics if [`vkCreateDebugUtilsMessengerEXT`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDebugUtilsMessengerEXT.html) failed.
-    pub fn new(app_name : CString, instance_extensions: Vec<CString>) -> Arc<Self> {
+    pub fn new(app_name : CString, instance_extensions: Vec<CString>) -> Self {
         let entry = Arc::new(unsafe { ash::Entry::load().unwrap() });
         let mut debug_utils_messenger_create_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
             .flags(ash::vk::DebugUtilsMessengerCreateFlagsEXT::empty())
@@ -140,11 +193,11 @@ impl Context {
                 .expect("Failed to create debug utils messenger")
         };
 
-        Arc::new(Self {
+        Self {
             entry,
             handle : instance,
             debug_utils : debug_utils_loader,
             debug_messenger
-        })
+        }
     }
 }

@@ -1,8 +1,8 @@
-use std::time::SystemTime;
+use std::{ffi::{CStr, CString}, mem::MaybeUninit, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::vk::renderer::{Renderer, RendererOptions};
+use crate::vk::{renderer::{Renderer, RendererOptions}, Context};
 use crate::window::Window;
 
 #[derive(Debug)]
@@ -148,12 +148,13 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 
 pub struct Application {
-    renderer : Renderer,
+    context : Arc<Context>,
+    renderer : MaybeUninit<Renderer>,
     window : Window,
 }
 
 impl Application {
-    #[inline] pub fn renderer(&self) -> &Renderer { &self.renderer }
+    #[inline] pub fn renderer(&self) -> &Renderer { unsafe { self.renderer.assume_init_ref() } }
 
     pub fn build<T>(setup: SetupFn<T>) -> ApplicationBuilder<T> {
         ApplicationBuilder {
@@ -167,12 +168,23 @@ impl Application {
 
     pub fn new(settings : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
         let window = Window::new(&settings, event_loop);
-        let renderer = Renderer::new(&settings.renderer, &window);
 
-        Self {
+        let context = Arc::new(unsafe {
+            let mut all_extensions = settings.renderer.instance_extensions.clone();
+            all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
+            all_extensions.dedup();
+
+            Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
+        });
+
+        let mut this = Self {
+            context,
+            renderer : MaybeUninit::uninit(),
             window,
-            renderer,
-        }
+        };
+
+        this.renderer.write(Renderer::new(&settings.renderer, &this.context, &this.window));
+        this
     }
 
     pub fn recreate_swapchain(&mut self) {

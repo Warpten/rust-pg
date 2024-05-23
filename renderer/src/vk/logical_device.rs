@@ -2,7 +2,7 @@ use std::{mem::ManuallyDrop, sync::{Arc, Mutex}};
 
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::{Framebuffer, RenderPass}};
+use crate::traits::handle::{BorrowHandle, Handle};
 
 use super::{Queue, Context, PhysicalDevice};
 

@@ -120,21 +120,14 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    #[inline] pub fn context(&self) -> &Arc<Context> { &self.context }
+    #[inline] pub fn context(&self) -> &Context { &self.context }
     #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.logical_device }
     #[inline] pub fn pipeline_cache(&self) -> &Arc<PipelinePool> { &self.pipeline_cache }
     #[inline] pub fn surface(&self) -> &Arc<Surface> { &self.surface }
     #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
     #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn new(settings : &RendererOptions, window : &Window) -> Self {
-        let context = unsafe {
-            let mut all_extensions = settings.instance_extensions.clone();
-            all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
-            all_extensions.dedup();
-
-            Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
-        };
+    pub fn new(settings : &RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
         let surface = Surface::new(&context, &window);
 
         let (physical_device, graphics_queue, presentation_queue) = select(&context, &surface, &settings);
@@ -177,7 +170,7 @@ impl Renderer {
         }).unwrap();
 
         Self {
-            context,
+            context : context.clone(),
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
             logical_device,
             surface,

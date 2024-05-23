@@ -16,17 +16,17 @@ pub mod resource;
 pub mod pass;
 pub mod texture;
 
-pub struct Graph<'device> {
+pub struct Graph {
     pub(in crate) passes : Manager<Pass>,
     pub(in crate) textures : Manager<Texture>,
     pub(in crate) buffers : Manager<Buffer>,
     pub(in crate) attachments : Manager<Attachment>,
 
-    device : &'device LogicalDevice,
+    device : Arc<LogicalDevice>,
     command_pool : CommandPool,
 }
 
-impl Graph<'_> { // Graph compilation functions
+impl Graph { // Graph compilation functions
     /// Builds this graph into a render pass.
     pub fn build(&self) {
         let topology = {
@@ -66,7 +66,7 @@ impl Graph<'_> { // Graph compilation functions
 
                         // Create the tracking state for this resource if it doesn't exist yet.
                         let state = texture_state_tracker.entry(texture.id())
-                            .or_insert_with(|| TextureState::new(texture, self.device.clone()));
+                            .or_insert_with(|| TextureState::new(texture, &self.device));
 
                         // Process the update.
                         self.process_texture(command_buffer, options, state);
@@ -117,15 +117,15 @@ impl Graph<'_> { // Graph compilation functions
     fn process_attachment(&self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
-impl Graph<'_> { // Public API
-    pub fn new<'device>(device : &'device LogicalDevice) -> Self {
+impl Graph { // Public API
+    pub fn new<'device>(device : &Arc<LogicalDevice>) -> Self {
         Self {
             passes: Default::default(),
             textures: Default::default(),
             buffers: Default::default(),
             attachments: Default::default(),
 
-            device : device,
+            device : device.clone(),
             command_pool : CommandPool::create(todo!(), device),
         }
     }
@@ -172,9 +172,9 @@ struct TextureState<'a> {
 }
 
 impl TextureState<'_> {
-    pub fn new<'a>(texture : &'a Texture, device : Arc<LogicalDevice>) -> TextureState<'a> {
+    pub fn new<'a>(texture : &'a Texture, device : &Arc<LogicalDevice>) -> TextureState<'a> {
         TextureState {
-            device,
+            device : device.clone(),
             texture_info : texture,
             current_layout : texture.layout(),
             handle : None,
