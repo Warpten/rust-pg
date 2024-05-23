@@ -1,5 +1,7 @@
 use std::{borrow::Borrow, ops::Range, sync::Arc};
 
+use ash::prelude::VkResult;
+
 use crate::{traits::handle::{BorrowHandle, Handle}, vk::{Framebuffer, Image, RenderPass}};
 
 use super::{Context, LogicalDevice, QueueFamily, RenderPassInfo, Surface};
@@ -286,10 +288,9 @@ impl Swapchain {
     }
 
     /// Acquires the next image. Returns the image index, and wether the swapchain is suboptimal for the surface.
-    pub fn acquire_image(&self, semaphore : ash::vk::Semaphore, fence : ash::vk::Fence) -> (u32, bool) {
+    pub(in crate) fn acquire_image(&self, semaphore : ash::vk::Semaphore, fence : ash::vk::Fence) -> VkResult<(u32, bool)> {
         unsafe {
             self.loader.acquire_next_image(self.handle, u64::MAX, semaphore, fence)
-                .expect("Image acquisition failed")
         }
     }
 

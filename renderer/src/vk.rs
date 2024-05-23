@@ -1,5 +1,6 @@
 mod context;
 mod command_pool;
+mod frame_data;
 mod logical_device;
 mod physical_device;
 mod queue;

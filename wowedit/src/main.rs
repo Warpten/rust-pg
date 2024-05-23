@@ -23,8 +23,13 @@ fn prepare() -> ApplicationOptions {
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
     let renderer = app.renderer();
+    let (semaphore, frame_index) = renderer.acquire_next_image()?;
 
-    renderer.draw_frame();
+    // 1. Acquire a command buffer.
+    // 2. Begin the render pass.
+    // 3. 
+
+    renderer.submit_and_present(ash::vk::CommandBuffer::null(), semaphore);
     Ok(()) 
 }
 

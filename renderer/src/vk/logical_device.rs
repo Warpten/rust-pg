@@ -73,6 +73,36 @@ impl LogicalDevice {
             _ = self.handle.device_wait_idle();
         }
     }
+
+    /// Submits a unit of work to this logical device.
+    /// 
+    /// # Description
+    /// 
+    /// This is a queue submission command, with multiple batches. Batches begin in the order they are
+    /// given but may complete out of order.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `queue` - The queue on which to submit.
+    /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
+    /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
+    ///             completed execution.
+    pub fn submit(&self, queue : &Queue, submit_infos : &[ash::vk::SubmitInfo], fence : ash::vk::Fence) {
+        unsafe {
+            self.handle.queue_submit(queue.handle(), submit_infos, fence)
+                .expect("Submission failed")
+        }
+    }
+
+    pub fn create_fence(&self, flags : ash::vk::FenceCreateFlags) -> ash::vk::Fence {
+        let create_info = ash::vk::FenceCreateInfo::default()
+            .flags(flags);
+
+        unsafe {
+            self.handle.create_fence(&create_info, None)
+                .expect("Failed to create fence")
+        }
+    }
 }
 
 impl BorrowHandle for LogicalDevice {

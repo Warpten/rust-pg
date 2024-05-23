@@ -4,9 +4,9 @@ use ash::vk;
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 
-use crate::{window::Window, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}};
+use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}, window::Window};
 
-use super::{Framebuffer, QueueAffinity, RenderPass};
+use super::{frame_data::FrameData, Framebuffer, QueueAffinity, RenderPass, SemaphorePool};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -31,6 +31,7 @@ pub struct RendererOptions {
     pub(in crate) get_pipeline_cache_file : fn() -> PathBuf,
     pub(in crate) depth : bool,
     pub(in crate) stencil : bool,
+    pub(in crate) separate_depth_stencil : bool, // NYI
 }
 
 impl RendererOptions {
@@ -86,6 +87,7 @@ impl Default for RendererOptions {
             get_pipeline_cache_file : || "pipelines.dat".into(),
             depth : true,
             stencil : true,
+            separate_depth_stencil : false,
         }
     }
 }
@@ -105,6 +107,7 @@ impl SwapchainOptions for RendererOptions {
 }
 
 pub struct Renderer {
+    // Internal Vulkan types
     context : Arc<Context>,
     logical_device : Arc<LogicalDevice>,
     pipeline_cache : Arc<PipelinePool>,
@@ -114,14 +117,14 @@ pub struct Renderer {
     framebuffers : Vec<Framebuffer>,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
+    // Actual application stuff
+    frames : Vec<FrameData>,
+    active_frame_index : usize,
+
     // One or many rendering graphs
     // The application driving the renderer is in charge of adding as many graphs as needed. They will be
     // baked, invalidated, scheduled and executed in order.
     graphs : Vec<Graph>,
-
-    present_semaphore : ash::vk::Semaphore,
-    render_semaphore : ash::vk::Semaphore,
-    render_fence : ash::vk::Fence,
 }
 
 impl Renderer {
@@ -163,6 +166,21 @@ impl Renderer {
         let render_pass = swapchain.create_render_pass();
         let framebuffers = swapchain.create_framebuffers(&render_pass);
 
+        let frames = {
+            let mut frames = Vec::<FrameData>::new();
+
+            for i in 0..swapchain.image_count() {
+                let frame = FrameData {
+                    index : i,
+                    render_fence : logical_device.create_fence(ash::vk::FenceCreateFlags::SIGNALED),
+                    semaphore_pool : SemaphorePool::new(&logical_device)
+                };
+                frames.push(frame);
+            }
+
+            frames
+        };
+
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: context.handle().clone(),
             device: logical_device.handle().clone(),
@@ -174,26 +192,6 @@ impl Renderer {
             buffer_device_address: false,
         }).unwrap();
 
-        let render_fence = unsafe {
-            let create_info = ash::vk::FenceCreateInfo::default()
-                .flags(ash::vk::FenceCreateFlags::SIGNALED);
-
-            logical_device.handle().create_fence(&create_info, None)
-                .expect("Failed to create rendering fence")
-        };
-
-        let (present_semaphore, render_semaphore) = unsafe {
-            let create_info = ash::vk::SemaphoreCreateInfo::default();
-
-            let p = logical_device.handle().create_semaphore(&create_info, None)
-                .expect("Failed to create the present semaphore");
-            
-            let r = logical_device.handle().create_semaphore(&create_info, None)
-                .expect("Failed to create the present semaphore");
-
-            (p, r)
-        };
-
         Self {
             context : context.clone(),
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
@@ -202,57 +200,68 @@ impl Renderer {
             swapchain,
             render_pass,
             framebuffers,
-            graphs : vec![],
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
 
-            render_fence,
-            present_semaphore,
-            render_semaphore
+            graphs : vec![],
+            frames,
+            active_frame_index : 0,
         }
     }
 
-    pub fn draw_frame(&self) {
+    pub fn acquire_next_image(&mut self) -> Result<(ash::vk::Semaphore, usize), ApplicationRenderError> {
         unsafe {
-            self.logical_device().handle().wait_for_fences(&[self.render_fence], true, u64::MAX);
-            self.logical_device().handle().reset_fences(&[self.render_fence]);
+            let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.rent_semaphore();
+            
+            let image_index = match self.swapchain().acquire_image(acquired_semaphore, ash::vk::Fence::null()) {
+                Ok((image_index, _)) => image_index,
+                Err(ash::vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    return Err(ApplicationRenderError::InvalidSwapchain);
+                },
+                Err(ash::vk::Result::SUBOPTIMAL_KHR) => {
+                    return Err(ApplicationRenderError::InvalidSwapchain);
+                },
+                Err(error) => panic!("Error while acquiring next image: {:?}", error)
+            };
+
+            self.active_frame_index = image_index;
+            self.frames[self.active_frame_index].semaphore_pool.reset();
+
+            let next_frame = &self.frames[self.active_frame_index];
+            
+            self.logical_device().handle().wait_for_fences(&[next_frame.render_fence], true, u64::MAX);
+            self.logical_device().handle().reset_fences(&[next_frame.render_fence]);
+
+            Ok((acquired_semaphore, self.active_frame_index))
         }
+    }
 
-        // TODO: Make these comments true
+    pub fn submit_and_present(&mut self, command_buffer : ash::vk::CommandBuffer, semaphore : ash::vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let rendering_complete_semaphore = self.submit_frame(&[command_buffer],
+            &[semaphore],
+            &[ash::vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
+        );
 
-        // The swapchain was created by the graph, as well as the render pass and the frame buffers
-        let (image_index, suboptimal_swapchain) = self.swapchain().acquire_image(self.render_semaphore, ash::vk::Fence::null());
+        self.present_frame(rendering_complete_semaphore)?;
+        Ok(())
+    }
 
-        // We should have a command buffer prepared by the graph that we can just submit.
-        // However, it's a secondary command buffer, so can't directly be executed. This is fine,
-        // because there is some default behavior we want to inject (such as clear color) and
-        // indications to the GPU that a render pass is beginning.
-
-
-        // Prepare the submission...
-        let submit_info = ash::vk::SubmitInfo::default()
-            .wait_dst_stage_mask(&[ash::vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT])
-            .wait_semaphores(&[self.present_semaphore])
-            .signal_semaphores(&[self.render_semaphore])
-            .command_buffers(&[command_buffer]);
-
-        // TOOD: Should be the present queue, but a queue's affinity for presentation is relative
-        //       to the swapchain. In theory all our graphics queues are present but...
-        let queue = &self.logical_device().get_queues(QueueAffinity::Graphics)[0];
-
-        // Submit this unit of work 
-        unsafe {
-            self.logical_device().handle().queue_submit(queue.handle(), &[submit_info], self.render_fence);
-        }
-
-        // And now, present it!
+    pub fn present_frame(&mut self, semaphore : ash::vk::Semaphore) -> Result<(), ApplicationRenderError> {
         let present_info = ash::vk::PresentInfoKHR::default()
+            .wait_semaphores(&[semaphore])
             .swapchains(&[self.swapchain.handle()])
-            .wait_semaphores(&[self.render_semaphore])
-            .image_indices(&[image_index]);
+            .image_indices(&[self.active_frame_index as u32]);
 
         unsafe {
-            self.swapchain.loader.queue_present(queue.handle(), &present_info)
-                .expect("Failed to present");
+            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present)[0];
+            let result = self.swapchain.loader
+                .queue_present(presentation_queue.handle(), &present_info);
+
+            match result {
+                Ok(_) => Ok(()),
+                Err(ash::vk::Result::ERROR_OUT_OF_DATE_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
+                Err(ash::vk::Result::SUBOPTIMAL_KHR) => Err(ApplicationRenderError::InvalidSwapchain),
+                Err(error) => panic!("Error while presenting frame: {:?}", error)
+            }
         }
     }
 }
