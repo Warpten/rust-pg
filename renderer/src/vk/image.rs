@@ -217,7 +217,7 @@ impl Image { // Utilities
             .old_layout(from)
             .subresource_range(ash::vk::ImageSubresourceRange::default()
                 .aspect_mask(aspect_flags)
-                .layer_count(1)
+                .layer_count(self.layers)
                 .level_count(self.levels));
 
         unsafe {

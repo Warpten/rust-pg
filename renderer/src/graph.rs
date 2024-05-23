@@ -16,17 +16,17 @@ pub mod resource;
 pub mod pass;
 pub mod texture;
 
-pub struct Graph {
+pub struct Graph<'device> {
     pub(in crate) passes : Manager<Pass>,
     pub(in crate) textures : Manager<Texture>,
     pub(in crate) buffers : Manager<Buffer>,
     pub(in crate) attachments : Manager<Attachment>,
 
-    device : Arc<LogicalDevice>,
+    device : &'device LogicalDevice,
     command_pool : CommandPool,
 }
 
-impl Graph { // Graph compilation functions
+impl Graph<'_> { // Graph compilation functions
     /// Builds this graph into a render pass.
     pub fn build(&self) {
         let topology = {
@@ -85,6 +85,10 @@ impl Graph { // Graph compilation functions
                 };
             }
 
+            if let Some(pass_emitter) = pass.command_emitter {
+                pass_emitter(command_buffer);
+            }
+
             // Persist the command buffer here.
         }
     }
@@ -113,15 +117,15 @@ impl Graph { // Graph compilation functions
     fn process_attachment(&self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
-impl Graph { // Public API
-    pub fn new(device : &Arc<LogicalDevice>) -> Self {
+impl Graph<'_> { // Public API
+    pub fn new<'device>(device : &'device LogicalDevice) -> Self {
         Self {
             passes: Default::default(),
             textures: Default::default(),
             buffers: Default::default(),
             attachments: Default::default(),
 
-            device : device.clone(),
+            device : device,
             command_pool : CommandPool::create(todo!(), device),
         }
     }

@@ -12,6 +12,7 @@ pub struct Pass {
     name : &'static str,
 
     resource_names : HashMap<&'static str, ResourceID>,
+    pub(in crate) command_emitter : Option<fn(ash::vk::CommandBuffer)>,
 
     pub(in crate) textures    : HashMap<TextureID, TextureOptions>,
     pub(in crate) buffers     : HashMap<BufferID, BufferOptions>,
@@ -25,11 +26,17 @@ impl Pass {
             id : PassID(usize::MAX),
 
             resource_names : Default::default(),
+            command_emitter : None,
 
             textures    : Default::default(),
             buffers     : Default::default(),
             attachments : Default::default(),
         }
+    }
+
+    pub fn emitter(mut self, emitter : fn(ash::vk::CommandBuffer)) -> Self {
+        self.command_emitter = Some(emitter);
+        self
     }
 
     /// Adds a texture to this pass.
