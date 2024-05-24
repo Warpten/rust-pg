@@ -137,6 +137,7 @@ pub struct Renderer {
     clear_values : [ClearValue; 2],
     frames : Vec<FrameData>,
     active_frame_index : usize,
+    active_image_index : usize,
 
     // One or many rendering graphs
     // The application driving the renderer is in charge of adding as many graphs as needed. They will be
@@ -230,10 +231,13 @@ impl Renderer {
             graphs : vec![],
             frames,
             active_frame_index : 0,
+            active_image_index : 0,
         }
     }
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
+        self.wait_for_fence(self.frames[self.active_frame_index].in_flight);
+
         let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
 
         let image_index = match self.swapchain().acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
@@ -248,11 +252,10 @@ impl Renderer {
         };
 
         assert!((image_index as usize) < self.frames.len());
+        self.active_image_index = image_index as _;
 
         // Set the image index returned by acquisition as the current frame.
-        self.active_frame_index = image_index as _;
-        self.frames[self.active_frame_index].semaphore_pool.reset();
-        self.wait_and_reset(self.frames[self.active_frame_index].in_flight);
+        self.reset_fence(self.frames[self.active_frame_index].in_flight);
 
         Ok((acquired_semaphore, self.active_frame_index))
     }
@@ -377,7 +380,7 @@ impl Renderer {
     pub fn present_frame(&mut self, wait_semaphore: vk::Semaphore) -> Result<(), ApplicationRenderError> {
         let wait_semaphores = [wait_semaphore];
         let swapchains = [self.swapchain().handle()];
-        let image_indices = [self.active_frame_index as u32];
+        let image_indices = [self.active_image_index as u32];
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&wait_semaphores)
@@ -388,6 +391,9 @@ impl Renderer {
             let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present, self.surface())[0];
             let result = self.swapchain.loader
                 .queue_present(presentation_queue.handle(), &present_info);
+
+            self.active_frame_index = (self.active_frame_index + 1) % self.frames.len();
+            self.frames[self.active_frame_index].semaphore_pool.reset();
 
             match result {
                 Ok(_) => Ok(()),
