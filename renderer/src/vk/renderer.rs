@@ -215,12 +215,12 @@ impl Renderer {
             framebuffers,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
             clear_values : [
-                vk::ClearValue {
+                ClearValue {
                     color : vk::ClearColorValue {
                         float32: settings.clear_color,
                     },
                 },
-                vk::ClearValue {
+                ClearValue {
                     depth_stencil : vk::ClearDepthStencilValue {
                         depth : 1.0f32,
                         stencil : 0,
@@ -236,6 +236,7 @@ impl Renderer {
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
         let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
+        dbg!(acquired_semaphore, self.active_frame_index);
         self.logical_device.set_handle_name(acquired_semaphore, format!("Acquisition Semaphore [{}]", self.active_frame_index));
 
         let image_index = match self.swapchain().acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
@@ -253,7 +254,8 @@ impl Renderer {
 
         self.active_frame_index = image_index as _;
         self.frames[self.active_frame_index].semaphore_pool.reset();
-        self.wait_and_reset(self.frames[self.active_frame_index].in_flight);
+        self.wait_for_fence(self.frames[self.active_frame_index].in_flight);
+        self.reset_fence(self.frames[self.active_frame_index].in_flight);
 
         Ok((acquired_semaphore, self.active_frame_index))
     }
@@ -278,13 +280,13 @@ impl Renderer {
     }
 
     pub fn submit_and_present(&mut self, command_buffer : vk::CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let rendering_complete_semaphore = self.submit_frame(&[command_buffer],
+        let signal_semaphore = self.submit_frame(&[command_buffer],
             &[wait_semaphore],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
         );
-        self.logical_device.set_handle_name(rendering_complete_semaphore, format!("Presentation Semaphore [{}]", self.active_frame_index));
+        self.logical_device.set_handle_name(signal_semaphore, format!("Signal Semaphore [{}]", self.active_frame_index));
 
-        self.present_frame(rendering_complete_semaphore)
+        self.present_frame(signal_semaphore)
     }
 
     pub fn begin_render_pass(&self, command_buffer : vk::CommandBuffer, extent : vk::Extent2D) {
@@ -352,20 +354,20 @@ impl Renderer {
     /// # Arguments
     /// 
     /// * `command_buffers` - A slice of command buffers to execute in batch.
-    /// * `semaphores` - Semaphores upon which to wait before executing the command buffers.
+    /// * `wait_semaphores` - Semaphores upon which to wait before executing the command buffers.
     /// * `flags` - An array of pipeline stages at which each corresponding semaphore wait will occur.
     /// 
     /// # Returns
     /// 
     /// A [`vk::Semaphore`] that will be signalled when all command buffers have completed execution.
-    pub fn submit_frame(&mut self, command_buffers : &[vk::CommandBuffer], semaphores : &[vk::Semaphore], flags : &[vk::PipelineStageFlags]) -> vk::Semaphore {
+    pub fn submit_frame(&mut self, command_buffers : &[vk::CommandBuffer], wait_semaphores : &[vk::Semaphore], flags : &[vk::PipelineStageFlags]) -> vk::Semaphore {
         let signal_semaphore = [
             self.frames[self.active_frame_index].semaphore_pool.request()
         ];
         self.logical_device.set_handle_name(signal_semaphore[0], format!("Signal semaphore [{}]", self.active_frame_index));
 
         let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(semaphores)
+            .wait_semaphores(wait_semaphores)
             .command_buffers(command_buffers)
             .wait_dst_stage_mask(flags)
             .signal_semaphores(&signal_semaphore);
@@ -376,13 +378,15 @@ impl Renderer {
         signal_semaphore[0]
     }
 
-    pub fn present_frame(&mut self, semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let semaphores = [semaphore];
+    pub fn present_frame(&mut self, wait_semaphore: vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let wait_semaphores = [wait_semaphore];
         let swapchains = [self.swapchain().handle()];
         let image_indices = [self.active_frame_index as u32];
 
+        dbg!(wait_semaphore, self.active_frame_index);
+
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(&semaphores)
+            .wait_semaphores(&wait_semaphores)
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 

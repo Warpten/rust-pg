@@ -31,6 +31,7 @@ impl Window {
             .expect("Failed to enumerate required display extensions")
             .to_vec();
 
+        surface_extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
         surface_extension_names
     }
 

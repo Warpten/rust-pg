@@ -172,6 +172,7 @@ impl Context {
         const VALIDATION: [&'static str; 1] = ["VK_LAYER_KHRONOS_validation"];
 
         let extension_names = instance_extensions.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
+
         let raw_layer_names = VALIDATION.iter()
             .map(|&l| CString::new(l).unwrap())
             .collect::<Vec<_>>();
