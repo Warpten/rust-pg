@@ -1,12 +1,11 @@
 use std::{cmp::Ordering, collections::HashSet, ffi::{CStr, CString}, hint, mem::ManuallyDrop, path::PathBuf, sync::{Arc, Mutex}};
 
 use ash::vk::{self, ClearValue};
-use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
+use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan::{Allocator, AllocatorCreateDesc}};
 use nohash_hasher::IntMap;
 
 use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}, window::Window};
-
-use super::{frame_data::FrameData, semaphore_pool, Framebuffer, QueueAffinity, RenderPass, SemaphorePool};
+use crate::vk::{frame_data::FrameData, Framebuffer, QueueAffinity, RenderPass};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -135,7 +134,7 @@ pub struct Renderer {
 
     // Actual application stuff
     framebuffers : Vec<Framebuffer>,
-    clear_values : [vk::ClearValue; 2],
+    clear_values : [ClearValue; 2],
     frames : Vec<FrameData>,
     active_frame_index : usize,
 
@@ -236,8 +235,6 @@ impl Renderer {
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
         let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
-        dbg!(acquired_semaphore, self.active_frame_index);
-        self.logical_device.set_handle_name(acquired_semaphore, format!("Acquisition Semaphore [{}]", self.active_frame_index));
 
         let image_index = match self.swapchain().acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
             Ok((image_index, _)) => image_index,
@@ -252,10 +249,10 @@ impl Renderer {
 
         assert!((image_index as usize) < self.frames.len());
 
+        // Set the image index returned by acquisition as the current frame.
         self.active_frame_index = image_index as _;
         self.frames[self.active_frame_index].semaphore_pool.reset();
-        self.wait_for_fence(self.frames[self.active_frame_index].in_flight);
-        self.reset_fence(self.frames[self.active_frame_index].in_flight);
+        self.wait_and_reset(self.frames[self.active_frame_index].in_flight);
 
         Ok((acquired_semaphore, self.active_frame_index))
     }
@@ -284,7 +281,6 @@ impl Renderer {
             &[wait_semaphore],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
         );
-        self.logical_device.set_handle_name(signal_semaphore, format!("Signal Semaphore [{}]", self.active_frame_index));
 
         self.present_frame(signal_semaphore)
     }
@@ -312,8 +308,8 @@ impl Renderer {
 
     pub fn run_frame(&mut self, handler : fn(&ash::Device, vk::CommandBuffer)) -> Result<(), ApplicationRenderError> {
         let (image_acquired, _) = self.acquire_next_image().expect("Image acquisition failed");
-        let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
+        let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         self.begin_render_pass(cmd, self.swapchain.extent);
 
         handler(self.logical_device.handle(), cmd);
@@ -326,6 +322,7 @@ impl Renderer {
     pub fn begin_command_buffer(&mut self, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
         let graphics_queue = self.logical_device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
 
+        self.frames[self.active_frame_index].reset_command_pool(graphics_queue.family());
         let cmd = self.frames[self.active_frame_index].get_command_buffer(graphics_queue.family(),
             vk::CommandBufferLevel::PRIMARY,
             1)[0];
@@ -364,7 +361,6 @@ impl Renderer {
         let signal_semaphore = [
             self.frames[self.active_frame_index].semaphore_pool.request()
         ];
-        self.logical_device.set_handle_name(signal_semaphore[0], format!("Signal semaphore [{}]", self.active_frame_index));
 
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(wait_semaphores)
@@ -382,8 +378,6 @@ impl Renderer {
         let wait_semaphores = [wait_semaphore];
         let swapchains = [self.swapchain().handle()];
         let image_indices = [self.active_frame_index as u32];
-
-        dbg!(wait_semaphore, self.active_frame_index);
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&wait_semaphores)

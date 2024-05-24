@@ -234,7 +234,7 @@ impl Swapchain {
         let resolve_images = {
             let mut resolve_images = Vec::<Image>::new();
             if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
-                for i in 0..present_images.len() {
+                for _ in 0..present_images.len() {
                     resolve_images.push(Image::new("Swapchain Multisampling Resolve",
                         device,
                         vk::ImageCreateInfo::default()
