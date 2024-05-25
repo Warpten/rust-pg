@@ -41,7 +41,7 @@ pub struct RendererOptions {
     pub(in crate) stencil : bool,
     pub(in crate) separate_depth_stencil : bool, // NYI
     pub(in crate) clear_color : [f32; 4],
-    pub(in crate) multisampling : vk::SampleCountFlags,
+    pub multisampling : vk::SampleCountFlags,
 }
 
 impl RendererOptions {
@@ -133,13 +133,16 @@ impl SwapchainOptions for RendererOptions {
 
 pub struct Renderer {
     // Internal Vulkan types
-    context : Arc<Context>,
-    pub logical_device : Arc<LogicalDevice>,
-    pipeline_cache : Arc<PipelinePool>,
-    surface : Arc<Surface>,
-    swapchain : Arc<Swapchain>,
-    render_pass : RenderPass,
+    pub context : Arc<Context>,
+    pub device : Arc<LogicalDevice>,
+    
+    pub pipeline_cache : Arc<PipelinePool>,
+    pub(in crate) surface : Arc<Surface>,
+    pub swapchain : Arc<Swapchain>,
+    pub render_pass : RenderPass,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+
+    pub options : RendererOptions,
 
     // Actual application stuff
     framebuffers : Vec<Framebuffer>,
@@ -147,12 +150,10 @@ pub struct Renderer {
     frames : Vec<FrameData>,
     active_frame_index : usize,
     active_image_index : usize,
-
-    pub graph : Graph,
 }
 
 impl Renderer {
-    pub fn new(settings : &RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
+    pub fn new(settings : RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
         let surface = Surface::new(&context, &window);
 
         let (physical_device, graphics_queue, presentation_queue) = select(&context, &surface, &settings);
@@ -177,7 +178,7 @@ impl Renderer {
             &context,
             &logical_device,
             &surface,
-            settings,
+            &settings,
             queue_families,
         );
         let render_pass = swapchain.create_render_pass();
@@ -207,7 +208,7 @@ impl Renderer {
         Self {
             context : context.clone(),
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
-            logical_device : logical_device.clone(),
+            device : logical_device.clone(),
             surface,
             swapchain,
             render_pass,
@@ -227,10 +228,11 @@ impl Renderer {
                 }
             ],
 
-            graph : Graph::new(logical_device),
             frames,
             active_frame_index : 0,
             active_image_index : 0,
+
+            options : settings,
         }
     }
 
@@ -266,14 +268,14 @@ impl Renderer {
 
     pub fn wait_for_fence(&self, fence : vk::Fence) {
         unsafe {
-            self.logical_device.handle().wait_for_fences(&[fence], true, u64::MAX)
+            self.device.handle().wait_for_fences(&[fence], true, u64::MAX)
                 .expect("Waiting for the fence failed");
         }
     }
 
     pub fn reset_fence(&self, fence : vk::Fence) {
         unsafe {
-            self.logical_device.handle().reset_fences(&[fence])
+            self.device.handle().reset_fences(&[fence])
                 .expect("Resetting the fence failed");
         }
     }
@@ -298,13 +300,13 @@ impl Renderer {
                 .render_pass(self.render_pass.handle())
                 .clear_values(&self.clear_values);
 
-            self.logical_device.handle().cmd_begin_render_pass(command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
+            self.device.handle().cmd_begin_render_pass(command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
         }
     }
 
     pub fn end_render_pass(&self, command_buffer : vk::CommandBuffer) {
         unsafe {
-            self.logical_device.handle().cmd_end_render_pass(command_buffer);
+            self.device.handle().cmd_end_render_pass(command_buffer);
         }
     }
 
@@ -314,7 +316,7 @@ impl Renderer {
         let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         self.begin_render_pass(cmd, self.swapchain.extent);
 
-        handler(self.logical_device.handle(), cmd);
+        handler(self.device.handle(), cmd);
 
         self.end_render_pass(cmd);
         self.end_command_buffer(cmd);
@@ -322,7 +324,7 @@ impl Renderer {
     }
 
     pub fn begin_command_buffer(&mut self, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
-        let graphics_queue = self.logical_device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
+        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
 
         self.frames[self.active_frame_index].reset_command_pool(graphics_queue.family());
         let cmd = self.frames[self.active_frame_index].get_command_buffer(graphics_queue.family(),
@@ -333,7 +335,7 @@ impl Renderer {
             let begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(flags);
 
-            self.logical_device.handle()
+            self.device.handle()
                 .begin_command_buffer(cmd, &begin_info)
                 .expect("Failed to begin frame commands");
         };
@@ -343,7 +345,7 @@ impl Renderer {
 
     pub fn end_command_buffer(&mut self, cmd : vk::CommandBuffer) {
         unsafe {
-            self.logical_device.handle().end_command_buffer(cmd)
+            self.device.handle().end_command_buffer(cmd)
                 .expect("Failed to end frame commands")
         };
     }
@@ -370,8 +372,8 @@ impl Renderer {
             .wait_dst_stage_mask(flags)
             .signal_semaphores(&signal_semaphore);
 
-        let graphics_queue = self.logical_device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
-        self.logical_device.submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
+        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
+        self.device.submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
     
         signal_semaphore[0]
     }
@@ -387,7 +389,7 @@ impl Renderer {
             .image_indices(&image_indices);
 
         unsafe {
-            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present, &self.surface)[0];
+            let presentation_queue = self.device.get_queues(QueueAffinity::Present, &self.surface)[0];
             let result = self.swapchain.loader
                 .queue_present(presentation_queue.handle(), &present_info);
 

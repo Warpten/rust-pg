@@ -1,6 +1,10 @@
+use std::mem::size_of;
+
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
+use renderer::traits::handle::Handle;
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
+use renderer::vk::pipeline::{pipeline, DepthOptions, Pipeline, PipelineInfo, Vertex};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -17,14 +21,39 @@ struct TerrainVertex {
     height : f32,
 }
 
+impl Vertex for TerrainVertex {
+    fn bindings() -> Vec<(u32, vk::VertexInputRate)> {
+        vec![
+            (size_of::<Self>() as u32, vk::VertexInputRate::VERTEX)
+        ]
+    }
+
+    fn format_offset() -> Vec<(vk::Format, u32)> {
+        vec![
+            (vk::Format::R32_SFLOAT, 0)
+        ]
+    }
+}
+
 fn setup(app : &mut Application) -> ApplicationData {
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
         .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
         .binding(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::ALL, 1)
-        .build(&app.renderer.logical_device);
+        .build(&app.renderer);
 
     let pipeline_layout = PipelineLayoutInfo::default()
-        .layout(&descriptor_set_layout);
+        .layout(&descriptor_set_layout)
+        .build(&app.renderer);
+
+    let pipeline = Pipeline::new(&app.renderer.device, PipelineInfo::default()
+        .layout(pipeline_layout.handle())
+        .depth(DepthOptions::enabled())
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .render_pass(app.renderer.render_pass.handle())
+        .samples(app.renderer.options.multisampling)
+        .pool(&app.renderer.pipeline_cache)
+        .vertex::<TerrainVertex>());
 
     ApplicationData {
         

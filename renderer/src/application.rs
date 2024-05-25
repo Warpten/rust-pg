@@ -2,7 +2,8 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::vk::{renderer::{Renderer, RendererOptions}, context::Context};
+use crate::vk::context::Context;
+use crate::vk::renderer::{Renderer, RendererOptions};
 use crate::window::Window;
 
 #[derive(Debug)]
@@ -140,7 +141,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => app.renderer.logical_device.wait_idle(),
+                Event::LoopExiting => app.renderer.device.wait_idle(),
                 _ => { }
             }
         }
@@ -178,7 +179,7 @@ impl Application {
 
         Self {
             context : context.clone(),
-            renderer : Renderer::new(&settings.renderer, &context, &window),
+            renderer : Renderer::new(settings.renderer, &context, &window),
             window,
         }
     }

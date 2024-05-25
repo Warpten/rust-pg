@@ -6,12 +6,14 @@ use nohash_hasher::IntMap;
 use crate::traits::handle::Handle;
 use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::logical_device::LogicalDevice;
+use crate::vk::renderer::Renderer;
 
 /// Facililates creating instances of [`DescriptorSetLayout`].
 pub struct DescriptorSetLayoutBuilder {
     pub(in self) bindings : IntMap<u32, (vk::DescriptorType, vk::ShaderStageFlags, u32)>,
     pub(in self) flags : vk::DescriptorSetLayoutCreateFlags,
     pub(in self) sets : u32,
+    #[cfg(debug_assertions)]
     registered : bool,
 }
 
@@ -31,16 +33,21 @@ impl DescriptorSetLayoutBuilder {
         self
     }
 
-    pub fn build(mut self, device : &Arc<LogicalDevice>) -> DescriptorSetLayout {
-        self.registered = true;
-        DescriptorSetLayout::new(device, self)
+    pub fn build(mut self, renderer : &Renderer) -> DescriptorSetLayout {
+        #[cfg(debug_assertions)] { // Just silencing a warning, don't mind me
+            self.registered = true;
+        }
+
+        DescriptorSetLayout::new(&renderer.device, self)
     }
 
+    #[cfg(debug_assertions)]
     pub fn forget(mut self) {
         self.registered = true;
     }
 }
 
+#[cfg(debug_assertions)]
 impl Drop for DescriptorSetLayoutBuilder {
     fn drop(&mut self) {
         assert!(self.registered, "A descriptor set layout builder is being dropped; did you forget to call build() or forget() ?");

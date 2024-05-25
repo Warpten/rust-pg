@@ -1,4 +1,4 @@
-use std::{fs, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
+use std::{ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
 use ash::vk;
 use gpu_allocator::vulkan::Allocator;
@@ -21,6 +21,8 @@ pub trait Vertex {
     /// This function returns an array of tuples consisting of the stride of the input, and the rate
     /// of the input.
     fn bindings() -> Vec<(u32, vk::VertexInputRate)>;
+
+    /// Returns formats and offsets of elements in this vertex.
     fn format_offset() -> Vec<(vk::Format, u32)>;
 }
 
@@ -38,56 +40,19 @@ pub struct PipelineInfo {
     vertex_format_offset : Vec<(vk::Format, u32)>,
     vertex_bindings : Vec<(u32, vk::VertexInputRate)>,
     samples : vk::SampleCountFlags,
-}
-
-pub struct DepthOptions {
-    test : bool,
-    write : bool,
-    bounds : Option<Range<f32>>,
-}
-
-impl DepthOptions {
-    /// Returns a new instance of [`DepthOptions`] where depth testing will be disabled in the pipeline.
-    pub fn disabled() -> Self {
-        Self { test : false, write : false, bounds : None }
-    }
-
-    /// Returns a new instance of [`DepthOptions`] where depth testing will be enabled in the pipeline.
-    pub fn enabled() -> Self {
-        Self { test : true, write : false, bounds : None }
-    }
-
-    #[inline] pub fn write(mut self, write : bool) -> Self {
-        self.write = write;
-        self
-    }
-
-    #[inline] pub fn bounds(mut self, bounds : Range<f32>) -> Self {
-        self.bounds = Some(bounds);
-        self
-    }
-
-    pub fn build(&self) -> vk::PipelineDepthStencilStateCreateInfo {
-        let info = vk::PipelineDepthStencilStateCreateInfo::default()
-            .depth_test_enable(self.test)
-            .depth_write_enable(self.write)
-            .depth_compare_op(vk::CompareOp::LESS);
-
-        match &self.bounds {
-            Some(bounds) => {
-                info.depth_bounds_test_enable(true)
-                    .min_depth_bounds(bounds.start)
-                    .max_depth_bounds(bounds.end)
-            },
-            None => {
-                info.depth_bounds_test_enable(false)
-            }
-        }
-    }
+    pool : Option<Arc<PipelinePool>>,
 }
 
 impl PipelineInfo {
-    #[inline] pub fn depth(&self) -> &DepthOptions { &self.depth }
+    #[inline] pub fn pool(mut self, pool : &Arc<PipelinePool>) -> Self {
+        self.pool = Some(pool.clone());
+        self
+    }
+
+    #[inline] pub fn depth(mut self, depth : DepthOptions) -> Self {
+        self.depth = depth;
+        self
+    }
 
     #[inline] pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
         self.layout = layout;
@@ -161,6 +126,54 @@ impl Default for PipelineInfo {
 
             vertex_bindings : vec![],
             vertex_format_offset : vec![],
+
+            pool : None,
+        }
+    }
+}
+
+pub struct DepthOptions {
+    test : bool,
+    write : bool,
+    bounds : Option<Range<f32>>,
+}
+
+impl DepthOptions {
+    /// Returns a new instance of [`DepthOptions`] where depth testing will be disabled in the pipeline.
+    pub fn disabled() -> Self {
+        Self { test : false, write : false, bounds : None }
+    }
+
+    /// Returns a new instance of [`DepthOptions`] where depth testing will be enabled in the pipeline.
+    pub fn enabled() -> Self {
+        Self { test : true, write : false, bounds : None }
+    }
+
+    #[inline] pub fn write(mut self, write : bool) -> Self {
+        self.write = write;
+        self
+    }
+
+    #[inline] pub fn bounds(mut self, bounds : Range<f32>) -> Self {
+        self.bounds = Some(bounds);
+        self
+    }
+
+    pub fn build(&self) -> vk::PipelineDepthStencilStateCreateInfo {
+        let info = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(self.test)
+            .depth_write_enable(self.write)
+            .depth_compare_op(vk::CompareOp::LESS);
+
+        match &self.bounds {
+            Some(bounds) => {
+                info.depth_bounds_test_enable(true)
+                    .min_depth_bounds(bounds.start)
+                    .max_depth_bounds(bounds.end)
+            },
+            None => {
+                info.depth_bounds_test_enable(false)
+            }
         }
     }
 }
@@ -176,7 +189,7 @@ impl Pipeline {
     #[inline] pub fn context(&self) -> &Arc<Context> { self.device().context() }
     #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.device().allocator() }
 
-    pub fn new(device : &Arc<LogicalDevice>, pool : Option<&Arc<PipelinePool>>, info : PipelineInfo) -> Self {
+    pub fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
             .map(|(path, flags)| Shader::new(device.clone(), path, flags))
@@ -248,7 +261,7 @@ impl Pipeline {
             .alpha_to_coverage_enable(false)
             .alpha_to_one_enable(false);
 
-        let depth_stencil_state = info.depth().build();
+        let depth_stencil_state = info.depth.build();
 
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op(vk::LogicOp::CLEAR);
@@ -267,8 +280,10 @@ impl Pipeline {
             .layout(info.layout);
 
         let pipelines = unsafe {
-            let pool_handle = pool.map(|p| p.handle())
-                .unwrap_or(vk::PipelineCache::null());
+            let pool_handle = match &info.pool {
+                Some(handle) => handle.handle(),
+                None => vk::PipelineCache::null(),
+            };
 
             device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
                 .expect("Creating a graphics pipeline failed")

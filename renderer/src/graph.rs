@@ -12,7 +12,8 @@ use crate::utils::topological_sort::TopologicalSorter;
 use crate::vk::command_pool::CommandPool;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::queue::Queue;
+use crate::vk::queue::{Queue, QueueAffinity};
+use crate::vk::renderer::Renderer;
 
 pub mod attachment;
 pub mod buffer;
@@ -21,27 +22,29 @@ pub mod resource;
 pub mod pass;
 pub mod texture;
 
-pub struct Graph {
+pub struct Graph<'a> {
     pub(in crate) passes : Manager<Pass>,
     pub(in crate) textures : Manager<Texture>,
     pub(in crate) buffers : Manager<Buffer>,
     pub(in crate) attachments : Manager<Attachment>,
 
-    device : Arc<LogicalDevice>,
+    renderer : &'a Renderer,
     // Optionally provides a command pool for the given queue family.
     command_pools : IntMap<u32, CommandPool>,
 }
 
-impl Graph { // Graph compilation functions
+impl Graph<'_> { // Graph compilation functions
     pub fn get_command_buffer(&mut self, queue : &Queue, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
         let command_pool = self.command_pools.entry(queue.family().index())
-            .or_insert_with(|| CommandPool::create(queue.family(), &self.device));
+            .or_insert_with(|| {
+                CommandPool::create(queue.family(), &self.renderer.device)
+            });
 
         command_pool.rent_one(level)
     }
 
     /// Builds this graph into a render pass.
-    pub fn build(&self) {
+    pub fn build(&mut self) {
         let topology = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
@@ -53,23 +56,20 @@ impl Graph { // Graph compilation functions
             }
 
             match sorter.sort_kahn() {
-                Ok(sorted) => {
-                    let mut sorted_passes = Vec::with_capacity(sorted.len());
-                    for sorted_id in sorted {
-                        sorted_passes.push(self.passes.find(sorted_id).unwrap());
-                    }
-                    sorted_passes
-                },
+                Ok(sorted) => sorted,
                 Err(_) => panic!("Cyclic graph detected"),
             }
         };
 
         // Walk the topology and process resources
-        /*let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
-        for pass in topology {
-            // Find a command pool that works with the pass's affinity.
+        let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics, &self.renderer.surface);
+        let command_buffer : vk::CommandBuffer = self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
 
-            let command_buffer : vk::CommandBuffer = todo!(); // self.command_pool.rent_one(vk::CommandBufferLevel::SECONDARY);
+        let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
+        for pass in &topology {
+            let pass = self.passes.find(*pass).unwrap();
+
+            // Find a command pool that works with the pass's affinity.
 
             for resource in pass.resources() {
                 let physical_resource = resource.devirtualize();
@@ -80,7 +80,7 @@ impl Graph { // Graph compilation functions
 
                         // Create the tracking state for this resource if it doesn't exist yet.
                         let state = texture_state_tracker.entry(texture.id())
-                            .or_insert_with(|| TextureState::new(texture, &self.device));
+                            .or_insert_with(|| TextureState::new(texture, &self.renderer.device));
 
                         // Process the update.
                         self.process_texture(command_buffer, options, state);
@@ -104,7 +104,7 @@ impl Graph { // Graph compilation functions
             }
 
             // Persist the command buffer here.
-        }*/
+        }
     }
 
     fn process_texture(
@@ -131,15 +131,15 @@ impl Graph { // Graph compilation functions
     fn process_attachment(&self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
-impl Graph { // Public API
-    pub fn new<'device>(device : Arc<LogicalDevice>) -> Self {
-        Self {
+impl Graph<'_> { // Public API
+    pub fn new<'a>(renderer : &'a Renderer) -> Graph {
+        Graph {
             passes: Default::default(),
             textures: Default::default(),
             buffers: Default::default(),
             attachments: Default::default(),
 
-            device,
+            renderer,
             command_pools : IntMap::<u32, CommandPool>::default(),
         }
     }
