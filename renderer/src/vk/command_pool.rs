@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use ash::vk;
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::QueueFamily};
-use crate::vk::LogicalDevice;
+use crate::traits::handle::Handle;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::queue::QueueFamily;
 
 pub struct CommandPool {
     handle : vk::CommandPool,
@@ -93,9 +94,7 @@ impl CommandPool {
     }
 }
 
-impl Handle for CommandPool {
-    type Target = vk::CommandPool;
-
+impl Handle<vk::CommandPool> for CommandPool {
     fn handle(&self) -> vk::CommandPool { self.handle }
 }
 

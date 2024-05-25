@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
+use crate::vk::logical_device::LogicalDevice;
 
 /// See <https://github.com/KhronosGroup/Vulkan-Samples/blob/master/framework/semaphore_pool.h>.
 pub struct SemaphorePool {
@@ -54,6 +54,7 @@ impl SemaphorePool {
 impl Drop for SemaphorePool {
     fn drop(&mut self) {
         self.reset();
+        
         unsafe {
             self.handles.iter().for_each(|s| {
                 self.device.handle().destroy_semaphore(*s, None);

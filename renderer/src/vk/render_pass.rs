@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::LogicalDevice};
-use crate::vk::Image;
+use crate::traits::handle::Handle;
+use crate::vk::image::Image;
+use crate::vk::logical_device::LogicalDevice;
 
 pub struct RenderPass {
     handle : vk::RenderPass,
@@ -146,10 +147,8 @@ impl RenderPass {
     }
 }
 
-impl Handle for RenderPass {
-    type Target = vk::RenderPass;
-
-    fn handle(&self) -> Self::Target { self.handle }
+impl Handle<vk::RenderPass> for RenderPass {
+    fn handle(&self) -> vk::RenderPass { self.handle }
 }
 
 impl Drop for RenderPass {

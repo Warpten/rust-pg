@@ -6,8 +6,7 @@ use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
 use ash::vk;
 
-use crate::traits::handle::BorrowHandle;
-use crate::vk::PhysicalDevice;
+use crate::vk::physical_device::PhysicalDevice;
 
 pub struct Context {
     entry : Arc<ash::Entry>,
@@ -15,21 +14,6 @@ pub struct Context {
     debug_utils : ash::ext::debug_utils::Instance,
     debug_messenger : vk::DebugUtilsMessengerEXT,
     
-}
-
-impl BorrowHandle for Context {
-    type Target = ash::Instance;
-
-    fn handle(&self) -> &ash::Instance { &self.handle }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe {
-            self.debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
-            self.handle.destroy_instance(None);
-        }
-    }
 }
 
 impl Context {
@@ -112,6 +96,8 @@ impl Context {
     }
 
     pub fn entry(&self) -> &Arc<ash::Entry> { &self.entry }
+
+    pub fn handle(&self) -> &ash::Instance { &self.handle }
 
     /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted according to the provided comparator.
     /// # Arguments
@@ -204,6 +190,15 @@ impl Context {
             handle : instance,
             debug_utils : debug_utils_loader,
             debug_messenger
+        }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe {
+            self.debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
+            self.handle.destroy_instance(None);
         }
     }
 }

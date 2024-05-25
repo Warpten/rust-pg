@@ -3,7 +3,11 @@ use std::{hash::Hash, sync::Arc};
 use ash::vk;
 use bitmask_enum::bitmask;
 
-use crate::{traits::handle::Handle, vk::{CommandPool, LogicalDevice, PhysicalDevice, Surface}};
+use crate::{traits::handle::Handle};
+use crate::vk::command_pool::CommandPool;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::physical_device::PhysicalDevice;
+use crate::vk::surface::Surface;
 
 /// A logical queue associated with a logical device.
 pub struct Queue {
@@ -53,9 +57,7 @@ impl Queue {
     #[inline] pub fn family(&self) -> &QueueFamily { &self.family }
 }
 
-impl Handle for Queue {
-    type Target = vk::Queue;
-
+impl Handle<vk::Queue> for Queue {
     fn handle(&self) -> vk::Queue { self.handle }
 }
 
@@ -136,10 +138,7 @@ impl QueueFamily {
     /// # Panics
     /// 
     /// * Panics if [`vkCreateCommandPool`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateCommandPool.html) fails.
-    pub fn create_command_pool(
-        &self,
-        device : &Arc<LogicalDevice>
-    ) -> Arc<CommandPool> {
+    pub fn create_command_pool(&self, device : &Arc<LogicalDevice>) -> Arc<CommandPool> {
         Arc::new(CommandPool::create(&self, device))
     }
 }

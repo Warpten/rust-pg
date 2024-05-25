@@ -1,8 +1,11 @@
 use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use ash::vk;
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::IndexingFeatures};
-use crate::vk::{QueueFamily, Context, LogicalDevice, Queue};
+
+use crate::traits::handle::Handle;
+use crate::vk::context::Context;
+use crate::vk::logical_device::{IndexingFeatures, LogicalDevice};
+use crate::vk::queue::{Queue, QueueFamily};
 
 #[derive(Clone)]
 pub struct PhysicalDevice {
@@ -11,12 +14,6 @@ pub struct PhysicalDevice {
     memory_properties : vk::PhysicalDeviceMemoryProperties,
     properties : vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
-}
-
-impl Handle for PhysicalDevice {
-    type Target = vk::PhysicalDevice;
-
-    fn handle(&self) -> vk::PhysicalDevice { self.handle }
 }
 
 impl PhysicalDevice {
@@ -168,4 +165,8 @@ impl PhysicalDevice {
         
         None
     }
+}
+
+impl Handle<vk::PhysicalDevice> for PhysicalDevice {
+    fn handle(&self) -> vk::PhysicalDevice { self.handle }
 }

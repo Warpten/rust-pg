@@ -18,3 +18,4 @@ derive-getters = { workspace = true }
 bitmask-enum = { workspace = true }
 shaderc = "0.8.3"
 nohash-hasher = { workspace = true }
+# renderer_derive = { path = "../renderer_derive" }

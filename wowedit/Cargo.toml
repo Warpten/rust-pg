@@ -6,7 +6,7 @@ edition = "2021"
 # TODO: Clarify the whole dependency hell I have going on here.
 [dependencies]
 puffin_egui = "0.27.0"
-puffin = "0.19"
+puffin = { version = "0.19", default-features = false }
 bytes = "1.6.0"
 anyhow = "1.0.82"
 thiserror = "1.0.59"

@@ -3,8 +3,14 @@ use std::{borrow::Borrow, ops::Range, sync::Arc};
 use ash::vk;
 use ash::prelude::VkResult;
 
-use crate::traits::handle::{BorrowHandle, Handle};
-use crate::vk::{Context, Framebuffer, Image, LogicalDevice, QueueFamily, RenderPass, RenderPassInfo, Surface};
+use crate::traits::handle::Handle;
+use crate::vk::context::Context;
+use crate::vk::framebuffer::Framebuffer;
+use crate::vk::image::Image;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::queue::QueueFamily;
+use crate::vk::render_pass::{RenderPass, RenderPassInfo};
+use crate::vk::surface::Surface;
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
@@ -346,10 +352,6 @@ impl Swapchain {
     pub fn image_count(&self) -> usize { self.present_images.len() }
 }
 
-impl Handle for Swapchain {
-    type Target = vk::SwapchainKHR;
-
-    fn handle(&self) -> Self::Target {
-        self.handle
-    }
+impl Handle<vk::SwapchainKHR> for Swapchain {
+    fn handle(&self) -> vk::SwapchainKHR { self.handle }
 }

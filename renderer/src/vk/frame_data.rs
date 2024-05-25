@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use ash::vk;
 use nohash_hasher::IntMap;
-use crate::traits::handle::BorrowHandle;
-use crate::vk::{CommandPool, LogicalDevice, SemaphorePool};
-
-use super::QueueFamily;
+use crate::vk::command_pool::CommandPool;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::queue::QueueFamily;
+use crate::vk::semaphore_pool::SemaphorePool;
 
 pub struct FrameData {
     device : Arc<LogicalDevice>,

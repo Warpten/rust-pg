@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use ash::vk;
-use crate::{traits::handle::{BorrowHandle, Handle}, vk::LogicalDevice};
+use crate::traits::handle::Handle;
+use crate::vk::logical_device::LogicalDevice;
 
 // This whole file needs cleaning
 // - Device should be Arc<LogicalDevice> and stored
@@ -24,10 +25,8 @@ impl Framebuffer {
     }
 }
 
-impl Handle for Framebuffer {
-    type Target = vk::Framebuffer;
-
-    fn handle(&self) -> Self::Target { self.handle }
+impl Handle<vk::Framebuffer> for Framebuffer {
+    fn handle(&self) -> vk::Framebuffer { self.handle }
 }
 
 impl Drop for Framebuffer {

@@ -1,102 +1,27 @@
-use std::{fs, marker::PhantomData, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
+use std::{fs, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
 use ash::vk;
 use gpu_allocator::vulkan::Allocator;
-use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
+use crate::{traits::handle::Handle, vk::context::Context};
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::pipeline::shader::Shader;
 
-use crate::{traits::handle::BorrowHandle, vk::{Context, LogicalDevice}};
+use self::pool::PipelinePool;
 
-pub struct Shader {
-    device : Arc<LogicalDevice>,
-    module : vk::ShaderModule,
-    flags : vk::ShaderStageFlags,
-    path : PathBuf,
-}
+pub mod layout;
+pub mod pipeline;
+pub mod pool;
+pub mod shader;
 
-fn translate_shader_kind(stage : vk::ShaderStageFlags) -> ShaderKind {
-    match stage {
-        vk::ShaderStageFlags::VERTEX => ShaderKind::Vertex,
-        vk::ShaderStageFlags::FRAGMENT => ShaderKind::Fragment,
-        vk::ShaderStageFlags::COMPUTE => ShaderKind::Compute,
-        vk::ShaderStageFlags::TESSELLATION_CONTROL => ShaderKind::TessControl,
-        vk::ShaderStageFlags::TESSELLATION_EVALUATION => ShaderKind::TessEvaluation,
-        vk::ShaderStageFlags::GEOMETRY => ShaderKind::Geometry,
-        vk::ShaderStageFlags::RAYGEN_KHR => ShaderKind::RayGeneration,
-        vk::ShaderStageFlags::ANY_HIT_KHR => ShaderKind::AnyHit,
-        vk::ShaderStageFlags::CLOSEST_HIT_KHR => ShaderKind::ClosestHit,
-        vk::ShaderStageFlags::MISS_KHR => ShaderKind::Miss,
-        vk::ShaderStageFlags::INTERSECTION_KHR => ShaderKind::Intersection,
-        _ => panic!("Unsupported shader stage"),
-    }
-}
-
-impl Shader {
-    #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
-
-    pub fn new(device : Arc<LogicalDevice>, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
-        let compiler = Compiler::new().expect("Failed to initialize shader compiler");
-        let mut options = CompileOptions::new().unwrap();
-        #[cfg(debug_assertions)]
-        options.set_generate_debug_info();
-        options.set_target_spirv(shaderc::SpirvVersion::V1_6);
-        options.set_target_env(shaderc::TargetEnv::Vulkan, EnvVersion::Vulkan1_3 as u32);
-        options.set_include_callback(
-            move |requested_source, include_type, origin_source, recursion_depth| {
-                Err("Includes are not supported yet".to_owned())
-            }
-        );
-
-        let source = fs::read_to_string(path.as_path()).unwrap();
-
-        let shader_kind = translate_shader_kind(flags);
-        let code = compiler.compile_into_spirv(&source,
-            shader_kind,
-            path.file_name().unwrap().to_str().unwrap(),
-            "main",
-            Some(&options)
-        ).unwrap();
-
-        let shader_info = vk::ShaderModuleCreateInfo::default()
-            .code(code.as_binary());
-
-        let module = unsafe {
-            device.handle().create_shader_module(&shader_info, None)
-                .unwrap()
-        };
-
-        Self {
-            device : device.clone(),
-            module,
-            flags,
-            path
-        }
-    }
-
-    pub fn stage_info(&self, spec : Option<vk::SpecializationInfo>) -> vk::PipelineShaderStageCreateInfo {
-        let create_info = vk::PipelineShaderStageCreateInfo::default()
-            .stage(self.flags)
-            .module(self.module);
-
-        if spec.is_some() {
-            _ = create_info.specialization_info(&spec.unwrap());
-        }
-
-        create_info
-    }
-}
- 
-impl BorrowHandle for Shader {
-    type Target = vk::ShaderModule;
-
-    fn handle(&self) -> &Self::Target { &self.module }
-}
-
-impl Drop for Shader {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle().destroy_shader_module(self.module, None);
-        }
-    }
+pub trait Vertex {
+    /// Returns bindings in the appropriate order.
+    ///
+    /// # Description
+    ///
+    /// This function returns an array of tuples consisting of the stride of the input, and the rate
+    /// of the input.
+    fn bindings() -> Vec<(u32, vk::VertexInputRate)>;
+    fn format_offset() -> Vec<(vk::Format, u32)>;
 }
 
 pub struct PipelineInfo {
@@ -109,6 +34,10 @@ pub struct PipelineInfo {
 
     specialization_data: Vec<u8>,
     specialization_entries: Vec<vk::SpecializationMapEntry>,
+
+    vertex_format_offset : Vec<(vk::Format, u32)>,
+    vertex_bindings : Vec<(u32, vk::VertexInputRate)>,
+    samples : vk::SampleCountFlags,
 }
 
 pub struct DepthOptions {
@@ -158,24 +87,24 @@ impl DepthOptions {
 }
 
 impl PipelineInfo {
-    pub fn depth(&self) -> &DepthOptions { &self.depth }
+    #[inline] pub fn depth(&self) -> &DepthOptions { &self.depth }
 
-    pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
+    #[inline] pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
         self.layout = layout;
         self
     }
 
-    pub fn render_pass(mut self, render_pass : vk::RenderPass) -> Self {
+    #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass) -> Self {
         self.render_pass = Some(render_pass);
         self
     }
 
-    pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
+    #[inline] pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         self.shaders.push((path, flags));
         self
     }
 
-    pub fn add_specialization<T>(mut self, data : &T, constant_id : u32) -> Self {
+    #[inline] pub fn add_specialization<T>(mut self, data : &T, constant_id : u32) -> Self {
         let slice = unsafe {
             std::slice::from_raw_parts(data as *const T as *const u8, std::mem::size_of_val(data))
         };
@@ -186,6 +115,27 @@ impl PipelineInfo {
             .constant_id(constant_id)
             .offset(offset as _)
             .size(self.specialization_data.len()));
+        self
+    }
+
+    #[inline] pub fn cull_mode(mut self, mode : vk::CullModeFlags) -> Self {
+        self.cull_mode = mode;
+        self
+    }
+
+    #[inline] pub fn vertex<T : Vertex>(mut self) -> Self {
+        self.vertex_format_offset = T::format_offset();
+        self.vertex_bindings = T::bindings();
+        self
+    }
+
+    #[inline] pub fn samples(mut self, samples : vk::SampleCountFlags) -> Self {
+        self.samples = samples;
+        self
+    }
+
+    #[inline] pub fn front_face(mut self, front : vk::FrontFace) -> Self {
+        self.front_face = front;
         self
     }
 }
@@ -206,29 +156,27 @@ impl Default for PipelineInfo {
 
             specialization_data : vec![],
             specialization_entries : vec![],
+
+            samples : vk::SampleCountFlags::TYPE_1,
+
+            vertex_bindings : vec![],
+            vertex_format_offset : vec![],
         }
     }
 }
 
-struct Pipeline<V : VertexType> {
+pub struct Pipeline {
     device : Arc<LogicalDevice>,
     info : PipelineInfo,
     handle : vk::Pipeline,
-
-    _marker : PhantomData<V>,
 }
 
-pub trait VertexType {
-    fn attributes() -> Vec<vk::VertexInputAttributeDescription>;
-    fn bindings() -> Vec<vk::VertexInputBindingDescription>;
-}
-
-impl<V : VertexType> Pipeline<V> {
+impl Pipeline {
     #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
     #[inline] pub fn context(&self) -> &Arc<Context> { self.device().context() }
     #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.device().allocator() }
 
-    pub fn new(device : Arc<LogicalDevice>, pool : Option<&Arc<PipelinePool>>, info : PipelineInfo) -> Self {
+    pub fn new(device : &Arc<LogicalDevice>, pool : Option<&Arc<PipelinePool>>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
             .map(|(path, flags)| Shader::new(device.clone(), path, flags))
@@ -255,8 +203,29 @@ impl<V : VertexType> Pipeline<V> {
                 vk::DynamicState::SCISSOR
             ]);
 
-        let vertex_attributes = V::attributes();
-        let vertex_bindings = V::bindings();
+        let vertex_attributes = {
+            let mut descs = vec![];
+            for (i, tpl) in info.vertex_format_offset.iter().enumerate() {
+                descs.push(vk::VertexInputAttributeDescription::default()
+                    .binding(0) // ?
+                    .location(i as u32)
+                    .format(tpl.0)
+                    .offset(tpl.1)
+                );
+            }
+            descs
+        };
+        let vertex_bindings = {
+            let mut bindings = vec![];
+            for (stride, rate) in &info.vertex_bindings {
+                bindings.push(vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .input_rate(*rate)
+                    .stride(*stride)
+                );
+            }
+            bindings
+        };
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_attribute_descriptions(&vertex_attributes)
             .vertex_binding_descriptions(&vertex_bindings);
@@ -299,7 +268,6 @@ impl<V : VertexType> Pipeline<V> {
 
         let pipelines = unsafe {
             let pool_handle = pool.map(|p| p.handle())
-                .copied()
                 .unwrap_or(vk::PipelineCache::null());
 
             device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
@@ -307,58 +275,13 @@ impl<V : VertexType> Pipeline<V> {
         };
 
         Self {
-            device,
+            device : device.clone(),
             handle : pipelines[0],
             info,
-
-            _marker : PhantomData::default(),
         }
     }
 }
 
-pub struct PipelinePool {
-    device : Arc<LogicalDevice>,
-    cache : vk::PipelineCache,
-
-    path : PathBuf,
-}
-
-impl PipelinePool {
-    pub fn new(device : Arc<LogicalDevice>, path : PathBuf) -> Self {
-        let data = fs::read(path.as_path()).unwrap_or(vec![]);
-        
-        let create_info = vk::PipelineCacheCreateInfo::default()
-            .initial_data(&data);
-
-        let cache = unsafe {
-            device.handle().create_pipeline_cache(&create_info, None)
-                .expect("An error occured while creating a pipeline cache")
-        };
-
-        Self { cache, path, device }
-    }
-
-    pub fn save(&self) {
-        unsafe {
-            let data = self.device.handle().get_pipeline_cache_data(self.cache).unwrap_or(vec![]);
-
-            _ = fs::write(self.path.as_path(), data);
-        }
-    }
-}
-
-impl BorrowHandle for PipelinePool {
-    type Target = vk::PipelineCache;
-
-    fn handle(&self) -> &Self::Target { &self.cache }
-}
-
-impl Drop for PipelinePool {
-    fn drop(&mut self) {
-        self.save();
-
-        unsafe {
-            self.device.handle().destroy_pipeline_cache(self.cache, None);
-        }
-    }
+impl Handle<vk::Pipeline> for Pipeline {
+    fn handle(&self) -> vk::Pipeline { self.handle }
 }

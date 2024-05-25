@@ -3,8 +3,11 @@ use std::{ffi::CString, mem::ManuallyDrop, sync::{Arc, Mutex}};
 use ash::{ext::debug_utils, vk};
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
 
-use crate::traits::handle::{BorrowHandle, Handle};
-use crate::vk::{Context, PhysicalDevice, Queue, QueueAffinity, Surface};
+use crate::traits::handle::Handle;
+use crate::vk::context::Context;
+use crate::vk::physical_device::PhysicalDevice;
+use crate::vk::queue::{Queue, QueueAffinity};
+use crate::vk::surface::Surface;
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
@@ -21,6 +24,7 @@ pub struct LogicalDevice {
 }
 
 impl LogicalDevice {
+    pub fn handle(&self) -> &ash::Device { &self.handle }
     pub fn context(&self) -> &Arc<Context> { &self.context }
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
@@ -77,7 +81,7 @@ impl LogicalDevice {
     /// 
     /// * `handle` - A handle to the object to name.
     /// * `name` - The name to assign to that object.
-    pub(in crate) fn set_handle_name<T : ash::vk::Handle, S : Into<String>>(&self, handle : T, name : S) {
+    pub(in crate) fn set_handle_name<T : vk::Handle, S : Into<String>>(&self, handle : T, name : S) {
         if let Some(debug_utils) = &self.debug_utils {
             let cname = CString::new(Into::<String>::into(name)).unwrap();
 
@@ -97,7 +101,9 @@ impl LogicalDevice {
     /// 
     /// * `nameable` - An object that exposes a handle.
     /// * `name` - The name to assign to that handle.
-    pub fn set_name<T : Handle, S : Into<String>>(&self, nameable : &T, name : S) {
+    pub fn set_name<T, U, S>(&self, nameable : &T, name : S)
+        where T : Handle<U>, U : vk::Handle, S : Into<String> 
+    {
         self.set_handle_name(nameable.handle(), name);
     }
 
@@ -148,12 +154,6 @@ impl LogicalDevice {
                 .expect("Failed to create fence")
         }
     }
-}
-
-impl BorrowHandle for LogicalDevice {
-    type Target = ash::Device;
-
-    fn handle(&self) -> &ash::Device { &self.handle }
 }
 
 impl Drop for LogicalDevice {

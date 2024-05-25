@@ -1,11 +1,5 @@
-pub trait Handle {
-    type Target : ash::vk::Handle;
+use ash::vk;
 
-    fn handle(&self) -> Self::Target;
-}
-
-pub trait BorrowHandle {
-    type Target;
-    
-    fn handle(&self) -> &Self::Target;
+pub trait Handle<T : vk::Handle> {
+    fn handle(&self) -> T;
 }

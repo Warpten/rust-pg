@@ -4,8 +4,17 @@ use ash::vk::{self, ClearValue};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan::{Allocator, AllocatorCreateDesc}};
 use nohash_hasher::IntMap;
 
-use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::{BorrowHandle, Handle}, vk::{Context, LogicalDevice, PhysicalDevice, PipelinePool, QueueFamily, Surface, Swapchain, SwapchainOptions}, window::Window};
-use crate::vk::{frame_data::FrameData, Framebuffer, QueueAffinity, RenderPass};
+use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::Handle, window::Window};
+use crate::vk::frame_data::FrameData;
+use crate::vk::context::Context;
+use crate::vk::framebuffer::Framebuffer;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::physical_device::PhysicalDevice;
+use crate::vk::pipeline::pool::PipelinePool;
+use crate::vk::queue::{QueueAffinity, QueueFamily};
+use crate::vk::render_pass::RenderPass;
+use crate::vk::surface::Surface;
+use crate::vk::swapchain::{Swapchain, SwapchainOptions};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -125,7 +134,7 @@ impl SwapchainOptions for RendererOptions {
 pub struct Renderer {
     // Internal Vulkan types
     context : Arc<Context>,
-    logical_device : Arc<LogicalDevice>,
+    pub logical_device : Arc<LogicalDevice>,
     pipeline_cache : Arc<PipelinePool>,
     surface : Arc<Surface>,
     swapchain : Arc<Swapchain>,
@@ -139,20 +148,10 @@ pub struct Renderer {
     active_frame_index : usize,
     active_image_index : usize,
 
-    // One or many rendering graphs
-    // The application driving the renderer is in charge of adding as many graphs as needed. They will be
-    // baked, invalidated, scheduled and executed in order.
-    graphs : Vec<Graph>,
+    pub graph : Graph,
 }
 
 impl Renderer {
-    #[inline] pub fn context(&self) -> &Context { &self.context }
-    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.logical_device }
-    #[inline] pub fn pipeline_cache(&self) -> &Arc<PipelinePool> { &self.pipeline_cache }
-    #[inline] pub fn surface(&self) -> &Arc<Surface> { &self.surface }
-    #[inline] pub fn swapchain(&self) -> &Arc<Swapchain> { &self.swapchain }
-    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
-
     pub fn new(settings : &RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
         let surface = Surface::new(&context, &window);
 
@@ -208,7 +207,7 @@ impl Renderer {
         Self {
             context : context.clone(),
             pipeline_cache : Arc::new(PipelinePool::new(logical_device.clone(), (settings.get_pipeline_cache_file)())),
-            logical_device,
+            logical_device : logical_device.clone(),
             surface,
             swapchain,
             render_pass,
@@ -228,7 +227,7 @@ impl Renderer {
                 }
             ],
 
-            graphs : vec![],
+            graph : Graph::new(logical_device),
             frames,
             active_frame_index : 0,
             active_image_index : 0,
@@ -240,7 +239,7 @@ impl Renderer {
 
         let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
 
-        let image_index = match self.swapchain().acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
+        let image_index = match self.swapchain.acquire_image(acquired_semaphore, vk::Fence::null(), u64::MAX) {
             Ok((image_index, _)) => image_index,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 return Err(ApplicationRenderError::InvalidSwapchain);
@@ -267,14 +266,14 @@ impl Renderer {
 
     pub fn wait_for_fence(&self, fence : vk::Fence) {
         unsafe {
-            self.logical_device().handle().wait_for_fences(&[fence], true, u64::MAX)
+            self.logical_device.handle().wait_for_fences(&[fence], true, u64::MAX)
                 .expect("Waiting for the fence failed");
         }
     }
 
     pub fn reset_fence(&self, fence : vk::Fence) {
         unsafe {
-            self.logical_device().handle().reset_fences(&[fence])
+            self.logical_device.handle().reset_fences(&[fence])
                 .expect("Resetting the fence failed");
         }
     }
@@ -371,15 +370,15 @@ impl Renderer {
             .wait_dst_stage_mask(flags)
             .signal_semaphores(&signal_semaphore);
 
-        let graphics_queue = self.logical_device().get_queues(QueueAffinity::Graphics, self.surface())[0];
-        self.logical_device().submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
+        let graphics_queue = self.logical_device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
+        self.logical_device.submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
     
         signal_semaphore[0]
     }
 
     pub fn present_frame(&mut self, wait_semaphore: vk::Semaphore) -> Result<(), ApplicationRenderError> {
         let wait_semaphores = [wait_semaphore];
-        let swapchains = [self.swapchain().handle()];
+        let swapchains = [self.swapchain.handle()];
         let image_indices = [self.active_image_index as u32];
 
         let present_info = vk::PresentInfoKHR::default()
@@ -388,7 +387,7 @@ impl Renderer {
             .image_indices(&image_indices);
 
         unsafe {
-            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present, self.surface())[0];
+            let presentation_queue = self.logical_device.get_queues(QueueAffinity::Present, &self.surface)[0];
             let result = self.swapchain.loader
                 .queue_present(presentation_queue.handle(), &present_info);
 

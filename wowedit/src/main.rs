@@ -1,17 +1,34 @@
-use renderer::vk::{renderer::{DynamicState, RendererOptions}, SwapchainOptions};
-use winit::event::WindowEvent;
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
+use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
+use renderer::vk::pipeline::layout::PipelineLayoutInfo;
+use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
+use winit::event::WindowEvent;
 
 mod casc;
+mod rendering;
 
 pub struct ApplicationData {
 
 }
 
+struct TerrainVertex {
+    height : f32,
+}
+
 fn setup(app : &mut Application) -> ApplicationData {
-    ApplicationData { }
+    let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
+        .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
+        .binding(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::ALL, 1)
+        .build(&app.renderer.logical_device);
+
+    let pipeline_layout = PipelineLayoutInfo::default()
+        .layout(&descriptor_set_layout);
+
+    ApplicationData {
+        
+    }
 }
 
 fn prepare() -> ApplicationOptions {

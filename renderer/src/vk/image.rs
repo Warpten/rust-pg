@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
-use crate::{traits::handle::BorrowHandle, vk::LogicalDevice};
+use crate::vk::logical_device::LogicalDevice;
 
 pub struct Image {
     device : Arc<LogicalDevice>,

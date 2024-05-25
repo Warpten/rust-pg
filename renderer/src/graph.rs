@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use ash::vk;
+use nohash_hasher::IntMap;
 use crate::graph::attachment::{Attachment, AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{Buffer, BufferID, BufferOptions};
 use crate::graph::manager::Manager;
@@ -8,7 +9,10 @@ use crate::graph::pass::{Pass, PassID};
 use crate::graph::resource::{Identifiable, PhysicalResourceID, Resource, ResourceID};
 use crate::graph::texture::{Texture, TextureID, TextureOptions};
 use crate::utils::topological_sort::TopologicalSorter;
-use crate::vk::{CommandPool, Image, LogicalDevice};
+use crate::vk::command_pool::CommandPool;
+use crate::vk::image::Image;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::queue::Queue;
 
 pub mod attachment;
 pub mod buffer;
@@ -24,10 +28,18 @@ pub struct Graph {
     pub(in crate) attachments : Manager<Attachment>,
 
     device : Arc<LogicalDevice>,
-    command_pool : CommandPool,
+    // Optionally provides a command pool for the given queue family.
+    command_pools : IntMap<u32, CommandPool>,
 }
 
 impl Graph { // Graph compilation functions
+    pub fn get_command_buffer(&mut self, queue : &Queue, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
+        let command_pool = self.command_pools.entry(queue.family().index())
+            .or_insert_with(|| CommandPool::create(queue.family(), &self.device));
+
+        command_pool.rent_one(level)
+    }
+
     /// Builds this graph into a render pass.
     pub fn build(&self) {
         let topology = {
@@ -44,7 +56,7 @@ impl Graph { // Graph compilation functions
                 Ok(sorted) => {
                     let mut sorted_passes = Vec::with_capacity(sorted.len());
                     for sorted_id in sorted {
-                        sorted_passes.push(self.passes.find(sorted_id));
+                        sorted_passes.push(self.passes.find(sorted_id).unwrap());
                     }
                     sorted_passes
                 },
@@ -53,10 +65,11 @@ impl Graph { // Graph compilation functions
         };
 
         // Walk the topology and process resources
-        let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
+        /*let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in topology {
-            let pass = pass.unwrap();
-            let command_buffer = self.command_pool.rent_one(vk::CommandBufferLevel::SECONDARY);
+            // Find a command pool that works with the pass's affinity.
+
+            let command_buffer : vk::CommandBuffer = todo!(); // self.command_pool.rent_one(vk::CommandBufferLevel::SECONDARY);
 
             for resource in pass.resources() {
                 let physical_resource = resource.devirtualize();
@@ -91,7 +104,7 @@ impl Graph { // Graph compilation functions
             }
 
             // Persist the command buffer here.
-        }
+        }*/
     }
 
     fn process_texture(
@@ -119,15 +132,15 @@ impl Graph { // Graph compilation functions
 }
 
 impl Graph { // Public API
-    pub fn new<'device>(device : &Arc<LogicalDevice>) -> Self {
+    pub fn new<'device>(device : Arc<LogicalDevice>) -> Self {
         Self {
             passes: Default::default(),
             textures: Default::default(),
             buffers: Default::default(),
             attachments: Default::default(),
 
-            device : device.clone(),
-            command_pool : CommandPool::create(todo!(), device),
+            device,
+            command_pools : IntMap::<u32, CommandPool>::default(),
         }
     }
 
