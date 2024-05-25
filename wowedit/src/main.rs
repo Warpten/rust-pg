@@ -4,6 +4,7 @@ use renderer::application::{Application, ApplicationOptions, ApplicationRenderEr
 use renderer::traits::handle::Handle;
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
+use renderer::vk::pipeline::shader::Shader;
 use renderer::vk::pipeline::{pipeline, DepthOptions, Pipeline, PipelineInfo, Vertex};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
@@ -45,15 +46,18 @@ fn setup(app : &mut Application) -> ApplicationData {
         .layout(&descriptor_set_layout)
         .build(&app.renderer);
 
-    let pipeline = Pipeline::new(&app.renderer.device, PipelineInfo::default()
+    let pipeline = PipelineInfo::default()
         .layout(pipeline_layout.handle())
         .depth(DepthOptions::enabled())
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
         .render_pass(app.renderer.render_pass.handle())
-        .samples(app.renderer.options.multisampling)
+        .samples(app.renderer.options().multisampling)
         .pool(&app.renderer.pipeline_cache)
-        .vertex::<TerrainVertex>());
+        .vertex::<TerrainVertex>()
+        .add_shader("./assets/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
+        .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
+        .build(&app.renderer.device);
 
     ApplicationData {
         

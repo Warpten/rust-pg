@@ -142,7 +142,7 @@ pub struct Renderer {
     pub render_pass : RenderPass,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
-    pub options : RendererOptions,
+    options : RendererOptions,
 
     // Actual application stuff
     framebuffers : Vec<Framebuffer>,
@@ -153,6 +153,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn options(&self) -> &RendererOptions { &self.options }
+
     pub fn new(settings : RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
         let surface = Surface::new(&context, &window);
 

@@ -1,4 +1,4 @@
-use std::{ops::Range, path::PathBuf, sync::{Arc, Mutex}};
+use std::{ffi::CString, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
 use ash::vk;
 use gpu_allocator::vulkan::Allocator;
@@ -28,7 +28,7 @@ pub trait Vertex {
 
 pub struct PipelineInfo {
     layout : vk::PipelineLayout,
-    render_pass : Option<vk::RenderPass>,
+    render_pass : vk::RenderPass,
     shaders : Vec<(PathBuf, vk::ShaderStageFlags)>,
     depth : DepthOptions,
     cull_mode : vk::CullModeFlags,
@@ -60,7 +60,7 @@ impl PipelineInfo {
     }
 
     #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass) -> Self {
-        self.render_pass = Some(render_pass);
+        self.render_pass = render_pass;
         self
     }
 
@@ -103,13 +103,17 @@ impl PipelineInfo {
         self.front_face = front;
         self
     }
+
+    pub fn build(self, device : &Arc<LogicalDevice>) -> Pipeline {
+        Pipeline::new(device, self)
+    }
 }
 
 impl Default for PipelineInfo {
     fn default() -> Self {
         Self {
             layout: vk::PipelineLayout::default(),
-            render_pass: None,
+            render_pass: vk::RenderPass::null(),
             shaders: vec![],
             depth : DepthOptions {
                 test : true,
@@ -185,24 +189,22 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
-    #[inline] pub fn context(&self) -> &Arc<Context> { self.device().context() }
-    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.device().allocator() }
-
-    pub fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
+    pub(in self) fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
-            .map(|(path, flags)| Shader::new(device.clone(), path, flags))
+            .map(|(path, flags)| Shader::new(device, path, flags))
             .collect::<Vec<_>>();
+
+        let shader_names = CString::new("main").unwrap();
 
         let shader_stage_create_infos = shaders.iter().map(|shader| {
             if info.specialization_entries.is_empty() {
-                shader.stage_info(None)
+                shader.stage_info(None, &shader_names)
             } else {
                 shader.stage_info(vk::SpecializationInfo::default()
                     .map_entries(&info.specialization_entries)
                     .data(&info.specialization_data)
-                    .into())
+                    .into(), &shader_names)
             }
         }).collect::<Vec<_>>();
 
@@ -263,8 +265,20 @@ impl Pipeline {
 
         let depth_stencil_state = info.depth.build();
 
+        // TODO: This array needs to be synced with render_pass.subpasses[all].colorAttachmentCount
+        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
+            blend_enable: 0,
+            src_color_blend_factor: vk::BlendFactor::SRC_COLOR,
+            dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_DST_COLOR,
+            color_blend_op: vk::BlendOp::ADD,
+            src_alpha_blend_factor: vk::BlendFactor::ZERO,
+            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+            alpha_blend_op: vk::BlendOp::ADD,
+            color_write_mask: vk::ColorComponentFlags::RGBA,
+        }];
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-            .logic_op(vk::LogicOp::CLEAR);
+            .logic_op(vk::LogicOp::CLEAR)
+            .attachments(&color_blend_attachment_states);
 
         let create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stage_create_infos[..])
@@ -276,7 +290,7 @@ impl Pipeline {
             .multisample_state(&multisample_state)
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blend_state)
-            .render_pass(vk::RenderPass::default())
+            .render_pass(info.render_pass)
             .layout(info.layout);
 
         let pipelines = unsafe {
@@ -293,6 +307,14 @@ impl Pipeline {
             device : device.clone(),
             handle : pipelines[0],
             info,
+        }
+    }
+}
+
+impl Drop for Pipeline {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.handle().destroy_pipeline(self.handle, None);
         }
     }
 }

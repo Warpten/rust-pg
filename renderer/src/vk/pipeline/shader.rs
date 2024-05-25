@@ -1,4 +1,5 @@
-use std::fs;
+use std::ffi::CString;
+use std::{ffi::CStr, fs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use ash::vk;
@@ -32,7 +33,7 @@ fn translate_shader_kind(stage : vk::ShaderStageFlags) -> ShaderKind {
 impl Shader {
     #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
 
-    pub fn new(device : Arc<LogicalDevice>, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
+    pub fn new(device : &Arc<LogicalDevice>, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         let compiler = Compiler::new().expect("Failed to initialize shader compiler");
         let mut options = CompileOptions::new().unwrap();
         #[cfg(debug_assertions)]
@@ -71,8 +72,9 @@ impl Shader {
         }
     }
 
-    pub fn stage_info(&self, spec : Option<vk::SpecializationInfo>) -> vk::PipelineShaderStageCreateInfo {
+    pub fn stage_info<'a>(&self, spec : Option<vk::SpecializationInfo>, name : &'a CStr) -> vk::PipelineShaderStageCreateInfo<'a> {
         let create_info = vk::PipelineShaderStageCreateInfo::default()
+            .name(name)
             .stage(self.flags)
             .module(self.module);
 
