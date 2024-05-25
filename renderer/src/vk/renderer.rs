@@ -49,21 +49,10 @@ impl RendererOptions {
         self.line_width = line_width.into();
         self
     }
-
-    #[inline] pub fn device_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.device_extensions = extensions;
-        self
-    }
-
-    #[inline] pub fn instance_extensions(mut self, extensions : Vec<CString>) -> Self {
-        self.instance_extensions = extensions;
-        self
-    }
-
-    #[inline] pub fn resolution(mut self, resolution : [u32; 2]) -> Self {
-        self.resolution = resolution;
-        self
-    }
+    
+    value_builder! { device_extensions, Vec<CString> }
+    value_builder! { instance_extensions, Vec<CString> }
+    value_builder! { resolution, [u32; 2] }
 
     #[inline] pub fn queue_count(mut self, getter : fn(&QueueFamily) -> u32) -> Self {
         self.get_queue_count = getter;
@@ -75,25 +64,10 @@ impl RendererOptions {
         self
     }
 
-    #[inline] pub fn depth(mut self, depth : bool) -> Self {
-        self.depth = depth;
-        self
-    }
-
-    #[inline] pub fn stencil(mut self, stencil : bool) -> Self {
-        self.stencil = stencil;
-        self
-    }
-
-    #[inline] pub fn clear_color(mut self, clear_color : [f32; 4]) -> Self {
-        self.clear_color = clear_color;
-        self
-    }
-
-    #[inline] pub fn multisampling(mut self, samples : vk::SampleCountFlags) -> Self {
-        self.multisampling = samples;
-        self
-    }
+    value_builder! { depth, bool }
+    value_builder! { stencil, bool }
+    value_builder! { clear_color, [f32; 4] }
+    value_builder! { multisampling, samples, multisampling, vk::SampleCountFlags }
 }
 
 impl Default for RendererOptions {
@@ -312,7 +286,9 @@ impl Renderer {
         }
     }
 
-    pub fn run_frame(&mut self, handler : fn(&ash::Device, vk::CommandBuffer)) -> Result<(), ApplicationRenderError> {
+    pub fn run_frame<F>(&mut self, handler : F) -> Result<(), ApplicationRenderError>
+        where F : Fn(&ash::Device, vk::CommandBuffer)
+    {
         let (image_acquired, _) = self.acquire_next_image().expect("Image acquisition failed");
 
         let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);

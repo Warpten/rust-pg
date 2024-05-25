@@ -1,7 +1,8 @@
-use std::mem::size_of;
+use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
 use renderer::traits::handle::Handle;
+use renderer::vk::buffer::BufferBuilder;
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::shader::Shader;
@@ -15,11 +16,12 @@ mod casc;
 mod rendering;
 
 pub struct ApplicationData {
-
+    pipeline : Pipeline,
 }
 
 struct TerrainVertex {
-    height : f32,
+    pos : [f32; 2],
+    color : [f32; 3],
 }
 
 impl Vertex for TerrainVertex {
@@ -31,15 +33,20 @@ impl Vertex for TerrainVertex {
 
     fn format_offset() -> Vec<(vk::Format, u32)> {
         vec![
-            (vk::Format::R32_SFLOAT, 0)
+            (vk::Format::R32G32_SFLOAT,    offset_of!(TerrainVertex, pos) as u32),
+            (vk::Format::R32G32B32_SFLOAT, offset_of!(TerrainVertex, color) as u32)
         ]
     }
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
+    let buffer = BufferBuilder::default()
+        .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+        .memory_location(MemoryLocation::GpuOnly);
+
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
-        .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
-        .binding(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::ALL, 1)
+        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
+        // .binding(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::ALL, 1)
         .build(&app.renderer);
 
     let pipeline_layout = PipelineLayoutInfo::default()
@@ -60,7 +67,7 @@ fn setup(app : &mut Application) -> ApplicationData {
         .build(&app.renderer.device);
 
     ApplicationData {
-        
+        pipeline,
     }
 }
 
@@ -75,8 +82,25 @@ fn prepare() -> ApplicationOptions {
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
-    app.renderer.run_frame(|_device, _cmd| {
-        // Do stuff here.
+    let viewport = vk::Viewport::default()
+        .x(0.0f32)
+        .y(0.0f32)
+        .min_depth(0.0f32)
+        .max_depth(0.0f32)
+        .width(app.renderer.swapchain.extent.width as _)
+        .height(app.renderer.swapchain.extent.height as _);
+
+    let scissors = vk::Rect2D::default()
+        .offset(vk::Offset2D { x: 0, y: 0 })
+        .extent(app.renderer.swapchain.extent);
+
+    app.renderer.run_frame(|device, cmd| unsafe {
+        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, data.pipeline.handle());
+
+        device.cmd_set_viewport(cmd, 0, &[viewport]);
+        device.cmd_set_scissor(cmd, 0, &[scissors]);
+
+        device.cmd_draw(cmd, 3, 1, 0, 0);
     })
 }
 

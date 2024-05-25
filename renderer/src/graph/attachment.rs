@@ -20,10 +20,8 @@ impl Attachment {
         }
     }
 
-    pub fn samples(mut self, samples : u32) -> Self {
-        self.samples = samples;
-        self
-    }
+    value_builder! { samples, samples, u32 }
+
 
     /// Registers this attachment on the given graph.
     ///

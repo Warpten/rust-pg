@@ -1,3 +1,6 @@
+#[macro_use]
+mod macros;
+
 // Public modules
 pub mod application;
 pub mod graph;

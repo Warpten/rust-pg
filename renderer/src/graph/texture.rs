@@ -80,28 +80,14 @@ impl Texture {
     }
 
     #[inline] pub fn layout(&self) -> vk::ImageLayout { self.layout }
-    #[inline] pub fn with_layout(mut self, layout : vk::ImageLayout) -> Self {
-        self.layout = layout;
-        self
-    }
-
     #[inline] pub fn levels(&self) -> u32 { self.levels }
-    #[inline] pub fn with_levels(mut self, levels : u32) -> Self {
-        self.levels = levels;
-        self
-    }
-
     #[inline] pub fn layers(&self) -> u32 { self.layers }
-    #[inline] pub fn with_layers(mut self, layers : u32) -> Self {
-        self.layers = layers;
-        self
-    }
-
     #[inline] pub fn tiling(&self) -> vk::ImageTiling { self.tiling }
-    #[inline] pub fn with_tiling(mut self, tiling : vk::ImageTiling) -> Self {
-        self.tiling = tiling;
-        self
-    }
+
+    value_builder! { with_layout, layout, vk::ImageLayout }
+    value_builder! { with_levels, levels, u32 }
+    value_builder! { with_layers, layers, u32 }
+    value_builder! { with_tiling, tiling, vk::ImageTiling }
 
     /// Registers this attachment on the given graph.
     ///

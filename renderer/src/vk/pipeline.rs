@@ -49,20 +49,12 @@ impl PipelineInfo {
         self
     }
 
-    #[inline] pub fn depth(mut self, depth : DepthOptions) -> Self {
-        self.depth = depth;
-        self
-    }
-
-    #[inline] pub fn layout(mut self, layout : vk::PipelineLayout) -> Self {
-        self.layout = layout;
-        self
-    }
-
-    #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass) -> Self {
-        self.render_pass = render_pass;
-        self
-    }
+    value_builder! { depth, depth, DepthOptions }
+    value_builder! { layout, layout, vk::PipelineLayout }
+    value_builder! { render_pass, render_pass, vk::RenderPass }
+    value_builder! { cull_mode, mode, cull_mode, vk::CullModeFlags }
+    value_builder! { samples, samples, vk::SampleCountFlags }
+    value_builder! { front_face, front, front_face, vk::FrontFace }
 
     #[inline] pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         self.shaders.push((path, flags));
@@ -83,24 +75,9 @@ impl PipelineInfo {
         self
     }
 
-    #[inline] pub fn cull_mode(mut self, mode : vk::CullModeFlags) -> Self {
-        self.cull_mode = mode;
-        self
-    }
-
     #[inline] pub fn vertex<T : Vertex>(mut self) -> Self {
         self.vertex_format_offset = T::format_offset();
         self.vertex_bindings = T::bindings();
-        self
-    }
-
-    #[inline] pub fn samples(mut self, samples : vk::SampleCountFlags) -> Self {
-        self.samples = samples;
-        self
-    }
-
-    #[inline] pub fn front_face(mut self, front : vk::FrontFace) -> Self {
-        self.front_face = front;
         self
     }
 
@@ -266,18 +243,21 @@ impl Pipeline {
         let depth_stencil_state = info.depth.build();
 
         // TODO: This array needs to be synced with render_pass.subpasses[all].colorAttachmentCount
-        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
-            blend_enable: 0,
-            src_color_blend_factor: vk::BlendFactor::SRC_COLOR,
-            dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_DST_COLOR,
-            color_blend_op: vk::BlendOp::ADD,
-            src_alpha_blend_factor: vk::BlendFactor::ZERO,
-            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-            alpha_blend_op: vk::BlendOp::ADD,
-            color_write_mask: vk::ColorComponentFlags::RGBA,
-        }];
+        let color_blend_attachment_states = [
+            vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(false)
+                .src_color_blend_factor(vk::BlendFactor::SRC_COLOR)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_DST_COLOR)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .alpha_blend_op(vk::BlendOp::ADD)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+        ];
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-            .logic_op(vk::LogicOp::CLEAR)
+            .logic_op_enable(false)
+            .logic_op(vk::LogicOp::COPY)
+            .blend_constants([0.0f32; 4])
             .attachments(&color_blend_attachment_states);
 
         let create_info = vk::GraphicsPipelineCreateInfo::default()

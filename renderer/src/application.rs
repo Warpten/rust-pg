@@ -27,10 +27,7 @@ impl ApplicationOptions {
         self
     }
 
-    #[inline] pub fn renderer(mut self, renderer : RendererOptions) -> Self {
-        self.renderer = renderer;
-        self
-    }
+    value_builder! { renderer, renderer, RendererOptions }
 }
 
 #[derive(Debug)]

@@ -23,15 +23,8 @@ impl DescriptorSetLayoutBuilder {
         self
     }
 
-    #[inline] pub fn sets(mut self, count : u32) -> Self {
-        self.sets = count;
-        self
-    }
-
-    #[inline] pub fn flags(mut self, flags : vk::DescriptorSetLayoutCreateFlags) -> Self {
-        self.flags = flags;
-        self
-    }
+    value_builder! { sets, count, sets, u32 }
+    value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
     pub fn build(mut self, renderer : &Renderer) -> DescriptorSetLayout {
         #[cfg(debug_assertions)] { // Just silencing a warning, don't mind me
