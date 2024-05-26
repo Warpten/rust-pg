@@ -4,8 +4,10 @@ use renderer::application::{Application, ApplicationOptions, ApplicationRenderEr
 use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, BufferBuilder};
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
+use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
+use renderer::vk::render_pass::RenderPass;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -17,6 +19,8 @@ mod rendering;
 pub struct ApplicationData {
     pipeline : Pipeline,
     buffer : Buffer,
+    render_pass: RenderPass,
+    framebuffers : Vec<Framebuffer>,
 }
 
 #[derive(Copy, Clone)]
@@ -69,13 +73,16 @@ fn setup(app : &mut Application) -> ApplicationData {
         .layout(&descriptor_set_layout)
         .build(&app.renderer);
 
+    let render_pass = app.renderer.swapchain.create_render_pass();
+    let framebuffers = app.renderer.swapchain.create_framebuffers(&render_pass);
+
     let pipeline = PipelineInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
         .layout(pipeline_layout.handle())
         .depth(DepthOptions::enabled())
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::CLOCKWISE)
-        .render_pass(app.renderer.render_pass.handle())
+        .render_pass(render_pass.handle())
         .samples(app.renderer.options().multisampling)
         .pool(&app.renderer.pipeline_cache)
         .vertex::<TerrainVertex>()
@@ -86,6 +93,8 @@ fn setup(app : &mut Application) -> ApplicationData {
     ApplicationData {
         pipeline,
         buffer,
+        render_pass,
+        framebuffers
     }
 }
 
@@ -112,7 +121,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         .offset(vk::Offset2D { x: 0, y: 0 })
         .extent(app.renderer.swapchain.extent);
 
-    let (image_acquired, cmd) = app.renderer.begin_frame()?;
+    let (image_acquired, cmd) = app.renderer.begin_frame(&data.render_pass, &data.framebuffers[app.renderer.frame_index()])?;
 
     cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
     cmd.set_viewport(0, &[viewport]);

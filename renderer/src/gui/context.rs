@@ -113,7 +113,7 @@ impl Interface {
             .samples(vk::SampleCountFlags::TYPE_1)
             .pool(&info.renderer.pipeline_cache)
             .vertex::<InterfaceVertex>()
-            .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
+            .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&info.renderer.device);
 

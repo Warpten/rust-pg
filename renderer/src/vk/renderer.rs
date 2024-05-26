@@ -113,15 +113,13 @@ pub struct Renderer {
     pub device : Arc<LogicalDevice>,
     
     pub pipeline_cache : Arc<PipelinePool>,
-    pub(in crate) surface : Arc<Surface>,
+    pub surface : Arc<Surface>,
     pub swapchain : Arc<Swapchain>,
-    pub render_pass : RenderPass,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     options : RendererOptions,
 
     // Actual application stuff
-    framebuffers : Vec<Framebuffer>,
     clear_values : [ClearValue; 2],
     frames : Vec<FrameData>,
     active_frame_index : usize,
@@ -170,8 +168,6 @@ impl Renderer {
             &settings,
             swapchain_queue_families,
         );
-        let render_pass = swapchain.create_render_pass();
-        let framebuffers = swapchain.create_framebuffers(&render_pass);
 
         let frames = {
             let mut frames = Vec::<FrameData>::new();
@@ -200,8 +196,6 @@ impl Renderer {
             device : logical_device.clone(),
             surface,
             swapchain,
-            render_pass,
-            framebuffers,
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
             clear_values : [
                 ClearValue {
@@ -228,6 +222,8 @@ impl Renderer {
                 .build(&logical_device)
         }
     }
+
+    pub fn frame_index(&self) -> usize { self.active_frame_index }
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
         self.wait_for_fence(self.frames[self.active_frame_index].in_flight);
@@ -282,28 +278,7 @@ impl Renderer {
         self.present_frame(signal_semaphore)
     }
 
-    pub fn begin_render_pass(&self, command_buffer : vk::CommandBuffer, extent : vk::Extent2D) {
-        unsafe {
-            let render_pass_begin_info = vk::RenderPassBeginInfo::default()
-                .render_area(vk::Rect2D {
-                    offset : vk::Offset2D { x: 0, y : 0 },
-                    extent
-                })
-                .framebuffer(self.framebuffers[self.active_frame_index].handle())
-                .render_pass(self.render_pass.handle())
-                .clear_values(&self.clear_values);
-
-            self.device.handle().cmd_begin_render_pass(command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
-        }
-    }
-
-    pub fn end_render_pass(&self, command_buffer : vk::CommandBuffer) {
-        unsafe {
-            self.device.handle().cmd_end_render_pass(command_buffer);
-        }
-    }
-
-    pub fn begin_frame(&mut self) -> Result<(vk::Semaphore, CommandBuffer), ApplicationRenderError> {
+    pub fn begin_frame(&mut self, render_pass : &RenderPass, framebuffer : &Framebuffer) -> Result<(vk::Semaphore, CommandBuffer), ApplicationRenderError> {
         let (image_acquired, _) = self.acquire_next_image()?;
 
         let frame = self.get_frame_mut();
@@ -314,7 +289,7 @@ impl Renderer {
             .build_one(&self.device);
 
         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[self.active_frame_index], vk::Rect2D {
+        cmd.begin_render_pass(render_pass, framebuffer, vk::Rect2D {
             offset : vk::Offset2D { x: 0, y : 0 },
             extent : self.swapchain.extent
         }, &self.clear_values, vk::SubpassContents::INLINE);
