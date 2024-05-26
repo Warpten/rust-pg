@@ -104,17 +104,18 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
             device.handle().bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Binding buffer memory failed");
 
-            let this = Buffer {
+            let mut this = Buffer {
                 device : device.clone(),
                 handle : buffer,
                 allocation,
-                index_type : self.index_type
+                index_type : self.index_type,
+                element_count : 0
             };
 
             if let BufferInitialization::From(data) = self.initialization {
                 match self.memory_location {
                     MemoryLocation::GpuOnly => {
-                        let staging_buffer = Self::default()
+                        let mut staging_buffer = Self::default()
                             .name("Staging buffer")
                             .cpu_to_gpu()
                             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
@@ -141,10 +142,12 @@ pub struct Buffer {
     handle : vk::Buffer,
     allocation : Allocation,
     index_type : vk::IndexType,
+    element_count : u32,
 }
 
 impl Buffer {
-    pub fn update<T : Copy>(&self, data : &[T]) {
+    pub fn update<T : Copy>(&mut self, data : &[T]) {
+
         let size = size_of_val(data) as u64;
         assert!(self.allocation.size() >= size, "The data you're trying to write to the buffer is too large to fit.");
 
@@ -159,10 +162,16 @@ impl Buffer {
             );
             mapping_slice.copy_from_slice(data);
         }
+
+        self.element_count = data.len() as u32;
     }
 
     pub fn map(&self) -> *mut u8 {
         self.allocation.mapped_ptr().unwrap().as_ptr() as *mut u8
+    }
+
+    pub fn element_count(&self) -> u32 {
+        self.element_count
     }
 }
 

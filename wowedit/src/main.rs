@@ -47,7 +47,7 @@ fn setup(app : &mut Application) -> ApplicationData {
         .cpu_to_gpu() // FIXME: gpu_only() not implemented, FIXME
         .data(&[
             TerrainVertex {
-                pos : [ 0.0f32, 0.5f32],
+                pos : [ 0.0f32, -0.5f32],
                 color : [ 1.0f32, 0.0f32, 0.0f32 ]
             },
             TerrainVertex {
@@ -74,7 +74,7 @@ fn setup(app : &mut Application) -> ApplicationData {
         .layout(pipeline_layout.handle())
         .depth(DepthOptions::enabled())
         .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .front_face(vk::FrontFace::CLOCKWISE)
         .render_pass(app.renderer.render_pass.handle())
         .samples(app.renderer.options().multisampling)
         .pool(&app.renderer.pipeline_cache)
@@ -95,7 +95,7 @@ fn prepare() -> ApplicationOptions {
         .renderer(RendererOptions::default()
             .line_width(DynamicState::Fixed(1.0f32))
             .resolution([1280, 720])
-            .multisampling(vk::SampleCountFlags::TYPE_1)
+            .multisampling(vk::SampleCountFlags::TYPE_4)
         )
 }
 
@@ -104,7 +104,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         .x(0.0f32)
         .y(0.0f32)
         .min_depth(0.0f32)
-        .max_depth(0.0f32)
+        .max_depth(1.0f32)
         .width(app.renderer.swapchain.extent.width as _)
         .height(app.renderer.swapchain.extent.height as _);
 
@@ -119,7 +119,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         device.cmd_set_scissor(cmd, 0, &[scissors]);
 
         device.cmd_bind_vertex_buffers(cmd, 0, &[data.buffer.handle()], &[0]);
-        device.cmd_draw(cmd, 3, 1, 0, 0);
+        device.cmd_draw(cmd, data.buffer.element_count(), 1, 0, 0);
     })
 }
 

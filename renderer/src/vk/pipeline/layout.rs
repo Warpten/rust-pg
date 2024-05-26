@@ -57,3 +57,11 @@ pub struct PipelineLayout {
 impl Handle<vk::PipelineLayout> for PipelineLayout {
     fn handle(&self) -> vk::PipelineLayout { self.layout }
 }
+
+impl Drop for PipelineLayout {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.handle().destroy_pipeline_layout(self.layout, None);
+        }
+    }
+}
