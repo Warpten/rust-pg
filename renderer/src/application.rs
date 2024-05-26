@@ -169,6 +169,7 @@ impl Application {
         let context = Arc::new(unsafe {
             let mut all_extensions = settings.renderer.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
+            all_extensions.push(ash::ext::debug_utils::NAME.into());
             all_extensions.dedup();
 
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)

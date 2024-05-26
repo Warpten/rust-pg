@@ -59,8 +59,7 @@ impl LogicalDevice {
             features,
             indexing_features,
             // TODO: Fix this being optional if the extension is not available
-            // debug_utils : Some(debug_utils::Device::new(&context.handle(), &device.clone())),
-            debug_utils : None,
+            debug_utils : Some(debug_utils::Device::new(&context.handle(), &device.clone())),
         }
     }
 

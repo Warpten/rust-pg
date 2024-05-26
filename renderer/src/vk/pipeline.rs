@@ -26,6 +26,8 @@ pub trait Vertex {
 }
 
 pub struct PipelineInfo {
+    name : Option<&'static str>,
+
     layout : vk::PipelineLayout,
     render_pass : vk::RenderPass,
     shaders : Vec<(PathBuf, vk::ShaderStageFlags)>,
@@ -46,6 +48,11 @@ pub struct PipelineInfo {
 impl PipelineInfo {
     #[inline] pub fn pool(mut self, pool : &Arc<PipelinePool>) -> Self {
         self.pool = Some(pool.clone());
+        self
+    }
+
+    #[inline] pub fn name(mut self, name : &'static str) -> Self {
+        self.name = Some(name);
         self
     }
 
@@ -90,6 +97,8 @@ impl PipelineInfo {
 impl Default for PipelineInfo {
     fn default() -> Self {
         Self {
+            name : Some("Default Pipeline"),
+
             layout: vk::PipelineLayout::default(),
             render_pass: vk::RenderPass::null(),
             shaders: vec![],
@@ -284,6 +293,10 @@ impl Pipeline {
             device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
                 .expect("Creating a graphics pipeline failed")
         };
+
+        if let Some(name) = &info.name {
+            device.set_handle_name(pipelines[0], name.to_owned());
+        }
 
         Self {
             device : device.clone(),

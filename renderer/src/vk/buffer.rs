@@ -91,6 +91,10 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
 
             let buffer = renderer.device.handle().create_buffer(&create_info, None)
                 .expect("Buffer creation failed");
+            
+            if !self.name.is_empty() {
+                renderer.device.set_handle_name(buffer, self.name.to_owned());
+            }
 
             let requirements = renderer.device.handle().get_buffer_memory_requirements(buffer);
             

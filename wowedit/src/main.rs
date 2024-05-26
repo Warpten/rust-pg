@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
