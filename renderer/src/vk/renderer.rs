@@ -11,7 +11,7 @@ use crate::vk::framebuffer::Framebuffer;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::pipeline::pool::PipelinePool;
-use crate::vk::queue::{QueueAffinity, QueueFamily};
+use crate::vk::queue::{Queue, QueueAffinity, QueueFamily};
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 use crate::vk::swapchain::{Swapchain, SwapchainOptions};
@@ -291,7 +291,8 @@ impl Renderer {
     {
         let (image_acquired, _) = self.acquire_next_image().expect("Image acquisition failed");
 
-        let cmd = self.begin_command_buffer(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics)[0];
+        let cmd = self.begin_command_buffer(graphics_queue, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         self.begin_render_pass(cmd, self.swapchain.extent);
 
         handler(self.device.handle(), cmd);
@@ -301,11 +302,9 @@ impl Renderer {
         self.submit_and_present(cmd, image_acquired)
     }
 
-    pub fn begin_command_buffer(&mut self, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
-        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
-
-        self.frames[self.active_frame_index].reset_command_pool(graphics_queue.family());
-        let cmd = self.frames[self.active_frame_index].get_command_buffer(graphics_queue.family(),
+    pub fn begin_command_buffer(&mut self, queue : &Queue, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
+        self.frames[self.active_frame_index].reset_command_pool(queue.family());
+        let cmd = self.frames[self.active_frame_index].get_command_buffer(queue.family(),
             vk::CommandBufferLevel::PRIMARY,
             1)[0];
 
@@ -350,7 +349,7 @@ impl Renderer {
             .wait_dst_stage_mask(flags)
             .signal_semaphores(&signal_semaphore);
 
-        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics, &self.surface)[0];
+        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics)[0];
         self.device.submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
     
         signal_semaphore[0]
@@ -367,7 +366,7 @@ impl Renderer {
             .image_indices(&image_indices);
 
         unsafe {
-            let presentation_queue = self.device.get_queues(QueueAffinity::Present, &self.surface)[0];
+            let presentation_queue = self.device.get_queues(QueueAffinity::Graphics)[0]; // TODO: Use the present queue here, not the graphics queue
             let result = self.swapchain.loader
                 .queue_present(presentation_queue.handle(), &present_info);
 

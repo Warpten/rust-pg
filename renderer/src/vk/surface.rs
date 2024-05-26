@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::window::Window;
@@ -15,9 +16,7 @@ pub struct Surface {
     // pub resolution : vk::Extent2D,
 }
 
-impl Handle<vk::SurfaceKHR> for Surface {
-    fn handle(&self) -> vk::SurfaceKHR { self.handle }
-}
+make_handle! { Surface, vk::SurfaceKHR }
 
 impl Drop for Surface {
     fn drop(&mut self) {

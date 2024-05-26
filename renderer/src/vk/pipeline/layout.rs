@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use ash::vk;
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::renderer::Renderer;
@@ -54,9 +55,7 @@ pub struct PipelineLayout {
     info : PipelineLayoutInfo
 }
 
-impl Handle<vk::PipelineLayout> for PipelineLayout {
-    fn handle(&self) -> vk::PipelineLayout { self.layout }
-}
+make_handle! { PipelineLayout, vk::PipelineLayout, layout }
 
 impl Drop for PipelineLayout {
     fn drop(&mut self) {

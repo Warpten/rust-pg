@@ -62,8 +62,8 @@ impl Graph<'_> { // Graph compilation functions
         };
 
         // Walk the topology and process resources
-        let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics, &self.renderer.surface);
-        let command_buffer : vk::CommandBuffer = self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
+        let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);
+        let command_buffer = self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
 
         let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in &topology {

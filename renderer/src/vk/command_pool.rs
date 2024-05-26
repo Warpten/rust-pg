@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk;
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
@@ -94,9 +95,7 @@ impl CommandPool {
     }
 }
 
-impl Handle<vk::CommandPool> for CommandPool {
-    fn handle(&self) -> vk::CommandPool { self.handle }
-}
+make_handle! { CommandPool, vk::CommandPool }
 
 impl Drop for CommandPool {
     fn drop(&mut self) {

@@ -3,6 +3,7 @@ use std::{borrow::Borrow, ops::Range, sync::Arc};
 use ash::vk;
 use ash::prelude::VkResult;
 
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::vk::framebuffer::Framebuffer;
@@ -352,6 +353,4 @@ impl Swapchain {
     pub fn image_count(&self) -> usize { self.present_images.len() }
 }
 
-impl Handle<vk::SwapchainKHR> for Swapchain {
-    fn handle(&self) -> vk::SwapchainKHR { self.handle }
-}
+make_handle! { Swapchain, vk::SwapchainKHR }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
@@ -147,9 +148,7 @@ impl RenderPass {
     }
 }
 
-impl Handle<vk::RenderPass> for RenderPass {
-    fn handle(&self) -> vk::RenderPass { self.handle }
-}
+make_handle! { RenderPass, vk::RenderPass }
 
 impl Drop for RenderPass {
     fn drop(&mut self) {

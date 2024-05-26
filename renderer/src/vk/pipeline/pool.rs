@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use ash::vk;
 
-use crate::{traits::handle::Handle, vk::logical_device::LogicalDevice};
+use crate::{make_handle, traits::handle::Handle, vk::logical_device::LogicalDevice};
 
 pub struct PipelinePool {
     device : Arc<LogicalDevice>,
@@ -35,9 +35,7 @@ impl PipelinePool {
     }
 }
 
-impl Handle<vk::PipelineCache> for PipelinePool {
-    fn handle(&self) -> vk::PipelineCache { self.cache }
-}
+make_handle! { PipelinePool, vk::PipelineCache, cache }
 
 impl Drop for PipelinePool {
     fn drop(&mut self) {

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use ash::vk;
 use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
+use crate::make_handle;
 use crate::{traits::handle::Handle, vk::logical_device::LogicalDevice};
 
 pub struct Shader {
@@ -86,9 +87,7 @@ impl Shader {
     }
 }
 
-impl Handle<vk::ShaderModule> for Shader {
-    fn handle(&self) -> vk::ShaderModule { self.module }
-}
+make_handle! { Shader, vk::ShaderModule, module }
 
 impl Drop for Shader {
     fn drop(&mut self) {

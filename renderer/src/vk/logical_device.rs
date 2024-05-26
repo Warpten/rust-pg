@@ -7,7 +7,6 @@ use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::queue::{Queue, QueueAffinity};
-use crate::vk::surface::Surface;
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
@@ -29,17 +28,9 @@ impl LogicalDevice {
     pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn get_queues(&self, affinity : QueueAffinity, surface : &Arc<Surface>) -> Vec<&Queue> {
+    pub fn get_queues<'a>(&'a self, affinity : QueueAffinity) -> Vec<&'a Queue> {
         self.queues.iter().filter(|queue| {
-            let queue_affinity = queue.affinity();
-
-            if affinity.contains(QueueAffinity::Present) {
-                let filtered = affinity.and(QueueAffinity::not(QueueAffinity::Present));
-
-                queue.family().can_present(surface, &self.physical_device) && queue_affinity.contains(filtered)
-            } else {
-                queue_affinity.contains(affinity)
-            }
+            queue.affinity().contains(affinity)
         }).collect()
     }
 

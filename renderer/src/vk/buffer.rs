@@ -8,8 +8,12 @@ use gpu_allocator::vulkan::Allocation;
 use gpu_allocator::vulkan::AllocationCreateDesc;
 use gpu_allocator::vulkan::AllocationScheme;
 use gpu_allocator::MemoryLocation;
+use crate::make_handle;
+use crate::traits::handle;
 use crate::traits::handle::Handle;
 use crate::vk::logical_device::LogicalDevice;
+use crate::vk::queue::QueueAffinity;
+use crate::vk::renderer::Renderer;
 
 pub enum BufferInitialization<'a, T : Sized + Copy> {
     Zeroed(u64),
@@ -65,7 +69,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> Buffer {
+    pub fn build(self, renderer : &mut Renderer) -> Buffer {
         unsafe {
             let size = match &self.initialization {
                 BufferInitialization::Zeroed(size) => *size,
@@ -84,12 +88,12 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                 .usage(usage)
                 .size(size);
 
-            let buffer = device.handle().create_buffer(&create_info, None)
+            let buffer = renderer.device.handle().create_buffer(&create_info, None)
                 .expect("Buffer creation failed");
 
-            let requirements = device.handle().get_buffer_memory_requirements(buffer);
+            let requirements = renderer.device.handle().get_buffer_memory_requirements(buffer);
             
-            let allocation = device.allocator()
+            let allocation = renderer.device.allocator()
                 .lock()
                 .unwrap()
                 .allocate(&AllocationCreateDesc {
@@ -101,11 +105,11 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                 })
                 .expect("Buffer memory allocation failed");
 
-            device.handle().bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
+            renderer.device.handle().bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Binding buffer memory failed");
 
             let mut this = Buffer {
-                device : device.clone(),
+                device : renderer.device.clone(),
                 handle : buffer,
                 allocation,
                 index_type : self.index_type,
@@ -120,13 +124,29 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                             .cpu_to_gpu()
                             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
                             .zeroed(size)
-                            .build(device);
+                            .build(renderer);
 
                         staging_buffer.update(data);
 
-                        // Begin a single time command buffer
-                        // and send out a vkCmdCopyBuffer.
-                        todo!("vkCmdCopyBuffer is not implemented");
+                        // Get the transfer queue.
+                        let transfer_queue = renderer.device.get_queues(QueueAffinity::Transfer)[0];
+
+                        // Begin a command buffer.
+                        let cmd = renderer.begin_command_buffer(transfer_queue, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+                        renderer.device.handle()
+                            .cmd_copy_buffer(cmd, staging_buffer.handle(), this.handle(), &[
+                                vk::BufferCopy::default()
+                                    .size(size)
+                            ]);
+
+                        renderer.end_command_buffer(cmd);
+                        renderer.device.submit(&transfer_queue, &[
+                            vk::SubmitInfo::default()
+                                .command_buffers(&[cmd])
+                        ], vk::Fence::null());
+
+                        renderer.device.handle().queue_wait_idle(transfer_queue.handle())
+                            .expect("Waiting for queue idle failed");
                     },
                     _ => this.update(data),
                 }
@@ -183,6 +203,4 @@ impl Drop for Buffer {
     }
 }
 
-impl Handle<vk::Buffer> for Buffer {
-    fn handle(&self) -> vk::Buffer { self.handle }
-}
+make_handle! { Buffer, vk::Buffer }

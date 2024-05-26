@@ -2,7 +2,7 @@ use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use ash::vk;
 
-use crate::traits::handle::Handle;
+use crate::{make_handle, traits::handle::Handle};
 use crate::vk::context::Context;
 use crate::vk::logical_device::{IndexingFeatures, LogicalDevice};
 use crate::vk::queue::{Queue, QueueFamily};
@@ -167,6 +167,4 @@ impl PhysicalDevice {
     }
 }
 
-impl Handle<vk::PhysicalDevice> for PhysicalDevice {
-    fn handle(&self) -> vk::PhysicalDevice { self.handle }
-}
+make_handle! { PhysicalDevice, vk::PhysicalDevice }

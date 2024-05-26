@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk;
+use crate::make_handle;
 use crate::traits::handle::Handle;
 use crate::vk::logical_device::LogicalDevice;
 
@@ -25,9 +26,7 @@ impl Framebuffer {
     }
 }
 
-impl Handle<vk::Framebuffer> for Framebuffer {
-    fn handle(&self) -> vk::Framebuffer { self.handle }
-}
+make_handle! { Framebuffer, vk::Framebuffer }
 
 impl Drop for Framebuffer {
     fn drop(&mut self) {

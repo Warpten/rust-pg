@@ -2,7 +2,7 @@ use std::{ffi::CString, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
 
 use ash::vk;
 use gpu_allocator::vulkan::Allocator;
-use crate::{traits::handle::Handle, vk::context::Context};
+use crate::{make_handle, traits::handle::Handle, vk::context::Context};
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::pipeline::shader::Shader;
 
@@ -299,6 +299,4 @@ impl Drop for Pipeline {
     }
 }
 
-impl Handle<vk::Pipeline> for Pipeline {
-    fn handle(&self) -> vk::Pipeline { self.handle }
-}
+make_handle! { Pipeline, vk::Pipeline }

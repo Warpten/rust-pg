@@ -3,6 +3,7 @@ use std::{hash::Hash, sync::Arc};
 use ash::vk;
 use bitmask_enum::bitmask;
 
+use crate::make_handle;
 use crate::{traits::handle::Handle};
 use crate::vk::command_pool::CommandPool;
 use crate::vk::logical_device::LogicalDevice;
@@ -21,7 +22,6 @@ pub enum QueueAffinity {
     Compute,
     Graphics,
     Transfer,
-    Present
 }
 
 impl Queue {
@@ -57,9 +57,7 @@ impl Queue {
     #[inline] pub fn family(&self) -> &QueueFamily { &self.family }
 }
 
-impl Handle<vk::Queue> for Queue {
-    fn handle(&self) -> vk::Queue { self.handle }
-}
+make_handle! { Queue, vk::Queue }
 
 /// A queue family.
 /// 
