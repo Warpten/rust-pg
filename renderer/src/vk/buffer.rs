@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 use std::mem::align_of;
+use std::mem::replace;
 use std::mem::size_of_val;
 use std::sync::Arc;
 use ash::util::Align;
@@ -9,8 +10,8 @@ use gpu_allocator::vulkan::AllocationCreateDesc;
 use gpu_allocator::vulkan::AllocationScheme;
 use gpu_allocator::MemoryLocation;
 use crate::make_handle;
-use crate::traits::handle;
 use crate::traits::handle::Handle;
+use crate::vk::command_buffer::CommandBuffer;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueAffinity;
 use crate::vk::renderer::Renderer;
@@ -69,7 +70,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
         self
     }
 
-    pub fn build(self, renderer : &mut Renderer) -> Buffer {
+    pub fn build(self, renderer : &Renderer) -> Buffer {
         unsafe {
             let size = match &self.initialization {
                 BufferInitialization::Zeroed(size) => *size,
@@ -129,24 +130,26 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                         staging_buffer.update(data);
 
                         // Get the transfer queue.
-                        let transfer_queue = renderer.device.get_queues(QueueAffinity::Transfer)[0];
+                        let transfer_queue = renderer.device.get_queue(QueueAffinity::Transfer, renderer.transfer_pool.family)
+                            .expect("Failed to recover the transfer queue");
 
                         // Begin a command buffer.
-                        let cmd = renderer.begin_command_buffer(transfer_queue, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-                        renderer.device.handle()
-                            .cmd_copy_buffer(cmd, staging_buffer.handle(), this.handle(), &[
-                                vk::BufferCopy::default()
-                                    .size(size)
-                            ]);
+                        let cmd = CommandBuffer::builder()
+                            .pool(&renderer.transfer_pool)
+                            .level(vk::CommandBufferLevel::PRIMARY)
+                            .build_one(&renderer.device);
 
-                        renderer.end_command_buffer(cmd);
-                        renderer.device.submit(&transfer_queue, &[
-                            vk::SubmitInfo::default()
-                                .command_buffers(&[cmd])
-                        ], vk::Fence::null());
+                        cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+                        cmd.copy_buffer(&staging_buffer, &this, &[vk::BufferCopy::default()
+                            .size(size)
+                        ]);
+                        cmd.end();
+                        cmd.submit_to_queue(transfer_queue, vk::Fence::null());
 
                         renderer.device.handle().queue_wait_idle(transfer_queue.handle())
                             .expect("Waiting for queue idle failed");
+
+                        this.element_count = data.len() as _;
                     },
                     _ => this.update(data),
                 }
@@ -193,13 +196,28 @@ impl Buffer {
     pub fn element_count(&self) -> u32 {
         self.element_count
     }
+
+    pub unsafe fn memory(&self) -> vk::DeviceMemory {
+        self.allocation.memory()
+    }
+
+    pub fn get_device_address(&self) -> u64 {
+        unsafe {
+            self.device.handle().get_buffer_device_address(&vk::BufferDeviceAddressInfo::default()
+                .buffer(self.handle))
+        }
+    }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
             self.device.handle().destroy_buffer(self.handle, None);
+
+            let memory = replace(&mut self.allocation, Allocation::default()); 
+            _ = self.device.allocator().lock().unwrap().free(memory);
         }
+
     }
 }
 

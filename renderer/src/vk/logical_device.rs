@@ -7,15 +7,19 @@ use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::queue::{Queue, QueueAffinity};
+use crate::vk::surface::Surface;
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
     handle : ash::Device,
-    context : Arc<Context>,
-    physical_device : PhysicalDevice,
+    pub context : Arc<Context>,
+    pub physical_device : PhysicalDevice,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+
+    // Device-level debug utilities
     debug_utils : Option<debug_utils::Device>,
 
+    // All queues
     pub queues : Vec<Queue>,
 
     pub features : vk::PhysicalDeviceFeatures,
@@ -23,16 +27,9 @@ pub struct LogicalDevice {
 }
 
 impl LogicalDevice {
-    pub fn handle(&self) -> &ash::Device { &self.handle }
-    pub fn context(&self) -> &Arc<Context> { &self.context }
-    pub fn physical_device(&self) -> &PhysicalDevice { &self.physical_device }
-    pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
+    pub(in crate) fn handle(&self) -> &ash::Device { &self.handle }
 
-    pub fn get_queues<'a>(&'a self, affinity : QueueAffinity) -> Vec<&'a Queue> {
-        self.queues.iter().filter(|queue| {
-            queue.affinity().contains(affinity)
-        }).collect()
-    }
+    pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
     pub fn new(context : &Arc<Context>,
         device : ash::Device,
@@ -40,6 +37,7 @@ impl LogicalDevice {
         queues : Vec<Queue>,
         features : vk::PhysicalDeviceFeatures,
         indexing_features : IndexingFeatures,
+        surface : &Arc<Surface>,
     )  -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
             instance: context.handle().clone(),
@@ -56,10 +54,10 @@ impl LogicalDevice {
             handle : device.clone(),
             context : context.clone(),
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
+            queues,
             physical_device,
             features,
             indexing_features,
-            queues,
             // TODO: Fix this being optional if the extension is not available
             // debug_utils : Some(debug_utils::Device::new(&context.handle(), &device.clone())),
             debug_utils : None,
@@ -99,7 +97,7 @@ impl LogicalDevice {
     }
 
     pub fn find_memory_type(&self, memory_type_bits : u32, flags : vk::MemoryPropertyFlags) -> u32 {
-        for (i, memory_type) in self.physical_device().memory_properties().memory_types.iter().enumerate() {
+        for (i, memory_type) in self.physical_device.memory_properties().memory_types.iter().enumerate() {
             if (memory_type_bits & (1 << i)) != 0 && (memory_type.property_flags & flags) == flags {
                 return i as _;
             }
@@ -128,7 +126,7 @@ impl LogicalDevice {
     /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
     /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
     ///             completed execution.
-    pub fn submit(&self, queue : &Queue, submit_infos : &[vk::SubmitInfo], fence : vk::Fence) {
+    pub fn submit(&self, queue : &impl Handle<vk::Queue>, submit_infos : &[vk::SubmitInfo], fence : vk::Fence) {
         unsafe {
             self.handle.queue_submit(queue.handle(), submit_infos, fence)
                 .expect("Submission failed")
@@ -147,6 +145,19 @@ impl LogicalDevice {
     }
 }
 
+impl LogicalDevice {
+    pub fn get_queues(&self, affinity : QueueAffinity) -> Vec<&Queue> {
+        self.queues.iter()
+            .filter(|queue| queue.affinity().contains(affinity))
+            .collect()
+    }
+
+    pub fn get_queue(&self, affinity : QueueAffinity, index : u32) -> Option<&Queue> {
+        self.queues.iter()
+            .find(|queue| queue.affinity().contains(affinity) && queue.family_index() == index)
+    }
+}
+
 impl Drop for LogicalDevice {
     fn drop(&mut self) {
         unsafe {
@@ -157,6 +168,10 @@ impl Drop for LogicalDevice {
     }
 }
 
+pub struct Queues {
+    queues : Vec<Queue>,
+    presentation_queue : usize,
+}
 
 pub struct IndexingFeatures {
     /// Indicates whether arrays of input attachments can be indexed by dynamically uniform integer expressions in shader code.

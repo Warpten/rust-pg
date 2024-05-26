@@ -5,8 +5,7 @@ use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, BufferBuilder};
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
-use renderer::vk::pipeline::shader::Shader;
-use renderer::vk::pipeline::{pipeline, DepthOptions, Pipeline, PipelineInfo, Vertex};
+use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -44,7 +43,7 @@ impl Vertex for TerrainVertex {
 fn setup(app : &mut Application) -> ApplicationData {
     let buffer = BufferBuilder::<TerrainVertex>::default()
         .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-        .cpu_to_gpu() // FIXME: gpu_only() not implemented, FIXME
+        .gpu_only()
         .data(&[
             TerrainVertex {
                 pos : [ 0.0f32, -0.5f32],
@@ -59,7 +58,7 @@ fn setup(app : &mut Application) -> ApplicationData {
                 color : [ 0.0f32, 0.0f32, 1.0f32 ]
             }
         ])
-        .build(&app.renderer.device);
+        .build(&app.renderer);
 
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
         // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
@@ -112,15 +111,15 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         .offset(vk::Offset2D { x: 0, y: 0 })
         .extent(app.renderer.swapchain.extent);
 
-    app.renderer.run_frame(|device, cmd| unsafe {
-        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, data.pipeline.handle());
+    let (image_acquired, cmd) = app.renderer.begin_frame()?;
 
-        device.cmd_set_viewport(cmd, 0, &[viewport]);
-        device.cmd_set_scissor(cmd, 0, &[scissors]);
+    cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
+    cmd.set_viewport(0, &[viewport]);
+    cmd.set_scissors(0, &[scissors]);
+    cmd.bind_vertex_buffers(0, &[&data.buffer], &[0]);
+    cmd.draw(data.buffer.element_count(), 1, 0, 0);
 
-        device.cmd_bind_vertex_buffers(cmd, 0, &[data.buffer.handle()], &[0]);
-        device.cmd_draw(cmd, data.buffer.element_count(), 1, 0, 0);
-    })
+    app.renderer.end_frame(image_acquired, cmd)
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {

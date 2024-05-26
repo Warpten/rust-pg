@@ -4,7 +4,7 @@ use ash::vk::{self, ClearValue};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan::{Allocator, AllocatorCreateDesc}};
 use nohash_hasher::IntMap;
 
-use crate::{application::ApplicationRenderError, graph::Graph, traits::handle::Handle, window::Window};
+use crate::{application::ApplicationRenderError, graph::{self, Graph}, traits::{self, handle::Handle}, window::Window};
 use crate::vk::frame_data::FrameData;
 use crate::vk::context::Context;
 use crate::vk::framebuffer::Framebuffer;
@@ -15,6 +15,8 @@ use crate::vk::queue::{Queue, QueueAffinity, QueueFamily};
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 use crate::vk::swapchain::{Swapchain, SwapchainOptions};
+
+use super::{command_buffer::{CommandBuffer, CommandBufferBuilder}, command_pool::CommandPool};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
@@ -124,6 +126,8 @@ pub struct Renderer {
     frames : Vec<FrameData>,
     active_frame_index : usize,
     active_image_index : usize,
+
+    pub(in crate) transfer_pool : CommandPool,
 }
 
 impl Renderer {
@@ -132,12 +136,13 @@ impl Renderer {
     pub fn new(settings : RendererOptions, context: &Arc<Context>, window : &Window) -> Self {
         let surface = Surface::new(&context, &window);
 
-        let (physical_device, graphics_queue, presentation_queue) = select(&context, &surface, &settings);
+        let (physical_device, graphics_queue, presentation_queue, transfer_queue) = select(&context, &surface, &settings);
 
         let queue_families = { // Deduplicate the graphics and presentation queues.
             let mut queue_families_map = IntMap::<u32, QueueFamily>::default();
             queue_families_map.entry(graphics_queue.index()).or_insert(graphics_queue);
             queue_families_map.entry(presentation_queue.index()).or_insert(presentation_queue);
+            queue_families_map.entry(transfer_queue.index()).or_insert(transfer_queue);
 
             queue_families_map.into_values().collect::<Vec<_>>()
         };
@@ -148,14 +153,22 @@ impl Renderer {
                 .map(|queue : &QueueFamily| ((settings.get_queue_count)(queue), queue))
                 .collect::<Vec<_>>(),
             |_index, _family| 1.0_f32,
-            &settings.device_extensions);
+            &settings.device_extensions,
+            &surface,
+        );
+
+        // TODO: I get why I have to do this but the swapchain should take care not to consider the transfer queue selected here
+        let swapchain_queue_families = queue_families.iter()
+            .filter(|q| q.index() == graphics_queue.index() || q.index() == presentation_queue.index())
+            .cloned()
+            .collect::<Vec<_>>();
 
         let swapchain = Swapchain::new(
             &context,
             &logical_device,
             &surface,
             &settings,
-            queue_families,
+            swapchain_queue_families,
         );
         let render_pass = swapchain.create_render_pass();
         let framebuffers = swapchain.create_framebuffers(&render_pass);
@@ -209,6 +222,10 @@ impl Renderer {
             active_image_index : 0,
 
             options : settings,
+
+            transfer_pool : CommandPool::builder(&transfer_queue)
+                .transient()
+                .build(&logical_device)
         }
     }
 
@@ -256,8 +273,8 @@ impl Renderer {
         }
     }
 
-    pub fn submit_and_present(&mut self, command_buffer : vk::CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let signal_semaphore = self.submit_frame(&[command_buffer],
+    pub fn submit_and_present(&mut self, command_buffer : CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let signal_semaphore = self.submit_frame(&[command_buffer.handle()],
             &[wait_semaphore],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
         );
@@ -286,46 +303,33 @@ impl Renderer {
         }
     }
 
-    pub fn run_frame<F>(&mut self, handler : F) -> Result<(), ApplicationRenderError>
-        where F : Fn(&ash::Device, vk::CommandBuffer)
-    {
-        let (image_acquired, _) = self.acquire_next_image().expect("Image acquisition failed");
+    pub fn begin_frame(&mut self) -> Result<(vk::Semaphore, CommandBuffer), ApplicationRenderError> {
+        let (image_acquired, _) = self.acquire_next_image()?;
 
-        let graphics_queue = self.device.get_queues(QueueAffinity::Graphics)[0];
-        let cmd = self.begin_command_buffer(graphics_queue, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        self.begin_render_pass(cmd, self.swapchain.extent);
+        let frame = self.get_frame_mut();
 
-        handler(self.device.handle(), cmd);
+        let cmd = CommandBuffer::builder()
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .pool(frame.graphics_command_pool.as_ref().unwrap())
+            .build_one(&self.device);
 
-        self.end_render_pass(cmd);
-        self.end_command_buffer(cmd);
+        cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[self.active_frame_index], vk::Rect2D {
+            offset : vk::Offset2D { x: 0, y : 0 },
+            extent : self.swapchain.extent
+        }, &self.clear_values, vk::SubpassContents::INLINE);
+
+        Ok((image_acquired, cmd))
+    }
+
+    pub fn end_frame(&mut self, image_acquired : vk::Semaphore, cmd : CommandBuffer) -> Result<(), ApplicationRenderError> {
+        cmd.end_render_pass();
+        cmd.end();
         self.submit_and_present(cmd, image_acquired)
     }
 
-    pub fn begin_command_buffer(&mut self, queue : &Queue, flags : vk::CommandBufferUsageFlags) -> vk::CommandBuffer {
-        self.frames[self.active_frame_index].reset_command_pool(queue.family());
-        let cmd = self.frames[self.active_frame_index].get_command_buffer(queue.family(),
-            vk::CommandBufferLevel::PRIMARY,
-            1)[0];
-
-        unsafe {
-            let begin_info = vk::CommandBufferBeginInfo::default()
-                .flags(flags);
-
-            self.device.handle()
-                .begin_command_buffer(cmd, &begin_info)
-                .expect("Failed to begin frame commands");
-        };
-
-        cmd
-    }
-
-    pub fn end_command_buffer(&mut self, cmd : vk::CommandBuffer) {
-        unsafe {
-            self.device.handle().end_command_buffer(cmd)
-                .expect("Failed to end frame commands")
-        };
-    }
+    pub(in crate) fn get_frame_mut(&mut self) -> &mut FrameData { &mut self.frames[self.active_frame_index] }
+    pub(in crate) fn get_frame(&self) -> &FrameData { &self.frames[self.active_image_index] }
 
     /// Submits a frame.
     /// 
@@ -350,7 +354,7 @@ impl Renderer {
             .signal_semaphores(&signal_semaphore);
 
         let graphics_queue = self.device.get_queues(QueueAffinity::Graphics)[0];
-        self.device.submit(&graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
+        self.device.submit(graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
     
         signal_semaphore[0]
     }
@@ -395,7 +399,7 @@ impl Renderer {
 /// 
 /// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
 /// 
-fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &RendererOptions) -> (PhysicalDevice, QueueFamily, QueueFamily) {
+fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &RendererOptions) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
     context.get_physical_devices(
         |left, right| {
             // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
@@ -467,30 +471,38 @@ fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &Renderer
         };
 
         return extensions_supported && supports_present
-    }).find_map(|device| -> Option<(PhysicalDevice, QueueFamily, QueueFamily)> {
+    }).find_map(|device| {
         // At this point, the current device is eligible and we just need to check for a present queue and a graphics queue.
         // To do that, we will grab the queue's families.
 
         let mut graphics_queue = None;
         let mut present_queue = None;
+        let mut transfer_queue = None;
 
         for family in &device.queue_families[..] {
             if family.is_graphics() {
                 graphics_queue = Some(family.clone());
+
+                // If this family can present as well just use it as a graphics+present queue
+                if family.can_present(&surface, device.handle()) {
+                    present_queue = Some(family.clone());
+                }
             }
 
-            if family.can_present(&surface, &device) {
+            // Default to the first available present queue
+            if family.can_present(&surface, device.handle()) && present_queue.is_none() {
                 present_queue = Some(family.clone());
             }
 
-            // Found a family that can do both, immediately return it.
-            if graphics_queue.is_some() && present_queue.is_some() {
-                return Some((device, graphics_queue.unwrap(), present_queue.unwrap()));
+            // If this family can transfer and no transfer queue is found,
+            // If this family can transfer and is only a transfer queue
+            if family.is_transfer() && ((!family.is_graphics() && !family.is_compute()) || transfer_queue.is_none()) {
+                transfer_queue = Some(family.clone());
             }
         }
 
-        match (graphics_queue, present_queue) {
-            (Some(g), Some(p)) => Some((device, g, p)),
+        match (graphics_queue, present_queue, transfer_queue) {
+            (Some(g), Some(p), Some(t)) => Some((device, g, p, t)),
             _ => None
         }
     })

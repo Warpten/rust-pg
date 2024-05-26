@@ -1,8 +1,7 @@
-use std::{ffi::CString, ops::Range, path::PathBuf, sync::{Arc, Mutex}};
+use std::{ffi::CString, ops::Range, path::PathBuf, sync::Arc};
 
 use ash::vk;
-use gpu_allocator::vulkan::Allocator;
-use crate::{make_handle, traits::handle::Handle, vk::context::Context};
+use crate::{make_handle, traits::handle::Handle};
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::pipeline::shader::Shader;
 

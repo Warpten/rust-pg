@@ -25,7 +25,7 @@ pub struct RenderPassInfo<'a> {
 impl RenderPass {
     pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
         for &format in formats {
-            let properties = device.physical_device().get_format_properties(format);
+            let properties = device.physical_device.get_format_properties(format);
             if let Some(properties) = properties {
                 let supported = match tiling {
                     vk::ImageTiling::LINEAR => properties.linear_tiling_features.contains(flags),

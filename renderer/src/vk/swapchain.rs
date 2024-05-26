@@ -114,7 +114,7 @@ impl Swapchain {
         let surface_format = {
             let surface_formats = unsafe {
                 surface.loader
-                    .get_physical_device_surface_formats(device.physical_device().handle(), surface.handle())
+                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle())
                     .expect("Failed to get physical device surface formats")
             };
 
@@ -126,7 +126,7 @@ impl Swapchain {
 
         let surface_capabilities = unsafe {
             surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device().handle(), surface.handle())
+                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle())
                 .expect("Failed to get physical device surface capabilities")
         };
         let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
@@ -166,6 +166,7 @@ impl Swapchain {
             // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(image_sharing_mode)
+            .queue_family_indices(&queue_family_indices)
             .pre_transform(if surface_capabilities.supported_transforms.contains(vk::SurfaceTransformFlagsKHR::IDENTITY) {
                 vk::SurfaceTransformFlagsKHR::IDENTITY
             } else {

@@ -7,6 +7,8 @@ use crate::vk::context::Context;
 use crate::vk::logical_device::{IndexingFeatures, LogicalDevice};
 use crate::vk::queue::{Queue, QueueFamily};
 
+use super::surface::Surface;
+
 #[derive(Clone)]
 pub struct PhysicalDevice {
     handle : vk::PhysicalDevice,
@@ -55,6 +57,7 @@ impl PhysicalDevice {
         queue_families : Vec<(u32, &QueueFamily)>,
         get_queue_priority : F,
         extensions : &Vec<CString>,
+        surface : &Arc<Surface>,
     ) -> Arc<LogicalDevice>
         where F : Fn(u32, &QueueFamily) -> f32
     {
@@ -65,14 +68,14 @@ impl PhysicalDevice {
 
         // Unfortunately has to happen in two loops because one borrow is immutable
         // and the other is mutable...
-        for (count, family) in queue_families.iter() {
+        for (count, family) in &queue_families {
             for queue_index in 0..min(family.count(), *count) {
                 flat_queue_priorities.push(get_queue_priority(queue_index, family));
             }
         }
         
         let mut priority_index = 0;
-        for (count, family) in queue_families.iter() {
+        for (count, family) in &queue_families {
             // Sacrificing brevity for readability (thank me later)
             let queue_priorities_range = Range {
                 start : priority_index as usize,
@@ -90,7 +93,6 @@ impl PhysicalDevice {
             .map(|s| s.as_ptr())
             .collect::<Vec<_>>();
 
-        
         let mut physical_device_descriptor_indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::default();
 
         let mut physical_device_features2 = vk::PhysicalDeviceFeatures2::default()
@@ -112,7 +114,7 @@ impl PhysicalDevice {
 
         // Now, get all the queues
         let queues_objs = queue_families.iter().flat_map(|(count, family)| {
-            (0..*count).map(|index| Queue::new(family, index, &device))
+            (0..*count).map(|index| Queue::new(family, index, &device, surface, self.handle))
         }).collect::<Vec<_>>();
 
         Arc::new(LogicalDevice::new(instance,
@@ -121,6 +123,7 @@ impl PhysicalDevice {
             queues_objs,
             physical_device_features2.features,
             IndexingFeatures::new(physical_device_descriptor_indexing_features),
+            surface
         ))
     }
 

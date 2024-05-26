@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod context;
+pub mod command_buffer;
 pub mod command_pool;
 pub mod descriptor;
 pub mod frame_data;
@@ -14,4 +15,3 @@ pub mod image;
 pub mod pipeline;
 pub mod renderer;
 pub mod render_pass;
-

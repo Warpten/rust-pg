@@ -12,7 +12,7 @@ use crate::utils::topological_sort::TopologicalSorter;
 use crate::vk::command_pool::CommandPool;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::queue::{Queue, QueueAffinity};
+use crate::vk::queue::QueueAffinity;
 use crate::vk::renderer::Renderer;
 
 pub mod attachment;
@@ -34,15 +34,6 @@ pub struct Graph<'a> {
 }
 
 impl Graph<'_> { // Graph compilation functions
-    pub fn get_command_buffer(&mut self, queue : &Queue, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
-        let command_pool = self.command_pools.entry(queue.family().index())
-            .or_insert_with(|| {
-                CommandPool::create(queue.family(), &self.renderer.device)
-            });
-
-        command_pool.rent_one(level)
-    }
-
     /// Builds this graph into a render pass.
     pub fn build(&mut self) {
         let topology = {
@@ -63,7 +54,7 @@ impl Graph<'_> { // Graph compilation functions
 
         // Walk the topology and process resources
         let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);
-        let command_buffer = self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
+        let command_buffer : vk::CommandBuffer= todo!(); // self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
 
         let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in &topology {

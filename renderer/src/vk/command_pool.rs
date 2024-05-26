@@ -9,9 +9,14 @@ use crate::vk::queue::QueueFamily;
 pub struct CommandPool {
     handle : vk::CommandPool,
     device : Arc<LogicalDevice>,
+    pub family : u32,
 }
 
 impl CommandPool {
+    pub fn builder(family : &QueueFamily) -> CommandPoolBuilder {
+        CommandPoolBuilder::default(family)
+    }
+
     pub fn device(&self) -> &LogicalDevice { &self.device }
 
     pub(in crate) fn rent_one(&self, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
@@ -28,20 +33,6 @@ impl CommandPool {
             self.device.handle().allocate_command_buffers(&options)
                 .expect("Failed to allocate command buffers")
         }
-    }
-
-    pub(in crate) fn create<'a>(family : &QueueFamily, device : &Arc<LogicalDevice>) -> Self {
-        let handle = {
-            let command_pool_create_info = vk::CommandPoolCreateInfo::default()
-                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(family.index());
-            unsafe {
-                device.handle().create_command_pool(&command_pool_create_info, None)
-                    .expect("Failed to create command pool")
-            }
-        };
-
-        Self { handle, device : device.clone() }
     }
 
     /// Resets this command pool.
@@ -92,6 +83,50 @@ impl CommandPool {
         unsafe {
             self.device.handle().trim_command_pool(self.handle, flags);
         }
+    }
+}
+
+pub struct CommandPoolBuilder {
+    flags : vk::CommandPoolCreateFlags,
+    family_index : u32,
+}
+
+impl CommandPoolBuilder {
+    pub(in crate) fn default(family : &QueueFamily) -> Self {
+        Self {
+            flags : vk::CommandPoolCreateFlags::empty(),
+            family_index : family.index()
+        }
+    }
+
+    pub fn transient(mut self) -> Self {
+        self.flags |= vk::CommandPoolCreateFlags::TRANSIENT;
+        self
+    }
+    
+    pub fn reset(mut self) -> Self {
+        self.flags |= vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER;
+        self
+    }
+    
+    pub fn protected(mut self) -> Self {
+        self.flags |= vk::CommandPoolCreateFlags::PROTECTED;
+        self
+    }
+
+    pub fn build(self, device : &Arc<LogicalDevice>) -> CommandPool {
+        let handle = {
+            let command_pool_create_info = vk::CommandPoolCreateInfo::default()
+                .flags(self.flags)
+                .queue_family_index(self.family_index);
+
+            unsafe {
+                device.handle().create_command_pool(&command_pool_create_info, None)
+                    .expect("Failed to create command pool")
+            }
+        };
+
+        CommandPool { handle, device : device.clone(), family : self.family_index }
     }
 }
 

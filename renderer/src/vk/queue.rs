@@ -3,11 +3,9 @@ use std::{hash::Hash, sync::Arc};
 use ash::vk;
 use bitmask_enum::bitmask;
 
-use crate::make_handle;
-use crate::{traits::handle::Handle};
-use crate::vk::command_pool::CommandPool;
+use crate::{make_handle, traits};
+use crate::{traits::handle::Handle, vk::command_pool::CommandPool};
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::surface::Surface;
 
 /// A logical queue associated with a logical device.
@@ -15,6 +13,7 @@ pub struct Queue {
     handle : vk::Queue,
     index : u32,
     family : QueueFamily,
+    can_present : bool,
 }
 
 #[bitmask(u8)]
@@ -22,16 +21,24 @@ pub enum QueueAffinity {
     Compute,
     Graphics,
     Transfer,
+    Present,
 }
 
 impl Queue {
-    pub fn new(family : &QueueFamily, index : u32, device : &ash::Device) -> Self {
+    pub(in crate) fn new(
+        family : &QueueFamily,
+        index : u32,
+        device : &ash::Device,
+        surface : &Arc<Surface>,
+        physical_device : vk::PhysicalDevice
+    ) -> Self {
         Self {
             index,
             family : *family,
             handle : unsafe {
                 device.get_device_queue(family.index, index)
-            }
+            },
+            can_present : family.can_present(surface, physical_device)
         }
     }
 
@@ -41,11 +48,14 @@ impl Queue {
             affinity = affinity.or(QueueAffinity::Compute);
         }
         if self.family.is_graphics() {
-            affinity = affinity.or(QueueAffinity::Graphics)
-        };
+            affinity = affinity.or(QueueAffinity::Graphics);
+        }
         if self.family.is_transfer() {
-            affinity = affinity.or(QueueAffinity::Transfer)
-        };
+            affinity = affinity.or(QueueAffinity::Transfer);
+        }
+        if self.can_present {
+            affinity = affinity.or(QueueAffinity::Present);
+        }
         affinity
     }
 
@@ -58,6 +68,10 @@ impl Queue {
 }
 
 make_handle! { Queue, vk::Queue }
+
+impl traits::Queue for Queue {
+    fn family(&self) -> &QueueFamily { &self.family }
+}
 
 /// A queue family.
 /// 
@@ -117,27 +131,14 @@ impl QueueFamily {
     ///
     /// * Panics if [`vkGetPhysicalDeviceSurfaceSupportKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceSupportKHR.html) fails.
     /// * Panics if the provided [`Surface`] has been dropped before this call happens.
-    pub fn can_present(&self, surface : &Arc<Surface>, device : &PhysicalDevice) -> bool {
+    pub(in crate) fn can_present(&self, surface : &Arc<Surface>, device : vk::PhysicalDevice) -> bool {
         unsafe {
             surface.loader.get_physical_device_surface_support(
-                device.handle(),
+                device,
                 self.index,
                 surface.handle()
             ).expect("Failed to get physical device surface support")
         }
-    }
-
-    /// Creates a command pool.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `device` - The device for which the command pool will be created.
-    /// 
-    /// # Panics
-    /// 
-    /// * Panics if [`vkCreateCommandPool`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateCommandPool.html) fails.
-    pub fn create_command_pool(&self, device : &Arc<LogicalDevice>) -> Arc<CommandPool> {
-        Arc::new(CommandPool::create(&self, device))
     }
 }
 
