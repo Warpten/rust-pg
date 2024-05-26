@@ -69,8 +69,10 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
         unsafe {
             let size = match &self.initialization {
                 BufferInitialization::Zeroed(size) => *size,
-                BufferInitialization::From(arr) => size_of_val(arr) as u64,
+                BufferInitialization::From(arr) => size_of_val(*arr) as u64,
             };
+
+            assert!(size != 0, "A buffer with no capacity is probably not what you want.");
             
             let mut usage = self.usage;
             // If we don't do this we can never write to this buffer
@@ -116,6 +118,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                             .name("Staging buffer")
                             .cpu_to_gpu()
                             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
+                            .zeroed(size)
                             .build(device);
 
                         staging_buffer.update(data);
@@ -143,7 +146,7 @@ pub struct Buffer {
 impl Buffer {
     pub fn update<T : Copy>(&self, data : &[T]) {
         let size = size_of_val(data) as u64;
-        assert!(self.allocation.size() < size, "The data you're trying to write to the buffer is too large to fit.");
+        assert!(self.allocation.size() >= size, "The data you're trying to write to the buffer is too large to fit.");
 
         unsafe {
             let mapped_data = self.allocation.mapped_ptr()
