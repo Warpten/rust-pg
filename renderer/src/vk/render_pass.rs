@@ -12,14 +12,208 @@ pub struct RenderPass {
     device : Arc<LogicalDevice>,
 }
 
-pub struct RenderPassInfo<'a> {
-    pub color_images   : Vec<&'a Image>,
-    pub depth_images   : Vec<&'a Image>,
-    pub resolve_images : Vec<&'a Image>,
+pub struct RenderPassCreateInfo {
+    color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout)>,
+    depth_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp)>,
+    resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
 
-    pub present : bool,
-    pub final_layout : vk::ImageLayout,
-    pub sample_count : vk::SampleCountFlags,
+    dependencies : Vec<vk::SubpassDependency>,
+    subpasses : Vec<(vk::PipelineBindPoint, Vec<u32>, Vec<u32>, Option<u32>)>,
+}
+
+impl RenderPassCreateInfo {
+    pub fn color_attachment(
+        mut self,
+        format : vk::Format,
+        samples : vk::SampleCountFlags,
+        load : vk::AttachmentLoadOp,
+        store : vk::AttachmentStoreOp,
+        final_layout : vk::ImageLayout
+    ) -> Self {
+        self.color_images.push((format, samples, load, store, final_layout));
+        self
+    }
+
+    pub fn dependency(mut self,
+        src_subpass : u32,
+        dst_subpass : u32,
+        src_stage_mask : vk::PipelineStageFlags,
+        dst_stage_mask : vk::PipelineStageFlags,
+        src_access_flags : vk::AccessFlags,
+        dst_access_flags : vk::AccessFlags
+    ) -> Self {
+        self.dependencies.push(vk::SubpassDependency::default()
+            .src_subpass(src_subpass)
+            .dst_subpass(dst_subpass)
+            .src_stage_mask(src_stage_mask)
+            .dst_stage_mask(dst_stage_mask)
+            .src_access_mask(src_access_flags)
+            .dst_access_mask(dst_access_flags)
+        );
+        self
+    }
+
+    pub fn depth_attachment(
+        mut self,
+        format : vk::Format,
+        samples : vk::SampleCountFlags,
+        load : vk::AttachmentLoadOp,
+        store : vk::AttachmentStoreOp
+    ) -> Self {
+        self.depth_images.push((format, samples, load, store));
+        self
+    }
+
+    pub fn resolve_attachment(
+        mut self,
+        format : vk::Format,
+        final_layout : vk::ImageLayout
+    ) -> Self {
+        self.resolve_images.push((format, final_layout));
+        self
+    }
+
+    fn make_attachment_description(
+        format : vk::Format,
+        samples : vk::SampleCountFlags,
+        load : vk::AttachmentLoadOp,
+        store : vk::AttachmentStoreOp,
+        initial_layout : vk::ImageLayout,
+        final_layout : vk::ImageLayout
+    ) -> vk::AttachmentDescription {
+        vk::AttachmentDescription::default()
+            .format(format)
+            .samples(samples)
+            .load_op(load)
+            .store_op(store)
+            .initial_layout(initial_layout)
+            .final_layout(final_layout)
+    }
+
+    pub fn subpass(
+        mut self,
+        bind_point : vk::PipelineBindPoint,
+        color_attachments : &[u32],
+        resolve_attachments : &[u32],
+        depth_attachment : Option<u32>
+    ) -> Self {
+        self.subpasses.push((bind_point, color_attachments.to_vec(), resolve_attachments.to_vec(), depth_attachment));
+        self
+    }
+
+    pub fn build(self, device : &Arc<LogicalDevice>) -> RenderPass {
+        let mut descs = Vec::<vk::AttachmentDescription>::new();
+
+        let mut attachment_index = 0;
+        let mut color_attachment_refs = Vec::<vk::AttachmentReference>::new();
+        for (format, samples, load, store, final_layout) in self.color_images {
+            descs.push(Self::make_attachment_description(
+                format,
+                samples,
+                load,
+                store,
+                vk::ImageLayout::UNDEFINED,
+                final_layout
+            ));
+            color_attachment_refs.push(vk::AttachmentReference::default()
+                .attachment(attachment_index)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            );
+
+            attachment_index += 1;
+        }
+
+        let mut depth_attachment_refs = Vec::<vk::AttachmentReference>::new();
+        for (format, samples, load, store) in self.depth_images {
+            descs.push(Self::make_attachment_description(
+                format,
+                samples,
+                load,
+                store,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            ));
+
+            depth_attachment_refs.push(vk::AttachmentReference::default()
+                .attachment(attachment_index)
+                .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+            );
+
+            attachment_index += 1;
+        }
+    
+        let mut resolve_attachment_refs = Vec::<vk::AttachmentReference>::new();
+        for (format, final_layout) in self.resolve_images {
+            descs.push(Self::make_attachment_description(
+                format,
+                vk::SampleCountFlags::TYPE_1,
+                vk::AttachmentLoadOp::DONT_CARE,
+                vk::AttachmentStoreOp::STORE,
+                vk::ImageLayout::UNDEFINED,
+                final_layout
+            ));
+            resolve_attachment_refs.push(vk::AttachmentReference::default()
+                .attachment(attachment_index)
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            );
+            
+            attachment_index += 1;
+        }
+
+        // This exists because the mapped arrays need to exist outside of the loop to satisfy the borrow checker.
+        let subpass_data = self.subpasses.into_iter().map(|tuple| {
+            let (bind_point, color_refs, resolve_refs, depth) = tuple;
+
+            let colors = color_refs.into_iter()
+                .map(|i| color_attachment_refs[i as usize])
+                .collect::<Vec<_>>();
+            let resolve = resolve_refs.into_iter()
+                .map(|i| resolve_attachment_refs[i as usize])
+                .collect::<Vec<_>>();
+
+            (bind_point, colors, resolve, depth)
+        }).collect::<Vec<_>>();
+
+        let mut subpasses = vec![];
+        for (bind_point, colors, resolve, depth) in &subpass_data {
+            let mut subpass_description = vk::SubpassDescription::default()
+                .pipeline_bind_point(*bind_point)
+                .color_attachments(&colors)
+                .resolve_attachments(&resolve);
+
+            if let Some(depth) = depth {
+                subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*depth as usize]);
+            }
+
+            subpasses.push(subpass_description);
+        }
+
+        let create_info = vk::RenderPassCreateInfo::default()
+            .attachments(&descs)
+            .subpasses(&subpasses)
+            .dependencies(&self.dependencies);
+
+        unsafe {
+            let handle = device.handle()
+                .create_render_pass(&create_info, None)
+                .expect("Failed to create a render pass");
+            
+            RenderPass::new(device, handle)
+        }
+    }
+}
+
+impl Default for RenderPassCreateInfo {
+    fn default() -> Self {
+        Self {
+            color_images: Default::default(),
+            depth_images: Default::default(),
+            resolve_images: Default::default(),
+            
+            dependencies: Default::default(),
+            subpasses: Default::default()
+        }
+    }
 }
 
 impl RenderPass {
@@ -42,108 +236,10 @@ impl RenderPass {
         None
     }
 
-    pub fn new(device : &Arc<LogicalDevice>, info : RenderPassInfo) -> RenderPass {
-        unsafe { // Everything is unsafe here, God has abandonned us.
-            let mut descs = Vec::<vk::AttachmentDescription>::new();
-
-            let mut attachment_index = 0;
-            let mut color_attachment_refs = Vec::<vk::AttachmentReference>::new();
-            for color_image in info.color_images {
-                let mut layout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
-                // Fix this for multisampling
-                if info.present && info.resolve_images.is_empty() {
-                    layout = info.final_layout;
-                }
-
-                descs.push(vk::AttachmentDescription::default()
-                    .format(color_image.format())
-                    .samples(info.sample_count)
-                    .load_op(vk::AttachmentLoadOp::CLEAR)
-                    .store_op(vk::AttachmentStoreOp::STORE)
-                    .final_layout(layout)
-                );
-                color_attachment_refs.push(vk::AttachmentReference::default()
-                    .attachment(attachment_index)
-                    .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) // Not reusing layout here?
-                );
-
-                attachment_index += 1;
-            }
-
-            let mut depth_attachment_refs = Vec::<vk::AttachmentReference>::new();
-            if let Some(depth_image) = info.depth_images.get(0) {
-                descs.push(vk::AttachmentDescription::default()
-                    .format(depth_image.format())
-                    .samples(info.sample_count)
-                    .load_op(vk::AttachmentLoadOp::CLEAR)
-                    .store_op(vk::AttachmentStoreOp::STORE)
-                    .initial_layout(vk::ImageLayout::UNDEFINED)
-                    .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                );
-                depth_attachment_refs.push(vk::AttachmentReference::default()
-                    .attachment(attachment_index)
-                    .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                );
-                
-                attachment_index += 1;
-            }
-
-            let mut resolve_attachment_refs = Vec::<vk::AttachmentReference>::new();
-            for resolve_image in &info.resolve_images {
-                descs.push(vk::AttachmentDescription::default()
-                    .format(resolve_image.format())
-                    .samples(vk::SampleCountFlags::TYPE_1)
-                    .load_op(vk::AttachmentLoadOp::DONT_CARE)
-                    .store_op(vk::AttachmentStoreOp::STORE)
-                    .initial_layout(vk::ImageLayout::UNDEFINED)
-                    .final_layout(info.final_layout)
-                );
-                resolve_attachment_refs.push(vk::AttachmentReference::default()
-                    .attachment(attachment_index)
-                    .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                );
-                
-                attachment_index += 1;
-            }
-
-            let dependencies = [
-                vk::SubpassDependency::default()
-                    .src_subpass(vk::SUBPASS_EXTERNAL)
-                    .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ
-                        | vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-                    .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-            ];
-
-            let subpasses = [
-                {
-                    let mut desc = vk::SubpassDescription::default()
-                        .color_attachments(&color_attachment_refs)
-                        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS);
-                    
-                    if !info.depth_images.is_empty() {
-                        desc = desc.depth_stencil_attachment(&depth_attachment_refs[0]);
-                    }
-
-                    if !info.resolve_images.is_empty() {
-                        desc = desc.resolve_attachments(&resolve_attachment_refs);
-                    }
-                    desc
-                }
-            ];
-
-            let create_info = vk::RenderPassCreateInfo::default()
-                .attachments(&descs)
-                .subpasses(&subpasses)
-                .dependencies(&dependencies);
-
-            let render_pass = device.handle().create_render_pass(&create_info, None)
-                .expect("Failed to create render pass");
-
-            Self {
-                device : device.clone(),
-                handle : render_pass,
-            }
+    pub fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
+        Self {
+            device : device.clone(),
+            handle,
         }
     }
 }

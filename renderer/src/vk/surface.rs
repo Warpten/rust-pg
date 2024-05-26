@@ -12,7 +12,6 @@ pub struct Surface {
     context : Arc<Context>,
     handle : vk::SurfaceKHR,
     pub loader : ash::khr::surface::Instance,
-    // pub format : vk::SurfaceFormatKHR,
     // pub resolution : vk::Extent2D,
 }
 
@@ -58,7 +57,7 @@ impl Surface {
         Arc::new(Self {
             handle : surface,
             loader,
-            context : context.clone()
+            context : context.clone(),
         })
     }
 }

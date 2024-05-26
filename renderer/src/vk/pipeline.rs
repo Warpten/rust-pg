@@ -32,6 +32,7 @@ pub struct PipelineInfo {
     depth : DepthOptions,
     cull_mode : vk::CullModeFlags,
     front_face : vk::FrontFace,
+    topology : vk::PrimitiveTopology,
 
     specialization_data: Vec<u8>,
     specialization_entries: Vec<vk::SpecializationMapEntry>,
@@ -54,6 +55,7 @@ impl PipelineInfo {
     value_builder! { cull_mode, mode, cull_mode, vk::CullModeFlags }
     value_builder! { samples, samples, vk::SampleCountFlags }
     value_builder! { front_face, front, front_face, vk::FrontFace }
+    value_builder! { topology, topology, vk::PrimitiveTopology }
 
     #[inline] pub fn add_shader(mut self, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         self.shaders.push((path, flags));
@@ -103,6 +105,7 @@ impl Default for PipelineInfo {
             specialization_entries : vec![],
 
             samples : vk::SampleCountFlags::TYPE_1,
+            topology : vk::PrimitiveTopology::TRIANGLE_LIST,
 
             vertex_bindings : vec![],
             vertex_format_offset : vec![],
@@ -223,7 +226,7 @@ impl Pipeline {
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
             .primitive_restart_enable(false)
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+            .topology(info.topology);
 
         // TODO: Allow for depth bias configuration
         let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()

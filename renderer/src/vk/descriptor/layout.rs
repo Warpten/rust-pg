@@ -9,18 +9,22 @@ use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::renderer::Renderer;
 
+pub struct PoolDescriptorCount(pub u32);
+pub struct BindingDescriptorCount(pub u32);
+
 /// Facililates creating instances of [`DescriptorSetLayout`].
 pub struct DescriptorSetLayoutBuilder {
-    pub(in self) bindings : IntMap<u32, (vk::DescriptorType, vk::ShaderStageFlags, u32)>,
+    pub(in self) bindings : IntMap<u32, (vk::DescriptorType, vk::ShaderStageFlags, PoolDescriptorCount, BindingDescriptorCount)>,
     pub(in self) flags : vk::DescriptorSetLayoutCreateFlags,
     pub(in self) sets : u32,
-    #[cfg(debug_assertions)]
-    registered : bool,
 }
 
 impl DescriptorSetLayoutBuilder {
-    #[inline] pub fn binding(mut self, binding : u32, descriptor_type : vk::DescriptorType, stage : vk::ShaderStageFlags, count : u32) -> Self {
-        self.bindings.insert(binding, (descriptor_type, stage, count));
+    #[inline] pub fn binding(mut self, binding : u32, descriptor_type : vk::DescriptorType, stage : vk::ShaderStageFlags,
+        pool_descriptor_count : PoolDescriptorCount,
+        binding_descriptor_count : BindingDescriptorCount
+    ) -> Self {
+        self.bindings.insert(binding, (descriptor_type, stage, pool_descriptor_count, binding_descriptor_count));
         self
     }
 
@@ -28,23 +32,7 @@ impl DescriptorSetLayoutBuilder {
     value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
     pub fn build(mut self, renderer : &Renderer) -> DescriptorSetLayout {
-        #[cfg(debug_assertions)] { // Just silencing a warning, don't mind me
-            self.registered = true;
-        }
-
         DescriptorSetLayout::new(&renderer.device, self)
-    }
-
-    #[cfg(debug_assertions)]
-    pub fn forget(mut self) {
-        self.registered = true;
-    }
-}
-
-#[cfg(debug_assertions)]
-impl Drop for DescriptorSetLayoutBuilder {
-    fn drop(&mut self) {
-        assert!(self.registered, "A descriptor set layout builder is being dropped; did you forget to call build() or forget() ?");
     }
 }
 
@@ -54,7 +42,6 @@ impl Default for DescriptorSetLayoutBuilder {
             sets: 64,
             bindings : IntMap::default(),
             flags : vk::DescriptorSetLayoutCreateFlags::empty(),
-            registered : false,
         }
     }
 }
@@ -81,20 +68,19 @@ impl DescriptorSetLayout {
         let mut bindings = Vec::<vk::DescriptorSetLayoutBinding>::with_capacity(binding_count);
         let mut pool_sizes = Vec::<vk::DescriptorPoolSize>::with_capacity(binding_count);
 
-        for (&binding, &(descriptor_type, stage_flags, count)) in &info.bindings {
+        for (binding, (descriptor_type, stage_flags, pool_descriptor_count, binding_descriptor_count)) in &info.bindings {
             bindings.push(vk::DescriptorSetLayoutBinding::default()
-                .binding(binding)
-                .descriptor_type(descriptor_type)
-                .stage_flags(stage_flags)
-                .descriptor_count(count)
+                .binding(*binding)
+                .descriptor_type(*descriptor_type)
+                .stage_flags(*stage_flags)
+                .descriptor_count(binding_descriptor_count.0)
             );
 
             pool_sizes.push(vk::DescriptorPoolSize::default()
-                .ty(descriptor_type)
-                .descriptor_count(count)
+                .ty(*descriptor_type)
+                .descriptor_count(pool_descriptor_count.0)
             );
         }
-
 
         unsafe {
             let create_info = vk::DescriptorSetLayoutCreateInfo::default()
@@ -191,10 +177,6 @@ impl DescriptorSetLayout {
 
     pub fn get_shader_stage(&self, binding : u32) -> vk::ShaderStageFlags {
         self.info.bindings[&binding].1
-    }
-
-    pub fn get_descriptor_count(&self, binding : u32) -> u32 {
-        self.info.bindings[&binding].2
     }
 }
 

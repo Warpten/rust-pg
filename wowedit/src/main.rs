@@ -70,6 +70,7 @@ fn setup(app : &mut Application) -> ApplicationData {
         .build(&app.renderer);
 
     let pipeline = PipelineInfo::default()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
         .layout(pipeline_layout.handle())
         .depth(DepthOptions::enabled())
         .cull_mode(vk::CullModeFlags::BACK)

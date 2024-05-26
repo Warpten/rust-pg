@@ -10,8 +10,10 @@ use crate::vk::framebuffer::Framebuffer;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
-use crate::vk::render_pass::{RenderPass, RenderPassInfo};
+use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
+
+use super::render_pass::RenderPassCreateInfo;
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
@@ -29,7 +31,7 @@ pub struct Swapchain {
     pub queue_families : Vec<QueueFamily>,
     layer_count : u32,
 
-    surface_format : vk::SurfaceFormatKHR,
+    pub surface_format : vk::SurfaceFormatKHR,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -284,6 +286,10 @@ impl Swapchain {
     }
 
     pub fn create_render_pass(&self) -> RenderPass {
+        let color_format = self.present_images.get(0).map(Image::format).expect("Unable to find the format of the presentation image");
+        let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
+        let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
+
         let color_images = match self.present_images.get(0) {
             Some(image) => vec![image],
             None => vec![]
@@ -297,18 +303,25 @@ impl Swapchain {
             None => vec![]
         };
 
-        RenderPass::new(
-            &self.device,
-            RenderPassInfo {
-                color_images,
-                depth_images,
-                resolve_images,
-
-                present : true,
-                sample_count : self.sample_count,
-                final_layout : vk::ImageLayout::PRESENT_SRC_KHR
-            }
-        )
+        RenderPassCreateInfo::default()
+            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
+            .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
+            .dependency(
+                vk::SUBPASS_EXTERNAL,
+                0,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+            )
+            .subpass(
+                vk::PipelineBindPoint::GRAPHICS,
+                &[0],
+                &[0],
+                Some(0)
+            )
+            .build(&self.device)
     }
 
     pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
