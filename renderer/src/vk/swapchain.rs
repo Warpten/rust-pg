@@ -13,7 +13,7 @@ use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 
-use super::render_pass::{RenderPassCreateInfo, SubpassAttachment};
+use super::{image::ImageCreateInfo, render_pass::{RenderPassCreateInfo, SubpassAttachment}};
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
@@ -232,24 +232,23 @@ impl Swapchain {
             }
 
             for i in 0..present_images.len() {
-                depth_images.push(Image::new(format!("Swapchain/DepthStencil #{}", i),
-                    device,
-                    vk::ImageCreateInfo::default()
-                        .image_type(vk::ImageType::TYPE_2D)
-                        .format(depth_format)
-                        .extent(vk::Extent3D {
-                            width : surface_extent.width,
-                            height : surface_extent.height,
-                            depth : 1
-                        })
-                        .mip_levels(1)
-                        .array_layers(1)
-                        .samples(options.multisampling())
-                        .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
-                        .sharing_mode(image_sharing_mode),
-                    depth_aspect_flags
-                ));
+                depth_images.push(ImageCreateInfo::default()
+                    .aspect(depth_aspect_flags)
+                    .name(format!("Swapchain/DepthStencil #{}", i))
+                    .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
+                    .format(depth_format)
+                    .levels(0, 1)
+                    .layers(0, 1)
+                    .samples(options.multisampling())
+                    .tiling(vk::ImageTiling::OPTIMAL)
+                    .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+                    .sharing_mode(image_sharing_mode)
+                    .extent(vk::Extent3D::default()
+                        .width(surface_extent.width)
+                        .height(surface_extent.height)
+                        .depth(1)
+                    )
+                    .build(device));
             }
             depth_images
         } else { vec![] };
@@ -258,24 +257,23 @@ impl Swapchain {
             let mut resolve_images = Vec::<Image>::new();
             if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
                 for i in 0..present_images.len() {
-                    resolve_images.push(Image::new(format!("Swapchain/Resolve #{}", i).to_owned(),
-                        device,
-                        vk::ImageCreateInfo::default()
-                            .image_type(vk::ImageType::TYPE_2D)
-                            .format(surface_format.format)
-                            .extent(vk::Extent3D {
-                                width : surface_extent.width,
-                                height : surface_extent.height,
-                                depth : 1
-                            })
-                            .mip_levels(1)
-                            .array_layers(1)
-                            .samples(options.multisampling())
-                            .tiling(vk::ImageTiling::OPTIMAL)
-                            .usage(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                            .sharing_mode(image_sharing_mode),
-                        vk::ImageAspectFlags::COLOR
-                    ));
+                    resolve_images.push(ImageCreateInfo::default()
+                        .aspect(vk::ImageAspectFlags::COLOR)
+                        .name(format!("Swapchain/Resolve #{}", i))
+                        .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
+                        .format(surface_format.format)
+                        .levels(0, 1)
+                        .layers(0, 1)
+                        .samples(options.multisampling())
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                        .sharing_mode(image_sharing_mode)
+                        .extent(vk::Extent3D::default()
+                            .width(surface_extent.width)
+                            .height(surface_extent.height)
+                            .depth(1)
+                        )
+                        .build(device));
                 }
             }
             resolve_images

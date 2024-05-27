@@ -3,8 +3,13 @@ use std::{ffi::CString, sync::Arc};
 use ash::vk::{self, ClearValue};
 
 use crate::traits::handle::Handle;
-
-use super::{buffer::Buffer, command_pool::CommandPool, framebuffer::Framebuffer, logical_device::LogicalDevice, pipeline::Pipeline, queue::Queue, render_pass::RenderPass};
+use crate::vk::buffer::Buffer;
+use crate::vk::command_pool::CommandPool;
+use crate::vk::framebuffer::Framebuffer;
+use crate::vk::image::Image;
+use crate::vk::logical_device::LogicalDevice;
+use crate::vk::pipeline::Pipeline;
+use crate::vk::render_pass::RenderPass;
 
 pub struct CommandBuffer {
     device : Arc<LogicalDevice>,
@@ -15,6 +20,24 @@ pub struct CommandBuffer {
 impl CommandBuffer {
     pub fn builder() -> CommandBufferBuilder {
         CommandBufferBuilder { pool : vk::CommandPool::null(), level : vk::CommandBufferLevel::PRIMARY }
+    }
+
+    pub fn pipeline_barrier(&self,
+        src_stage_mask : vk::PipelineStageFlags,
+        dst_stage_mask : vk::PipelineStageFlags,
+        dependency_flags : vk::DependencyFlags,
+        memory_barriers : &[vk::MemoryBarrier],
+        buffer_memory_barriers : &[vk::BufferMemoryBarrier],
+        image_memory_barriers : &[vk::ImageMemoryBarrier]
+    ) {
+        unsafe {
+            self.device.handle()
+                .cmd_pipeline_barrier(self.handle,
+                    src_stage_mask,
+                    dst_stage_mask,
+                    dependency_flags, memory_barriers, buffer_memory_barriers, image_memory_barriers
+                );
+        }
     }
 
     pub fn label(&self, label : String, color : [f32; 4], cb : impl Fn()) {
@@ -58,6 +81,37 @@ impl CommandBuffer {
             self.device.handle()
                 .begin_command_buffer(self.handle, &begin_info)
                 .expect("Failed to begin recording the command buffer.");
+        }
+    }
+
+    pub fn image_memory_barrier(&self,
+        image : &mut Image,
+        src : BarrierPhase,
+        dst : BarrierPhase,
+        dependency : vk::DependencyFlags,
+        new_layout : vk::ImageLayout
+    ) {
+        let barrier = vk::ImageMemoryBarrier::default()
+            .dst_access_mask(dst.1)
+            .src_access_mask(src.1)
+            .dst_queue_family_index(dst.0)
+            .src_queue_family_index(src.0)
+            .old_layout(image.layout())
+            .new_layout(new_layout)
+            .subresource_range(vk::ImageSubresourceRange::default()
+                .aspect_mask(image.aspect())
+                .base_array_layer(image.base_array_layer())
+                .layer_count(image.layer_count())
+                .base_mip_level(image.base_mip_level())
+                .level_count(image.level_count())
+            )
+            .image(image.handle());
+
+        unsafe {
+            self.device.handle()
+                .cmd_pipeline_barrier(self.handle, src.2, dst.2, dependency, &[], &[], &[barrier]);
+
+            image.layout = new_layout;
         }
     }
 
@@ -155,15 +209,30 @@ impl CommandBuffer {
         }
     }
 
-    pub fn submit_to_queue(&self, queue : &Queue, fence : vk::Fence) {
-        let handles = [self.handle];
+    /// Copies data from a buffer to an image.
+    pub fn copy_buffer_to_image(&self, source : &Buffer, dest : &Image, dst_layout : vk::ImageLayout, regions : &[vk::BufferImageCopy]) {
+        unsafe {
+            self.device.handle().cmd_copy_buffer_to_image(self.handle, source.handle(), dest.handle(), dst_layout, regions);
+        }
+    }
 
-        let submit_infos = [
-            vk::SubmitInfo::default()
-                .command_buffers(&handles)
-        ];
+    /// Copies regions of an image, potentially performing format conversion.
+    pub fn blit_image(&self, source : &Image, dest : &mut Image, blit : &[vk::ImageBlit], filter : vk::Filter) {
+        debug_assert!(source.sample_count() == vk::SampleCountFlags::TYPE_1 && dest.sample_count() == vk::SampleCountFlags::TYPE_1,
+            "blit_image must not be used for multisampled source or destination images. Use resolve_image for this purpose."
+        );
 
-        self.device.submit(queue, &submit_infos, fence);
+        unsafe {
+            self.device.handle().cmd_blit_image(self.handle,
+                source.handle(),
+                source.layout(),
+                dest.handle(),
+                dest.layout(),
+                blit,
+                filter);
+
+            dest.layout = source.layout;
+        }
     }
 
     /// Finishes recording this command buffer.
@@ -230,4 +299,12 @@ impl CommandBufferBuilder {
     }
 
     value_builder! { level, vk::CommandBufferLevel }
+}
+
+pub struct BarrierPhase(pub u32, pub vk::AccessFlags, pub vk::PipelineStageFlags);
+
+impl BarrierPhase {
+    pub fn ignore_queue(access_flags : vk::AccessFlags, stage : vk::PipelineStageFlags) -> Self {
+        Self(vk::QUEUE_FAMILY_IGNORED, access_flags, stage)
+    }
 }

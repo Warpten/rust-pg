@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use ash::vk;
 
-use crate::{make_handle, traits::handle::Handle, vk::logical_device::LogicalDevice};
+use crate::{make_handle, vk::logical_device::LogicalDevice};
 
 pub struct PipelinePool {
     device : Arc<LogicalDevice>,

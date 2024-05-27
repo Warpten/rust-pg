@@ -23,7 +23,7 @@ macro_rules! make_handle {
         }
 
         impl Into<$h> for $x {
-            fn into(self) -> $h { self.handle() }
+            fn into(self) -> $h { self.$f }
         }
     };
     ($x:ty, $h:ty) => {
@@ -32,7 +32,7 @@ macro_rules! make_handle {
         }
 
         impl Into<$h> for $x {
-            fn into(self) -> $h { self.handle() }
+            fn into(self) -> $h { self.handle }
         }
     }
 }

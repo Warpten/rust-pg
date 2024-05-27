@@ -4,7 +4,6 @@ use ash::vk;
 use nohash_hasher::IntMap;
 
 use crate::make_handle;
-use crate::traits::handle::Handle;
 use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::renderer::Renderer;

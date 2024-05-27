@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use ash::vk;
 use crate::make_handle;
-use crate::traits::handle::Handle;
 use crate::vk::logical_device::LogicalDevice;
 
 // This whole file needs cleaning

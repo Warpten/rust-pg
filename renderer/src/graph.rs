@@ -9,6 +9,7 @@ use crate::graph::pass::{Pass, PassID};
 use crate::graph::resource::{Identifiable, PhysicalResourceID, Resource, ResourceID};
 use crate::graph::texture::{Texture, TextureID, TextureOptions};
 use crate::utils::topological_sort::TopologicalSorter;
+use crate::vk::command_buffer::CommandBuffer;
 use crate::vk::command_pool::CommandPool;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
@@ -54,7 +55,7 @@ impl Graph<'_> { // Graph compilation functions
 
         // Walk the topology and process resources
         let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);
-        let command_buffer : vk::CommandBuffer= todo!(); // self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
+        let command_buffer : CommandBuffer = todo!(); // self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
 
         let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
         for pass in &topology {
@@ -74,7 +75,7 @@ impl Graph<'_> { // Graph compilation functions
                             .or_insert_with(|| TextureState::new(texture, &self.renderer.device));
 
                         // Process the update.
-                        self.process_texture(command_buffer, options, state);
+                        self.process_texture(&command_buffer, options, state);
                     },
                     PhysicalResourceID::Buffer(buffer) => {
                         let options = buffer.get_options(pass).unwrap();
@@ -91,7 +92,7 @@ impl Graph<'_> { // Graph compilation functions
             }
 
             if let Some(pass_emitter) = pass.command_emitter {
-                pass_emitter(command_buffer);
+                pass_emitter(&command_buffer);
             }
 
             // Persist the command buffer here.
@@ -100,7 +101,7 @@ impl Graph<'_> { // Graph compilation functions
 
     fn process_texture(
         &self,
-        command_buffer : vk::CommandBuffer,
+        command_buffer : &CommandBuffer,
         options: &TextureOptions,
         state : &mut TextureState)
     {
@@ -193,7 +194,7 @@ impl TextureState<'_> {
     /// 
     /// * `command_buffer` - The command buffer on which to record the layout transition.
     /// * `to` - The layout to transition to.
-    pub fn emit_transition(&mut self, command_buffer : vk::CommandBuffer , to : vk::ImageLayout) {
+    pub fn emit_transition(&mut self, command_buffer : &CommandBuffer , to : vk::ImageLayout) {
         self.emit_layout_transition(command_buffer, self.current_layout, to);
     }
 
@@ -213,7 +214,7 @@ impl TextureState<'_> {
     /// * `command_buffer` - The command buffer on which to record commands.
     /// * `from` - The layout to transition from.
     /// * `to` - The layout to transition to.
-    pub fn emit_layout_transition(&mut self, command_buffer : vk::CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout) {
+    pub fn emit_layout_transition(&mut self, command_buffer : &CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout) {
         // Nothing to be done if the layout does not change.
         if from == to {
             return;
@@ -221,7 +222,7 @@ impl TextureState<'_> {
 
         // Create the image now if it doesn't exist. This has the added benefit of not creating the image
         // if it is never used in the graph.
-        let record_command_transition = if self.handle.is_none() {
+        /*let record_command_transition = if self.handle.is_none() {
             let mut create_info = self.texture_info.create_info();
 
             // Only record a layout transition if the image's layout wasn't undefined.
@@ -248,8 +249,8 @@ impl TextureState<'_> {
             // Record the layout transition command on the provided command buffer.
             self.handle.as_ref()
                 .unwrap()
-                .layout_transition(command_buffer, from, to);
+                .layout_transition(command_buffer, from, to, vk::DependencyFlags::empty());
         }
-        self.current_layout = to;
+        self.current_layout = to;*/
     }
 }

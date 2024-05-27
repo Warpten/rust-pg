@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
-use crate::vk::logical_device::LogicalDevice;
+use crate::{graph::buffer::Buffer, make_handle, vk::logical_device::LogicalDevice};
+
+use super::{command_buffer::CommandBuffer, renderer::Renderer};
 
 pub struct Image {
     device : Arc<LogicalDevice>,
@@ -11,81 +13,165 @@ pub struct Image {
     allocation : Option<Allocation>,
     view : vk::ImageView,
 
-    levels : u32,
-    layers : u32,
-    layout : vk::ImageLayout,
+    levels : [u32; 2],
+    layers : [u32; 2],
+    pub(in crate) layout : vk::ImageLayout,
     format : vk::Format,
     extent : vk::Extent3D,
+    aspect : vk::ImageAspectFlags,
+    sample_count : vk::SampleCountFlags,
+}
+
+pub struct ImageCreateInfo {
+    aspect : vk::ImageAspectFlags,
+    levels : [u32; 2],
+    layers : [u32; 2],
+    format : vk::Format,
+    image_type : vk::ImageType,
+    image_view_type : vk::ImageViewType,
+    extent : vk::Extent3D,
+    samples : vk::SampleCountFlags,
+    tiling : vk::ImageTiling,
+    usage : vk::ImageUsageFlags,
+    sharing_mode : vk::SharingMode,
+    name : String,
+    initial_layout : vk::ImageLayout,
+}
+
+impl Default for ImageCreateInfo {
+    fn default() -> Self {
+        Self {
+            aspect: vk::ImageAspectFlags::empty(),
+            levels: [0, 1],
+            layers: [0, 1],
+            format: vk::Format::UNDEFINED,
+            image_type: vk::ImageType::TYPE_2D,
+            image_view_type: vk::ImageViewType::TYPE_2D,
+            extent: vk::Extent3D::default(),
+            samples: vk::SampleCountFlags::TYPE_1,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: vk::ImageUsageFlags::empty(),
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            name: "Unnamed image".to_owned(),
+            initial_layout: vk::ImageLayout::UNDEFINED
+        }
+    }
+}
+
+impl ImageCreateInfo {
+    value_builder! { aspect, vk::ImageAspectFlags }
+    value_builder! { initial_layout, vk::ImageLayout }
+    value_builder! { name, String }
+    value_builder! { format, vk::Format }
+    value_builder! { extent, vk::Extent3D }
+    value_builder! { samples, vk::SampleCountFlags }
+    value_builder! { tiling, vk::ImageTiling }
+    value_builder! { usage, vk::ImageUsageFlags }
+    value_builder! { sharing_mode, vk::SharingMode }
+    
+    #[inline] pub fn image_type(mut self, image_type : vk::ImageType, view_image_type : vk::ImageViewType) -> Self {
+        self.image_type = image_type;
+        self.image_view_type = view_image_type;
+        self
+    }
+
+    #[inline] pub fn color(mut self) -> Self {
+        self.aspect |= vk::ImageAspectFlags::COLOR;
+        self
+    }
+
+    #[inline] pub fn depth(mut self) -> Self {
+        self.aspect |= vk::ImageAspectFlags::DEPTH;
+        self
+    }
+
+    #[inline] pub fn stencil(mut self) -> Self {
+        self.aspect |= vk::ImageAspectFlags::STENCIL;
+        self
+    }
+
+    #[inline] pub fn levels(mut self, base : u32, count : u32) -> Self {
+        self.levels = [base, count];
+        self
+    }
+
+    #[inline] pub fn layers(mut self, base : u32, count : u32) -> Self {
+        self.layers = [base, count];
+        self
+    }
+
+    pub fn build(self, device : &Arc<LogicalDevice>) -> Image {
+        unsafe {
+            let image = vk::ImageCreateInfo::default()
+                .image_type(self.image_type)
+                .format(self.format)
+                .extent(self.extent)
+                .mip_levels(self.levels[1])
+                .array_layers(self.layers[1])
+                .samples(self.samples)
+                .tiling(self.tiling)
+                .usage(self.usage)
+                .sharing_mode(self.sharing_mode);
+
+            let image = device.handle()
+                .create_image(&image, None)
+                .expect("Image creation failed");
+
+            let requirements = device.handle()
+                .get_image_memory_requirements(image);
+
+            let allocation = device.allocator()
+                .lock()
+                .expect("Failed to obtain allocator")
+                .allocate(&AllocationCreateDesc {
+                    name : format!("Allocation/{}", self.name).as_str(),
+                    requirements,
+                    location: gpu_allocator::MemoryLocation::GpuOnly,
+                    linear: false,
+                    // TODO: Figure this out
+                    allocation_scheme: gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged
+                })
+                .expect("Memory allocation failed");
+
+            device.handle()
+                .bind_image_memory(image, allocation.memory(), allocation.offset())
+                .expect("Memory binding failed");
+
+            let image_view = vk::ImageViewCreateInfo::default()
+                .format(self.format)
+                .view_type(self.image_view_type)
+                .image(image)
+                .subresource_range(vk::ImageSubresourceRange::default()
+                    .aspect_mask(self.aspect)
+                    .base_mip_level(self.levels[0])
+                    .level_count(self.levels[1])
+                    .base_array_layer(self.layers[0])
+                    .layer_count(self.layers[1])
+                );
+
+            let image_view = device.handle()
+                .create_image_view(&image_view, None)
+                .expect("Image view creation failed");
+            device.set_handle_name(image_view, &format!("View/{}", self.name));
+            
+            Image {
+                device: device.clone(),
+                handle: image,
+                allocation : Some(allocation),
+                view: image_view,
+                levels: self.levels,
+                layers: self.layers,
+                layout: self.initial_layout,
+                format: self.format,
+                extent: self.extent,
+                aspect: self.aspect,
+                sample_count : self.samples,
+            }
+        }
+    }
 }
 
 impl Image { // Construction
-    /// Creates a new image.
-    ///
-    /// # Arguments
-    ///
-    /// * `device` - The logical device owning this image.
-    /// * `allocator` - A GPU allocator.
-    /// * `create_info` - Describes the format and type of the texel blocks that will be contained in the image.
-    /// * `aspect_mask` - Number of data elements in each dimension of the image.
-    /// * `levels` - Number of levels of detail available for minified sampling of the image.
-    /// * `layers` - 
-    pub fn new(
-        name : String,
-        device : &Arc<LogicalDevice>,
-        create_info : vk::ImageCreateInfo,
-        aspect_mask : vk::ImageAspectFlags,
-    ) -> Self
-    {
-        let image = unsafe {
-            device.handle().create_image(&create_info, None)
-                .expect("Creating the image failed")
-        };
-        device.set_handle_name(image, &name);
-
-        let requirements = unsafe { device.handle().get_image_memory_requirements(image) };
-
-        let allocation = device.allocator()
-            .lock()
-            .expect("Failed to obtain allocator")
-            .allocate(&AllocationCreateDesc {
-                name : name.as_str(),
-                requirements,
-                location: gpu_allocator::MemoryLocation::GpuOnly,
-                linear: false,
-                // TODO: Figure this out
-                allocation_scheme: gpu_allocator::vulkan::AllocationScheme::GpuAllocatorManaged
-            })
-            .expect("Memory allocation failed");
-
-        unsafe { device.handle().bind_image_memory(image, allocation.memory(), allocation.offset()).expect("Memory binding failed") };
-
-        let image_view_info = vk::ImageViewCreateInfo::default()
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .subresource_range(vk::ImageSubresourceRange::default()
-                .aspect_mask(aspect_mask)
-                .level_count(create_info.mip_levels)
-                .layer_count(create_info.array_layers))
-            .image(image)
-            .format(create_info.format);
-
-        let image_view = unsafe {
-            device.handle().create_image_view(&image_view_info, None)
-                .expect("Creating an image view failed")
-        };
-
-        Self {
-            device: device.clone(),
-            allocation: Some(allocation),
-            handle: image,
-            layout: create_info.initial_layout,
-            format: create_info.format,
-            view: image_view,
-            extent: create_info.extent,
-            levels : create_info.mip_levels,
-            layers : create_info.array_layers,
-        }
-    }
-
     pub fn from_swapchain(extent: &vk::Extent2D, device: &Arc<LogicalDevice>, format: vk::Format, images: Vec<vk::Image>) -> Vec<Image> {
         let mut index = 0;
         images.iter().map(|&image| {
@@ -131,8 +217,10 @@ impl Image { // Construction
                     view: image_view,
                     format,
                     layout: vk::ImageLayout::UNDEFINED,
-                    levels : 1,
-                    layers : 1,
+                    levels : [0, 1],
+                    layers : [0, 1],
+                    aspect : vk::ImageAspectFlags::COLOR,
+                    sample_count : vk::SampleCountFlags::TYPE_1,
                 }
             }
             
@@ -141,19 +229,27 @@ impl Image { // Construction
 }
 
 impl Image { // Getters
-    #[inline]
-    pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.device }
-    #[inline]
-    pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.logical_device().allocator() }
+    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.device }
+    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.logical_device().allocator() }
 
-    #[inline]
-    pub fn layout(&self) -> vk::ImageLayout { self.layout }
-    #[inline]
-    pub fn extent(&self) -> &vk::Extent3D { &self.extent }
-
-    pub fn view(&self) -> vk::ImageView { self.view }
-
-    pub fn format(&self) -> vk::Format { self.format }
+    #[inline] pub fn layout(&self) -> vk::ImageLayout { self.layout }
+    #[inline] pub fn extent(&self) -> &vk::Extent3D { &self.extent }
+    #[inline] pub fn view(&self) -> vk::ImageView { self.view }
+    #[inline] pub fn format(&self) -> vk::Format { self.format }
+    #[inline] pub fn aspect(&self) -> vk::ImageAspectFlags { self.aspect }
+    #[inline] pub fn base_array_layer(&self) -> u32 { self.layers[0] }
+    #[inline] pub fn layer_count(&self) -> u32 { self.layers[1] }
+    #[inline] pub fn base_mip_level(&self) -> u32 { self.levels[0] }
+    #[inline] pub fn level_count(&self) -> u32 { self.levels[1] }
+    #[inline] pub fn sample_count(&self) -> vk::SampleCountFlags { self.sample_count }
+    
+    pub fn make_subresource_layer(&self, mip_level : u32) -> vk::ImageSubresourceLayers {
+        vk::ImageSubresourceLayers::default()
+            .aspect_mask(self.aspect)
+            .mip_level(mip_level.clamp(self.base_mip_level(), self.base_mip_level() + self.level_count()))
+            .base_array_layer(self.base_array_layer())
+            .layer_count(self.layer_count())
+    }
 }
 
 impl Image { // Utilities
@@ -169,16 +265,73 @@ impl Image { // Utilities
         }
         aspect_flags
     }
+
+    pub fn from_buffer(&self, renderer : &Renderer, buffer : Buffer, cb : impl FnOnce(&CommandBuffer)) {
+        let cmd = CommandBuffer::builder()
+            .pool(&renderer.transfer_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .build_one(&renderer.device);
+
+        {
+            let image_memory_barrier = vk::ImageMemoryBarrier::default()
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .src_access_mask(vk::AccessFlags::NONE_KHR)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .subresource_range(vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(self.layers[0])
+                    .layer_count(self.layers[1])
+                    .base_mip_level(self.levels[0])
+                    .level_count(self.levels[1])
+                );
+
+            cmd.pipeline_barrier(
+                vk::PipelineStageFlags::HOST,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::BY_REGION,
+                &[], &[], &[image_memory_barrier]
+            );
+        }
+
+        cb(&cmd);
+
+        {
+            let image_memory_barrier = vk::ImageMemoryBarrier::default()
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .subresource_range(vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .base_array_layer(self.layers[0])
+                    .layer_count(self.layers[1])
+                    .base_mip_level(self.levels[0])
+                    .level_count(self.levels[1])
+                );
+
+            cmd.pipeline_barrier(
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::VERTEX_SHADER,
+                vk::DependencyFlags::BY_REGION,
+                &[], &[], &[image_memory_barrier]
+            );
+        }
+    }
     
     /// Records a layout transition for this image.
     ///
     /// # Arguments
     ///
-    /// * `command_buffer` - The command buffer on which the command will be recorded.
+    /// * `cmd` - The command buffer on which the command will be recorded.
     /// * `from` - The old layout.
     /// * `to` - The new layout.
     /// * `mip_levels` - The mipmap levels that should be transitioned.
-    pub fn layout_transition(&self, command_buffer : vk::CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout) {
+    pub fn layout_transition(&self, cmd : &CommandBuffer, from : vk::ImageLayout, to : vk::ImageLayout, flags : vk::DependencyFlags) {
         let aspect_flags = Image::derive_aspect_flags(to, self.format);
 
         let src_access_mask = match from {
@@ -227,20 +380,23 @@ impl Image { // Utilities
             .old_layout(from)
             .subresource_range(vk::ImageSubresourceRange::default()
                 .aspect_mask(aspect_flags)
-                .layer_count(self.layers)
-                .level_count(self.levels));
+                .base_array_layer(self.layers[0])
+                .layer_count(self.layers[1])
+                .base_mip_level(self.levels[0])
+                .level_count(self.levels[1]));
 
         unsafe {
-            self.device.handle().cmd_pipeline_barrier(command_buffer,
-                src_stage,
+            cmd.pipeline_barrier(src_stage,
                 dst_stage,
-                vk::DependencyFlags::empty(), // No idea
+                flags,
                 &[],
                 &[],
                 &[barrier]);
         }
     }
 }
+
+make_handle! { Image, vk::Image }
 
 impl Drop for Image {
     fn drop(&mut self) {

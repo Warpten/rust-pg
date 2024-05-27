@@ -1,20 +1,19 @@
 use std::collections::HashMap;
 
-use ash::vk;
-
 use crate::graph::attachment::{AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{BufferID, BufferOptions};
 use crate::graph::Graph;
 use crate::graph::manager::Identifier;
 use crate::graph::resource::{Identifiable, PhysicalResourceID, ResourceAccessFlags, ResourceID, ResourceOptions};
 use crate::graph::texture::{TextureID, TextureOptions};
+use crate::vk::command_buffer::CommandBuffer;
 
 pub struct Pass {
     id : PassID,
     name : &'static str,
 
     resource_names : HashMap<&'static str, ResourceID>,
-    pub(in crate) command_emitter : Option<fn(vk::CommandBuffer)>,
+    pub(in crate) command_emitter : Option<fn(&CommandBuffer)>,
 
     pub(in crate) textures    : HashMap<TextureID, TextureOptions>,
     pub(in crate) buffers     : HashMap<BufferID, BufferOptions>,
@@ -36,7 +35,7 @@ impl Pass {
         }
     }
 
-    pub fn emitter(mut self, emitter : fn(vk::CommandBuffer)) -> Self {
+    pub fn emitter(mut self, emitter : fn(&CommandBuffer)) -> Self {
         self.command_emitter = Some(emitter);
         self
     }

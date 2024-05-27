@@ -4,7 +4,6 @@ use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use crate::make_handle;
-use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::window::Window;
 

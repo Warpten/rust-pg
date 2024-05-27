@@ -15,3 +15,5 @@ pub mod image;
 pub mod pipeline;
 pub mod renderer;
 pub mod render_pass;
+pub mod sampler;
+pub mod helpers;

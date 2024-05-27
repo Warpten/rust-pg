@@ -2,7 +2,7 @@ use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
 use renderer::traits::handle::Handle;
-use renderer::vk::buffer::{Buffer, BufferBuilder};
+use renderer::vk::buffer::{Buffer, BufferBuilder, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder};
 use renderer::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayoutBuilder, PoolDescriptorCount};
 use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
@@ -53,10 +53,10 @@ impl Vertex for TerrainVertex {
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
-    let buffer = BufferBuilder::<TerrainVertex>::default()
+    let buffer = DynamicBufferBuilder::dynamic()
         .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
         .gpu_only()
-        .data(&[
+        .build(&app.renderer, &[
             TerrainVertex {
                 pos : [ 0.0f32, -0.5f32],
                 color : [ 1.0f32, 0.0f32, 0.0f32 ]
@@ -69,8 +69,7 @@ fn setup(app : &mut Application) -> ApplicationData {
                 pos : [ -0.5f32, 0.5f32],
                 color : [ 0.0f32, 0.0f32, 1.0f32 ]
             }
-        ])
-        .build(&app.renderer);
+        ]);
 
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
         // This is a workaround for an Intel driver crash.
@@ -139,7 +138,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         cmd.draw(data.buffer.element_count(), 1, 0, 0);
     });
 
-    app.renderer.end_frame(image_acquired, cmd)
+    app.renderer.end_frame(image_acquired, &cmd)
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {

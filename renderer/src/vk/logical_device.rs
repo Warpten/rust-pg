@@ -8,6 +8,8 @@ use crate::vk::context::Context;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::queue::{Queue, QueueAffinity};
 
+use super::command_buffer::CommandBuffer;
+
 /// A logical Vulkan device.
 pub struct LogicalDevice {
     handle : ash::Device,
@@ -123,9 +125,25 @@ impl LogicalDevice {
     /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
     /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
     ///             completed execution.
-    pub fn submit(&self, queue : &impl Handle<vk::Queue>, submit_infos : &[vk::SubmitInfo], fence : vk::Fence) {
+    pub fn submit(&self,
+        queue : &impl Handle<vk::Queue>,
+        command_buffers : &[&CommandBuffer],
+        wait_info : &[(vk::Semaphore, vk::PipelineStageFlags)],
+        signal_semaphores : &[vk::Semaphore],
+        fence : vk::Fence
+    ) {
         unsafe {
-            self.handle.queue_submit(queue.handle(), submit_infos, fence)
+            let command_buffers = command_buffers.iter().map(|cmd| cmd.handle()).collect::<Vec<_>>();
+            let wait_semaphores = wait_info.iter().map(|t| t.0).collect::<Vec<_>>();
+            let wait_stages = wait_info.iter().map(|t| t.1).collect::<Vec<_>>();
+
+            let submit_info = vk::SubmitInfo::default()
+                .wait_dst_stage_mask(&wait_stages)
+                .wait_semaphores(&wait_semaphores)
+                .signal_semaphores(signal_semaphores)
+                .command_buffers(&command_buffers);
+
+            self.handle.queue_submit(queue.handle(), &[submit_info], fence)
                 .expect("Submission failed")
         }
     }
@@ -138,6 +156,13 @@ impl LogicalDevice {
         unsafe {
             self.handle.create_fence(&create_info, None)
                 .expect("Failed to create fence")
+        }
+    }
+    
+    pub fn wait_for_fence(&self, fence : vk::Fence) {
+        unsafe {
+            self.handle.wait_for_fences(&[fence], true, u64::MAX)
+                .expect("Waiting for the fence failed");
         }
     }
 }

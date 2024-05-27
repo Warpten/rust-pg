@@ -223,7 +223,7 @@ impl Renderer {
     pub fn frame_index(&self) -> usize { self.active_frame_index }
 
     pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
-        self.wait_for_fence(self.frames[self.active_frame_index].in_flight);
+        self.device.wait_for_fence(self.frames[self.active_frame_index].in_flight);
 
         let acquired_semaphore = self.frames[self.active_frame_index].semaphore_pool.request();
 
@@ -248,15 +248,8 @@ impl Renderer {
     }
 
     pub fn wait_and_reset(&self, fence : vk::Fence) {
-        self.wait_for_fence(fence);
+        self.device.wait_for_fence(fence);
         self.reset_fence(fence);
-    }
-
-    pub fn wait_for_fence(&self, fence : vk::Fence) {
-        unsafe {
-            self.device.handle().wait_for_fences(&[fence], true, u64::MAX)
-                .expect("Waiting for the fence failed");
-        }
     }
 
     pub fn reset_fence(&self, fence : vk::Fence) {
@@ -266,10 +259,9 @@ impl Renderer {
         }
     }
 
-    pub fn submit_and_present(&mut self, command_buffer : CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let signal_semaphore = self.submit_frame(&[command_buffer.handle()],
-            &[wait_semaphore],
-            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT]
+    pub fn submit_and_present(&mut self, command_buffer : &CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
+        let signal_semaphore = self.submit_frame(&[command_buffer],
+            &[(wait_semaphore, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]
         );
 
         self.present_frame(signal_semaphore)
@@ -294,7 +286,7 @@ impl Renderer {
         Ok((image_acquired, cmd))
     }
 
-    pub fn end_frame(&mut self, image_acquired : vk::Semaphore, cmd : CommandBuffer) -> Result<(), ApplicationRenderError> {
+    pub fn end_frame(&mut self, image_acquired : vk::Semaphore, cmd : &CommandBuffer) -> Result<(), ApplicationRenderError> {
         cmd.end_render_pass();
         cmd.end();
         self.submit_and_present(cmd, image_acquired)
@@ -314,19 +306,13 @@ impl Renderer {
     /// # Returns
     /// 
     /// A [`vk::Semaphore`] that will be signalled when all command buffers have completed execution.
-    pub fn submit_frame(&mut self, command_buffers : &[vk::CommandBuffer], wait_semaphores : &[vk::Semaphore], flags : &[vk::PipelineStageFlags]) -> vk::Semaphore {
+    pub fn submit_frame(&mut self, command_buffers : &[&CommandBuffer], wait_info : &[(vk::Semaphore, vk::PipelineStageFlags)]) -> vk::Semaphore {
         let signal_semaphore = [
             self.frames[self.active_frame_index].semaphore_pool.request()
         ];
 
-        let submit_info = vk::SubmitInfo::default()
-            .wait_semaphores(wait_semaphores)
-            .command_buffers(command_buffers)
-            .wait_dst_stage_mask(flags)
-            .signal_semaphores(&signal_semaphore);
-
         let graphics_queue = self.device.get_queues(QueueAffinity::Graphics)[0];
-        self.device.submit(graphics_queue, &[submit_info], self.frames[self.active_frame_index].in_flight);
+        self.device.submit(graphics_queue, command_buffers, wait_info, &[], self.frames[self.active_frame_index].in_flight);
     
         signal_semaphore[0]
     }

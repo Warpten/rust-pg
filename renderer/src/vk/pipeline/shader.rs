@@ -4,7 +4,7 @@ use std::sync::Arc;
 use ash::vk;
 use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
 use crate::make_handle;
-use crate::{traits::handle::Handle, vk::logical_device::LogicalDevice};
+use crate::vk::logical_device::LogicalDevice;
 
 pub struct Shader {
     device : Arc<LogicalDevice>,

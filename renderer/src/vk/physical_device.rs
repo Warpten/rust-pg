@@ -2,7 +2,7 @@ use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use ash::vk;
 
-use crate::{make_handle, traits::handle::Handle};
+use crate::make_handle;
 use crate::vk::context::Context;
 use crate::vk::logical_device::{IndexingFeatures, LogicalDevice};
 use crate::vk::queue::{Queue, QueueFamily};

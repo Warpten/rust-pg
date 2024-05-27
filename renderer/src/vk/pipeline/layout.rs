@@ -25,7 +25,12 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn register_push_constants(mut self, constants : &[vk::PushConstantRange]) -> Self {
+    pub fn push_constant(mut self, constant : vk::PushConstantRange) -> Self {
+        self.push_constants.push(constant);
+        self
+    }
+
+    pub fn push_constants(mut self, constants : &[vk::PushConstantRange]) -> Self {
         self.push_constants.extend_from_slice(constants);
         self
     }
