@@ -1,3 +1,4 @@
+use std::ops::Sub;
 use std::sync::Arc;
 
 use ash::vk;
@@ -12,16 +13,63 @@ pub struct RenderPass {
     device : Arc<LogicalDevice>,
 }
 
+impl RenderPass {
+    pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
+        for &format in formats {
+            let properties = device.physical_device.get_format_properties(format);
+            if let Some(properties) = properties {
+                let supported = match tiling {
+                    vk::ImageTiling::LINEAR => properties.linear_tiling_features.contains(flags),
+                    vk::ImageTiling::OPTIMAL => properties.optimal_tiling_features.contains(flags),
+                    _ => panic!("Unsupported tiling mode")
+                };
+
+                if supported {
+                    return Some(format);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
+        Self {
+            device : device.clone(),
+            handle,
+        }
+    }
+}
+
+make_handle! { RenderPass, vk::RenderPass }
+
+impl Drop for RenderPass {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.handle().destroy_render_pass(self.handle, None);
+        }
+    }
+}
+
 pub struct RenderPassCreateInfo {
     color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout)>,
     depth_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp)>,
     resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
 
     dependencies : Vec<vk::SubpassDependency>,
-    subpasses : Vec<(vk::PipelineBindPoint, Vec<u32>, Vec<u32>, Option<u32>)>,
+    subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachmentIndex>, SubpassAttachmentIndex)>,
 }
 
 impl RenderPassCreateInfo {
+    /// Adds a color attachment.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `format` - The format of this attachment.
+    /// * `samples` - The amount of samples to use.
+    /// * `load` - The operation to use when this render pass begins.
+    /// * `store` - The operation to use when this render pass finishes.
+    /// * `final_layout` - The final layuout this attachment should be in when the render pass finished.
     pub fn color_attachment(
         mut self,
         format : vk::Format,
@@ -34,6 +82,16 @@ impl RenderPassCreateInfo {
         self
     }
 
+    /// Expresses a dependency between two subpasses.
+    /// 
+    /// Arguments
+    /// 
+    /// * `src_subpass` - The subpass that is about to finish.
+    /// * `dst_subpass` - The subpass that is about to begin.
+    /// * `src_stage_mask` -
+    /// * `dst_stage_mask` - 
+    /// * `src_access_flags` -
+    /// * `dst_access_flags` - 
     pub fn dependency(mut self,
         src_subpass : u32,
         dst_subpass : u32,
@@ -53,6 +111,14 @@ impl RenderPassCreateInfo {
         self
     }
 
+    /// Adds a depth attachment.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `format` - The format of this attachment.
+    /// * `samples` - The amount of samples to use.
+    /// * `load` - The operation to use when this render pass begins.
+    /// * `store` - The operation to use when this render pass finishes.
     pub fn depth_attachment(
         mut self,
         format : vk::Format,
@@ -64,6 +130,12 @@ impl RenderPassCreateInfo {
         self
     }
 
+    /// Adds a multisampling resolve attachment.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `format` - The format of this attachment.
+    /// * `final_layout` - The final layuout this attachment should be in when the render pass finished.
     pub fn resolve_attachment(
         mut self,
         format : vk::Format,
@@ -90,14 +162,21 @@ impl RenderPassCreateInfo {
             .final_layout(final_layout)
     }
 
+    /// Declares a new subpass.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `bind_point` - The pipeline type supported by this subpass.
+    /// * `color_attachments` - An array of indices mapping to the color attachments declared with [`Self::color_attachment`].
+    /// * `resolve_attachments` - An array of indices mapping to the resolve attachments declared with [`Self::resolve_attachment`].
+    /// * `depth_attachment` - An indice mapping to one of the color attachments declared with [`Self::depth_attachment`].
     pub fn subpass(
         mut self,
         bind_point : vk::PipelineBindPoint,
-        color_attachments : &[u32],
-        resolve_attachments : &[u32],
-        depth_attachment : Option<u32>
+        attachments : &[SubpassAttachmentIndex],
+        depth_attachment : SubpassAttachmentIndex
     ) -> Self {
-        self.subpasses.push((bind_point, color_attachments.to_vec(), resolve_attachments.to_vec(), depth_attachment));
+        self.subpasses.push((bind_point, attachments.to_vec(), depth_attachment));
         self
     }
 
@@ -162,16 +241,22 @@ impl RenderPassCreateInfo {
 
         // This exists because the mapped arrays need to exist outside of the loop to satisfy the borrow checker.
         let subpass_data = self.subpasses.into_iter().map(|tuple| {
-            let (bind_point, color_refs, resolve_refs, depth) = tuple;
+            let (bind_point, attachments, depth) = tuple;
 
-            let colors = color_refs.into_iter()
-                .map(|i| color_attachment_refs[i as usize])
-                .collect::<Vec<_>>();
-            let resolve = resolve_refs.into_iter()
-                .map(|i| resolve_attachment_refs[i as usize])
-                .collect::<Vec<_>>();
+            let mut colors = vec![];
+            let mut resolves = vec![];
 
-            (bind_point, colors, resolve, depth)
+            for attachment in &attachments {
+                let r#ref = match attachment {
+                    SubpassAttachmentIndex::Color(index) => colors.push(color_attachment_refs[*index as usize]),
+                    // Use depth as a color attachment?
+                    SubpassAttachmentIndex::Depth(index) => colors.push(depth_attachment_refs[*index as usize]),
+                    SubpassAttachmentIndex::Resolve(index) => resolves.push(resolve_attachment_refs[*index as usize]),
+                    SubpassAttachmentIndex::None => continue,
+                };
+            }
+
+            (bind_point, colors, resolves, depth)
         }).collect::<Vec<_>>();
 
         let mut subpasses = vec![];
@@ -181,8 +266,17 @@ impl RenderPassCreateInfo {
                 .color_attachments(&colors)
                 .resolve_attachments(&resolve);
 
-            if let Some(depth) = depth {
-                subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*depth as usize]);
+            match depth {
+                SubpassAttachmentIndex::Color(index) => {
+                    subpass_description = subpass_description.depth_stencil_attachment(&color_attachment_refs[*index as usize]);
+                },
+                SubpassAttachmentIndex::Depth(index) => {
+                    subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*index as usize]);
+                },
+                SubpassAttachmentIndex::Resolve(index) => {
+                    subpass_description = subpass_description.depth_stencil_attachment(&resolve_attachment_refs[*index as usize]);
+                },
+                SubpassAttachmentIndex::None => (),
             }
 
             subpasses.push(subpass_description);
@@ -216,40 +310,10 @@ impl Default for RenderPassCreateInfo {
     }
 }
 
-impl RenderPass {
-    pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
-        for &format in formats {
-            let properties = device.physical_device.get_format_properties(format);
-            if let Some(properties) = properties {
-                let supported = match tiling {
-                    vk::ImageTiling::LINEAR => properties.linear_tiling_features.contains(flags),
-                    vk::ImageTiling::OPTIMAL => properties.optimal_tiling_features.contains(flags),
-                    _ => panic!("Unsupported tiling mode")
-                };
-
-                if supported {
-                    return Some(format);
-                }
-            }
-        }
-
-        None
-    }
-
-    pub fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
-        Self {
-            device : device.clone(),
-            handle,
-        }
-    }
-}
-
-make_handle! { RenderPass, vk::RenderPass }
-
-impl Drop for RenderPass {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.handle().destroy_render_pass(self.handle, None);
-        }
-    }
+#[derive(Copy, Clone)]
+pub enum SubpassAttachmentIndex {
+    Color(u32),
+    Depth(u32),
+    Resolve(u32),
+    None
 }

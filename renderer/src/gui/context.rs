@@ -10,7 +10,7 @@ use crate::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayoutB
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::pipeline::layout::PipelineLayoutInfo;
 use crate::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
-use crate::vk::render_pass::{RenderPass, RenderPassCreateInfo};
+use crate::vk::render_pass::{RenderPass, RenderPassCreateInfo, SubpassAttachmentIndex};
 use crate::vk::renderer::Renderer;
 use crate::window::Window;
 
@@ -90,7 +90,9 @@ impl Interface {
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE
             )
-            .subpass(vk::PipelineBindPoint::GRAPHICS, &[0], &[], None)
+            .subpass(vk::PipelineBindPoint::GRAPHICS, &[
+                SubpassAttachmentIndex::Color(0)
+            ], SubpassAttachmentIndex::None)
             .build(&info.renderer.device);
 
         // Create a descriptor pool.
