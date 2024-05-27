@@ -86,13 +86,13 @@ impl Interface {
             None);
 
         // Create a render pass.
-        let render_pass = RenderPassCreateInfo::default()
+        let render_pass = RenderPass::builder()
             .color_attachment(
                 info.renderer.swapchain.surface_format.format,
                 vk::SampleCountFlags::TYPE_1,
-                vk::AttachmentLoadOp::DONT_CARE,
+                vk::AttachmentLoadOp::LOAD,
                 vk::AttachmentStoreOp::STORE,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                vk::ImageLayout::PRESENT_SRC_KHR
             )
             .dependency(
                 vk::SUBPASS_EXTERNAL,

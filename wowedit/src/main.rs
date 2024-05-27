@@ -40,9 +40,13 @@ impl Vertex for TerrainVertex {
         vec![
             vk::VertexInputAttributeDescription::default()
                 .format(vk::Format::R32G32_SFLOAT)
+                .binding(0)
+                .location(0)
                 .offset(offset_of!(TerrainVertex, pos) as u32),
             vk::VertexInputAttributeDescription::default()
                 .format(vk::Format::R32G32B32_SFLOAT)
+                .binding(0)
+                .location(1)
                 .offset(offset_of!(TerrainVertex, color) as u32),
         ]
     }

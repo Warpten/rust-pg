@@ -150,16 +150,18 @@ impl RenderPassCreateInfo {
     fn make_attachment_description(
         format : vk::Format,
         samples : vk::SampleCountFlags,
-        load : vk::AttachmentLoadOp,
-        store : vk::AttachmentStoreOp,
+        color_depth : (vk::AttachmentLoadOp, vk::AttachmentStoreOp),
+        stencil : (vk::AttachmentLoadOp, vk::AttachmentStoreOp),
         initial_layout : vk::ImageLayout,
         final_layout : vk::ImageLayout
     ) -> vk::AttachmentDescription {
         vk::AttachmentDescription::default()
             .format(format)
             .samples(samples)
-            .load_op(load)
-            .store_op(store)
+            .load_op(color_depth.0)
+            .store_op(color_depth.1)
+            .stencil_load_op(stencil.0)
+            .stencil_store_op(stencil.1)
             .initial_layout(initial_layout)
             .final_layout(final_layout)
     }
@@ -201,8 +203,8 @@ impl RenderPassCreateInfo {
             descs.push(Self::make_attachment_description(
                 format,
                 samples,
-                load,
-                store,
+                (load, store),
+                (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
                 vk::ImageLayout::UNDEFINED,
                 final_layout
             ));
@@ -219,8 +221,8 @@ impl RenderPassCreateInfo {
             descs.push(Self::make_attachment_description(
                 format,
                 samples,
-                load,
-                store,
+                (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
+                (load, store),
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
             ));
@@ -238,8 +240,8 @@ impl RenderPassCreateInfo {
             descs.push(Self::make_attachment_description(
                 format,
                 vk::SampleCountFlags::TYPE_1,
-                vk::AttachmentLoadOp::DONT_CARE,
-                vk::AttachmentStoreOp::STORE,
+                (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::STORE),
+                (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
                 vk::ImageLayout::UNDEFINED,
                 final_layout
             ));
