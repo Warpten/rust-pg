@@ -144,7 +144,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                             .build_one(&renderer.device);
 
                         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-                        cmd.begin_label("Transfer command buffer", [0.0; 4], || {
+                        cmd.label("Data upload to the GPU".to_owned(), [0.0; 4], || {
                             cmd.copy_buffer(&staging_buffer, &this, &[vk::BufferCopy::default()
                                 .size(size)
                             ]);

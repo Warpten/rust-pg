@@ -1,8 +1,8 @@
-use std::{ffi::{CStr, CString}, ops::Deref, sync::Arc};
+use std::{ffi::CString, sync::Arc};
 
 use ash::vk::{self, ClearValue};
 
-use crate::{traits::handle::Handle};
+use crate::traits::handle::Handle;
 
 use super::{buffer::Buffer, command_pool::CommandPool, framebuffer::Framebuffer, logical_device::LogicalDevice, pipeline::Pipeline, queue::Queue, render_pass::RenderPass};
 
@@ -17,7 +17,7 @@ impl CommandBuffer {
         CommandBufferBuilder { pool : vk::CommandPool::null(), level : vk::CommandBufferLevel::PRIMARY }
     }
 
-    pub fn begin_label(&self, label : &'static str, color : [f32; 4], cb : impl Fn()) {
+    pub fn label(&self, label : String, color : [f32; 4], cb : impl Fn()) {
         unsafe {
             if let Some(debug_utils) = &self.device.debug_utils {
                 let name = CString::new(label).unwrap();
@@ -49,6 +49,7 @@ impl CommandBuffer {
         }
     }
 
+    /// Begins recording this command buffer.
     pub fn begin(&self, flags : vk::CommandBufferUsageFlags) {
         unsafe {
             let begin_info = vk::CommandBufferBeginInfo::default()
@@ -60,8 +61,8 @@ impl CommandBuffer {
         }
     }
 
-    pub fn begin_render_pass(&self, render_pass : &RenderPass, framebuffer : &Framebuffer, render_area : vk::Rect2D, clear_values : &[ClearValue], contents : vk::SubpassContents)
-    {
+    /// Begins a new render pass.
+    pub fn begin_render_pass(&self, render_pass : &RenderPass, framebuffer : &Framebuffer, render_area : vk::Rect2D, clear_values : &[ClearValue], contents : vk::SubpassContents) {
         unsafe {
             let begin_info = vk::RenderPassBeginInfo::default()
                 .render_pass(render_pass.handle())
@@ -74,24 +75,55 @@ impl CommandBuffer {
         }
     }
 
+    /// Transitions to the next subpass of the current render pass.
+    pub fn next_subpass(&self, contents : vk::SubpassContents) {
+        unsafe {
+            self.device.handle().cmd_next_subpass(self.handle, contents);
+        }
+    }
+
+    /// Executes commands from a given array of command buffers.
+    pub fn execute_commands(&self, commands : &[CommandBuffer]) {
+        unsafe {
+            let handles = commands.iter()
+                .map(CommandBuffer::handle)
+                .collect::<Vec<_>>();
+
+            self.device.handle().cmd_execute_commands(self.handle, &handles);
+        }
+    }
+
+    /// Executes commands from a given command buffer.
+    pub fn execute_command(&self, command : &CommandBuffer) {
+        unsafe {
+            let handle = [command.handle()];
+
+            self.device.handle().cmd_execute_commands(self.handle, &handle);
+        }
+    }
+
+    /// Binds a pipeline object to this command buffer.
     pub fn bind_pipeline(&self, point : vk::PipelineBindPoint, pipeline : &Pipeline) {
         unsafe {
             self.device.handle().cmd_bind_pipeline(self.handle, point, pipeline.handle());
         }
     }
 
+    /// Sets the viewport dynamically for this command buffer.
     pub fn set_viewport(&self, first_viewport : u32, viewports : &[vk::Viewport]) {
         unsafe {
             self.device.handle().cmd_set_viewport(self.handle, first_viewport, viewports);
         }
     }
 
+    /// Sets the scissors dynamically for this command buffer.
     pub fn set_scissors(&self, first_scissor : u32, scissors : &[vk::Rect2D]) {
         unsafe {
             self.device.handle().cmd_set_scissor(self.handle, first_scissor, scissors);
         }
     }
 
+    /// Binds vertex buffers to this command buffer.
     pub fn bind_vertex_buffers(&self, first_binding : u32, buffers : &[&Buffer], offsets : &[vk::DeviceSize]) {
         let buffer_handles = buffers.iter()
             .map(|b| b.handle())
@@ -102,18 +134,21 @@ impl CommandBuffer {
         }
     }
     
+    /// Ends the current render pass.
     pub fn end_render_pass(&self) {
         unsafe {
             self.device.handle().cmd_end_render_pass(self.handle);
         }
     }
 
+    /// Draws primitives.
     pub fn draw(&self, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) {
         unsafe {
             self.device.handle().cmd_draw(self.handle, vertex_count, instance_count, first_vertex, first_instance)
         }
     }
 
+    /// Copies data between buffer regions.
     pub fn copy_buffer(&self, source : &Buffer, dest : &Buffer, regions : &[vk::BufferCopy]) {
         unsafe {
             self.device.handle().cmd_copy_buffer(self.handle, source.handle(), dest.handle(), regions);
@@ -131,6 +166,7 @@ impl CommandBuffer {
         self.device.submit(queue, &submit_infos, fence);
     }
 
+    /// Finishes recording this command buffer.
     pub fn end(&self) {
         unsafe {
             self.device.handle().end_command_buffer(self.handle)

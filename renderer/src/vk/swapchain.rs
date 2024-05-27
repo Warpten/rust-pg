@@ -59,7 +59,15 @@ pub trait SwapchainOptions {
     fn composite_alpha(&self) -> vk::CompositeAlphaFlagsKHR { vk::CompositeAlphaFlagsKHR::OPAQUE }
 
     /// Returns the presentation mode of this swapchain.
-    fn present_mode(&self) -> vk::PresentModeKHR;
+    fn select_present_mode(&self, modes : Vec<vk::PresentModeKHR>) -> vk::PresentModeKHR {
+        for present_mode in modes {
+            if present_mode == vk::PresentModeKHR::MAILBOX {
+                return present_mode;
+            }
+        }
+
+        vk::PresentModeKHR::FIFO
+    }
 
     /// Returns the amount of layers of each texture of this swapchain.
     /// By default, there is only one layer.
@@ -149,6 +157,11 @@ impl Swapchain {
             image_count
         };
 
+        let present_modes = unsafe {
+            surface.loader.get_physical_device_surface_present_modes(device.physical_device.handle(), surface.handle())
+                .expect("Failed to get physical device surface present modes")
+        };
+
         let queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
 
         let image_sharing_mode = if queue_family_indices.len() == 1 {
@@ -179,7 +192,7 @@ impl Swapchain {
             .composite_alpha(options.composite_alpha())
             // Presentation mode the swapchain will use. A swapchain’s present mode determines how incoming present
             // requests will be processed and queued internally.
-            .present_mode(vk::PresentModeKHR::FIFO)
+            .present_mode(options.select_present_mode(present_modes))
             // Specifies whether the Vulkan implementation is allowed to discard rendering operations that affect
             // regions of the surface that are not visible.
             .clipped(true);

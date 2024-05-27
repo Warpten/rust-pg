@@ -124,7 +124,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
 
     let (image_acquired, cmd) = app.renderer.begin_frame(&data.render_pass, &data.framebuffers[app.renderer.frame_index()])?;
 
-    cmd.begin_label("Draw frame", [1.0, 0.0, 0.0, 0.0], || {
+    cmd.label("Draw application frame".to_owned(), [1.0, 0.0, 0.0, 0.0], || {
         cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
         cmd.set_viewport(0, &[viewport]);
         cmd.set_scissors(0, &[scissors]);
