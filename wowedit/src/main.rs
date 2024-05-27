@@ -3,7 +3,7 @@ use std::mem::{offset_of, size_of};
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
 use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, BufferBuilder};
-use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
+use renderer::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayoutBuilder, PoolDescriptorCount};
 use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
@@ -65,8 +65,8 @@ fn setup(app : &mut Application) -> ApplicationData {
         .build(&app.renderer);
 
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
-        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
-        // .binding(1, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::ALL, 1)
+        // This is a workaround for an Intel driver crash.
+        .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, PoolDescriptorCount(1), BindingDescriptorCount(1))
         .build(&app.renderer);
 
     let pipeline_layout = PipelineLayoutInfo::default()
