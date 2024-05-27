@@ -59,7 +59,7 @@ pub struct RenderPassCreateInfo {
     resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
 
     dependencies : Vec<vk::SubpassDependency>,
-    subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachmentIndex>, SubpassAttachmentIndex)>,
+    subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachment>, SubpassAttachment)>,
 }
 
 impl RenderPassCreateInfo {
@@ -166,17 +166,27 @@ impl RenderPassCreateInfo {
 
     /// Declares a new subpass.
     /// 
+    /// # Description
+    /// 
+    /// This function provides the ability to declare subpasses on the current render pass along with their attachments.
+    /// It works by expecting an array of indices into the attachments registered via [`color_attachment`](Self::color_attachment),
+    /// [`depth_attachment`](Self::depth_attachment) or [`resolve_attachment`](Self::resolve_attachment). Each one of this indices
+    /// can then be interepreted as a color or resolve attachment for the subpass, allowing, for example, to alias the depth buffer
+    /// as a color texture for a specific render pass.
+    /// 
+    /// It also takes in a single index as a depth attachment. In this case, the attachment must be referenced as a
+    /// [`SubpassAttachment::depth`] attachment.
+    /// 
     /// # Arguments
     /// 
     /// * `bind_point` - The pipeline type supported by this subpass.
-    /// * `color_attachments` - An array of indices mapping to the color attachments declared with [`Self::color_attachment`].
-    /// * `resolve_attachments` - An array of indices mapping to the resolve attachments declared with [`Self::resolve_attachment`].
-    /// * `depth_attachment` - An indice mapping to one of the color attachments declared with [`Self::depth_attachment`].
+    /// * `attachments` - An array of indices mapping to the attachments of this render pass.
+    /// * `depth_attachment` - An indice mapping to one of the attachments of this render pass.
     pub fn subpass(
         mut self,
         bind_point : vk::PipelineBindPoint,
-        attachments : &[SubpassAttachmentIndex],
-        depth_attachment : SubpassAttachmentIndex
+        attachments : &[SubpassAttachment],
+        depth_attachment : SubpassAttachment
     ) -> Self {
         self.subpasses.push((bind_point, attachments.to_vec(), depth_attachment));
         self
@@ -250,11 +260,32 @@ impl RenderPassCreateInfo {
 
             for attachment in &attachments {
                 let r#ref = match attachment {
-                    SubpassAttachmentIndex::Color(index) => colors.push(color_attachment_refs[*index as usize]),
-                    // Use depth as a color attachment?
-                    SubpassAttachmentIndex::Depth(index) => colors.push(depth_attachment_refs[*index as usize]),
-                    SubpassAttachmentIndex::Resolve(index) => resolves.push(resolve_attachment_refs[*index as usize]),
-                    SubpassAttachmentIndex::None => continue,
+                    SubpassAttachment::Color(use_as, index) => {
+                        let target = match use_as {
+                            SubpassAttachmentUse::Color => &mut colors,
+                            SubpassAttachmentUse::Resolve => &mut resolves,
+                            _ => panic!("Unsupported attachment usage"),
+                        };
+                        
+                        target.push(color_attachment_refs[*index as usize])
+                    },
+                    SubpassAttachment::Depth(use_as, index) => {
+                        let target = match use_as {
+                            SubpassAttachmentUse::Color => &mut colors,
+                            SubpassAttachmentUse::Resolve => &mut resolves,
+                            _ => panic!("Unsupported attachment usage"),
+                        };
+                        target.push(depth_attachment_refs[*index as usize])
+                    },
+                    SubpassAttachment::Resolve(use_as, index) => {
+                        let target = match use_as {
+                            SubpassAttachmentUse::Color => &mut colors,
+                            SubpassAttachmentUse::Resolve => &mut resolves,
+                            _ => panic!("Unsupported attachment usage"),
+                        };
+                        target.push(resolve_attachment_refs[*index as usize])
+                    },
+                    SubpassAttachment::None => continue,
                 };
             }
 
@@ -269,16 +300,16 @@ impl RenderPassCreateInfo {
                 .resolve_attachments(&resolve);
 
             match depth {
-                SubpassAttachmentIndex::Color(index) => {
+                SubpassAttachment::Color(_, index) => {
                     subpass_description = subpass_description.depth_stencil_attachment(&color_attachment_refs[*index as usize]);
                 },
-                SubpassAttachmentIndex::Depth(index) => {
+                SubpassAttachment::Depth(_, index) => {
                     subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*index as usize]);
                 },
-                SubpassAttachmentIndex::Resolve(index) => {
+                SubpassAttachment::Resolve(_, index) => {
                     subpass_description = subpass_description.depth_stencil_attachment(&resolve_attachment_refs[*index as usize]);
                 },
-                SubpassAttachmentIndex::None => (),
+                SubpassAttachment::None => (),
             }
 
             subpasses.push(subpass_description);
@@ -313,9 +344,30 @@ impl Default for RenderPassCreateInfo {
 }
 
 #[derive(Copy, Clone)]
-pub enum SubpassAttachmentIndex {
-    Color(u32),
-    Depth(u32),
-    Resolve(u32),
+pub enum SubpassAttachmentUse {
+    Color,
+    Depth,
+    Resolve
+}
+
+#[derive(Copy, Clone)]
+pub enum SubpassAttachment {
+    Color(SubpassAttachmentUse, u32),
+    Depth(SubpassAttachmentUse, u32),
+    Resolve(SubpassAttachmentUse, u32),
     None
+}
+
+impl SubpassAttachment {
+    pub fn color(index : u32) -> Self {
+        Self::Color(SubpassAttachmentUse::Color, index)
+    }
+
+    pub fn depth(index : u32) -> Self {
+        Self::Depth(SubpassAttachmentUse::Depth, index)
+    }
+
+    pub fn resolve(index : u32) -> Self {
+        Self::Resolve(SubpassAttachmentUse::Resolve, index)
+    }
 }

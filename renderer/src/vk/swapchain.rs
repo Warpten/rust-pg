@@ -13,7 +13,7 @@ use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 
-use super::render_pass::{RenderPassCreateInfo, SubpassAttachmentIndex};
+use super::render_pass::{RenderPassCreateInfo, SubpassAttachment};
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
@@ -318,10 +318,10 @@ impl Swapchain {
             .subpass(
                 vk::PipelineBindPoint::GRAPHICS,
                 &[
-                    SubpassAttachmentIndex::Color(0),
-                    SubpassAttachmentIndex::Resolve(0)
+                    SubpassAttachment::color(0),
+                    SubpassAttachment::resolve(0)
                 ],
-                SubpassAttachmentIndex::None
+                SubpassAttachment::None
             )
             .build(&self.device)
     }
