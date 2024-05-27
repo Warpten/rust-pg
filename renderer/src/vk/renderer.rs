@@ -370,7 +370,6 @@ impl Renderer {
 /// 5. [`vk::PhysicalDeviceType::OTHER`]
 /// 
 /// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
-/// 
 fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &RendererOptions) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
     context.get_physical_devices(
         |left, right| {

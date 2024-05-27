@@ -22,7 +22,7 @@ pub trait Vertex {
     fn bindings() -> Vec<(u32, vk::VertexInputRate)>;
 
     /// Returns formats and offsets of elements in this vertex.
-    fn format_offset() -> Vec<(vk::Format, u32)>;
+    fn format_offset() -> Vec<vk::VertexInputAttributeDescription>;
 }
 
 pub struct PipelineInfo {
@@ -39,7 +39,7 @@ pub struct PipelineInfo {
     specialization_data: Vec<u8>,
     specialization_entries: Vec<vk::SpecializationMapEntry>,
 
-    vertex_format_offset : Vec<(vk::Format, u32)>,
+    vertex_format_offset : Vec<vk::VertexInputAttributeDescription>,
     vertex_bindings : Vec<(u32, vk::VertexInputRate)>,
     samples : vk::SampleCountFlags,
     pool : Option<Arc<PipelinePool>>,
@@ -206,18 +206,6 @@ impl Pipeline {
                 vk::DynamicState::SCISSOR
             ]);
 
-        let vertex_attributes = {
-            let mut descs = vec![];
-            for (i, tpl) in info.vertex_format_offset.iter().enumerate() {
-                descs.push(vk::VertexInputAttributeDescription::default()
-                    .binding(0) // ?
-                    .location(i as u32)
-                    .format(tpl.0)
-                    .offset(tpl.1)
-                );
-            }
-            descs
-        };
         let vertex_bindings = {
             let mut bindings = vec![];
             for (stride, rate) in &info.vertex_bindings {
@@ -230,7 +218,7 @@ impl Pipeline {
             bindings
         };
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_attribute_descriptions(&vertex_attributes)
+            .vertex_attribute_descriptions(&info.vertex_format_offset)
             .vertex_binding_descriptions(&vertex_bindings);
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()

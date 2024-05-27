@@ -36,10 +36,14 @@ impl Vertex for TerrainVertex {
         ]
     }
 
-    fn format_offset() -> Vec<(vk::Format, u32)> {
+    fn format_offset() -> Vec<vk::VertexInputAttributeDescription> {
         vec![
-            (vk::Format::R32G32_SFLOAT,    offset_of!(TerrainVertex, pos) as u32),
-            (vk::Format::R32G32B32_SFLOAT, offset_of!(TerrainVertex, color) as u32)
+            vk::VertexInputAttributeDescription::default()
+                .format(vk::Format::R32G32_SFLOAT)
+                .offset(offset_of!(TerrainVertex, pos) as u32),
+            vk::VertexInputAttributeDescription::default()
+                .format(vk::Format::R32G32B32_SFLOAT)
+                .offset(offset_of!(TerrainVertex, color) as u32),
         ]
     }
 }
@@ -66,7 +70,7 @@ fn setup(app : &mut Application) -> ApplicationData {
 
     let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
         // This is a workaround for an Intel driver crash.
-        .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, PoolDescriptorCount(1), BindingDescriptorCount(1))
+        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, PoolDescriptorCount(1), BindingDescriptorCount(1))
         .build(&app.renderer);
 
     let pipeline_layout = PipelineLayoutInfo::default()

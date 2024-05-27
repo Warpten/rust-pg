@@ -9,13 +9,15 @@ use crate::vk::queue::QueueFamily;
 pub struct CommandPool {
     handle : vk::CommandPool,
     device : Arc<LogicalDevice>,
-    pub family : u32,
+    family : u32,
 }
 
 impl CommandPool {
     pub fn builder(family : &QueueFamily) -> CommandPoolBuilder {
         CommandPoolBuilder::default(family)
     }
+
+    pub fn family(&self) -> u32 { self.family }
 
     pub fn device(&self) -> &LogicalDevice { &self.device }
 

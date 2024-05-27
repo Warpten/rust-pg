@@ -39,11 +39,23 @@ impl Vertex for InterfaceVertex {
     }
 
     // https://github.com/MatchaChoco010/egui-winit-ash-integration/blob/main/src/integration.rs#L179
-    fn format_offset() -> Vec<(vk::Format, u32)> {
+    fn format_offset() -> Vec<vk::VertexInputAttributeDescription> {
         vec![
-            (vk::Format::R32G32_SFLOAT, 0),
-            (vk::Format::R32G32_SFLOAT, 0),
-            (vk::Format::R8G8B8A8_SNORM, 0)
+            vk::VertexInputAttributeDescription::default() // Position
+                .binding(0)
+                .offset(0)
+                .location(0)
+                .format(vk::Format::R32G32_SFLOAT),
+            vk::VertexInputAttributeDescription::default() // UV
+                .binding(0)
+                .offset(8)
+                .location(1)
+                .format(vk::Format::R32G32_SFLOAT),
+            vk::VertexInputAttributeDescription::default() // Color
+                .binding(0)
+                .offset(16)
+                .location(2)
+                .format(vk::Format::R8G8B8A8_UNORM)
         ]
     }
 }

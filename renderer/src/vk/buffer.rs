@@ -134,7 +134,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                         staging_buffer.update(data);
 
                         // Get the transfer queue.
-                        let transfer_queue = renderer.device.get_queue(QueueAffinity::Transfer, renderer.transfer_pool.family)
+                        let transfer_queue = renderer.device.get_queue(QueueAffinity::Transfer, renderer.transfer_pool.family())
                             .expect("Failed to recover the transfer queue");
 
                         // Begin a command buffer.
