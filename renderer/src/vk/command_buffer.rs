@@ -178,13 +178,23 @@ impl CommandBuffer {
     }
 
     /// Binds vertex buffers to this command buffer.
-    pub fn bind_vertex_buffers(&self, first_binding : u32, buffers : &[&Buffer], offsets : &[vk::DeviceSize]) {
-        let buffer_handles = buffers.iter()
-            .map(|b| b.handle())
-            .collect::<Vec<_>>();
+    pub fn bind_vertex_buffers(&self, first_binding : u32, buffers : &[(&Buffer, vk::DeviceSize)]) {
+        let mut handles = Vec::<vk::Buffer>::with_capacity(buffers.len());
+        let mut offsets = Vec::<vk::DeviceSize>::with_capacity(buffers.len());
+        for (buffer, offset) in buffers {
+            handles.push(buffer.handle());
+            offsets.push(offset);
+        }
 
         unsafe {
-            self.device.handle().cmd_bind_vertex_buffers(self.handle, first_binding, &buffer_handles, offsets)
+            self.device.handle().cmd_bind_vertex_buffers(self.handle, first_binding, &handles, &offsets)
+        }
+    }
+
+    /// Binds an index buffer to this command buffer.
+    pub fn bind_index_buffer(&self, buffer : &Buffer, offset : vk::DeviceSize) {
+        unsafe {
+            self.device.handle().cmd_bind_index_buffer(self.handle, buffer.handle(), offset, buffer.index_type())
         }
     }
     
@@ -213,6 +223,21 @@ impl CommandBuffer {
     pub fn copy_buffer_to_image(&self, source : &Buffer, dest : &Image, dst_layout : vk::ImageLayout, regions : &[vk::BufferImageCopy]) {
         unsafe {
             self.device.handle().cmd_copy_buffer_to_image(self.handle, source.handle(), dest.handle(), dst_layout, regions);
+        }
+    }
+
+    /// Updates the values of push constants.
+    pub fn push_constants(&self, pipeline : &Pipeline, stage : vk::ShaderStageFlags, offset : u32, constants : &[u8]) {
+        unsafe {
+            self.device.handle()
+                .cmd_push_constants(self.handle, pipeline.layout(), stage, offset, constants);
+        }
+    }
+
+    pub fn bind_descriptor_sets(&self, point : vk::PipelineBindPoint, pipeline : &Pipeline, first_set : u32, descriptor_sets : &[vk::DescriptorSet], dynamic_offsets : &[u32]) {
+        unsafe {
+            self.device.handle()
+                .cmd_bind_descriptor_sets(self.handle, point, pipeline.layout(), first_set, descriptor_sets, dynamic_sets)
         }
     }
 

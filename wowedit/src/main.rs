@@ -2,8 +2,8 @@ use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
 use renderer::traits::handle::Handle;
-use renderer::vk::buffer::{Buffer, BufferBuilder, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder};
-use renderer::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayoutBuilder, PoolDescriptorCount};
+use renderer::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer};
+use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
 use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};

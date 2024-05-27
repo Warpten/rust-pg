@@ -174,9 +174,12 @@ pub struct Pipeline {
     device : Arc<LogicalDevice>,
     info : PipelineInfo,
     handle : vk::Pipeline,
+    layout : vk::PipelineLayout,
 }
 
 impl Pipeline {
+    #[inline] pub fn layout(&self) -> vk::PipelineLayout { &self.layout }
+
     pub(in self) fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
@@ -290,6 +293,7 @@ impl Pipeline {
             device : device.clone(),
             handle : pipelines[0],
             info,
+            layout,
         }
     }
 }

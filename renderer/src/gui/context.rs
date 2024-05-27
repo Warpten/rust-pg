@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 use std::sync::Arc;
 use ash::vk::{self};
-use egui::epaint::ImageDelta;
+use bytemuck::bytes_of;
+use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
 use raw_window_handle::HasDisplayHandle;
 use crate::traits::handle::Handle;
@@ -228,12 +229,13 @@ impl Interface {
 
     pub fn paint(&mut self,
         cmd : &CommandBuffer,
+        renderer : &Renderer,
         swapchain_image_index : usize,
         clipped_meshes : Vec<egui::ClippedPrimitive>,
         texture_delta : TexturesDelta
     ) {
-        /*for (id, image_delta) in texture_delta.set {
-            self.update_texture(id, image_delta);
+        for (id, image_delta) in texture_delta.set {
+            self.update_texture(renderer, id, image_delta);
         }
 
         let mut vertex_buffer = self.vertex_buffers[swapchain_image_index]
@@ -241,9 +243,7 @@ impl Interface {
         let mut index_buffer = self.index_buffers[swapchain_image_index]
             .map();
 
-        cmd.begin_render_pass(
-            &self.render_pass,
-            &self.framebuffers[swapchain_image_index], 
+        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[swapchain_image_index], 
             vk::Rect2D::default()
                 .offset(vk::Offset2D::default().x(0).y(0))
                 .extent(self.extent),
@@ -251,15 +251,9 @@ impl Interface {
             vk::SubpassContents::INLINE
         );
 
-        cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, self.pipeline)
-        cmd.bind_vertex_buffers(0,
-            &[&self.vertex_buffers[swapchain_image_index]],
-            &[0]
-        );
-        cmd.bind_index_buffers(0,
-            &[&self.index_buffers[swapchain_image_index]],
-            &[0]
-        );
+        cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
+        cmd.bind_vertex_buffers(0, &[(&self.vertex_buffers[swapchain_image_index], 0)]);
+        cmd.bind_index_buffer(&self.index_buffers[swapchain_image_index], 0);
         cmd.set_viewport(0, &[
             vk::Viewport::default()
                 .x(0.0)
@@ -273,16 +267,8 @@ impl Interface {
         let width_points = self.extent.width as f32 / self.scale_factor as f32;
         let height_points = self.extent.height as f32 / self.scale_factor as f32;
 
-        cmd.push_constants(&self.pipeline_layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            bytes_of(&width_points)
-        );
-        cmd.push_constants(&self.pipeline_layout,
-            vk::ShaderStageFlags::VERTEX,
-            size_of_val(width_points) as u32,
-            bytes_of(&height_points)
-        );
+        cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
+        cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
 
         // Render the meshes
         let mut vertex_base = 0;
@@ -299,21 +285,12 @@ impl Interface {
 
             if let egui::TextureId::User(user) = mesh.texture_id {
                 if let Some(descriptor) = self.user_textures[id as usize] {
-                    cmd.bind_descriptor_sets(
-                        vk::PipelineBindPoint::GRAPHICS,
-                        self.pipeline_layout,
-                        0,
-                        &[descriptor_set],
-                        &[]
-                    );
+                    cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0, &[descriptor_set], &[]);
                 } else {
                     continue;
                 }
             } else {
-                cmd.bind_descriptor_sets(
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
-                    0,
+                cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, self.pipeline.layout(), 0,
                     &[*self.texture_desc_sets.get(&mesh.texture_id).unwrap()],
                     &[]
                 );
@@ -326,7 +303,7 @@ impl Interface {
             let i_slice = &mesh.indices;
             let i_size = size_of_val(&i_slice[0]);
             let i_copy_size = i_slice.len() * i_size;
-        }*/
+        }
     }
     
     fn update_texture(&mut self, renderer : &Renderer, tex_id : TextureId, delta : ImageDelta) {

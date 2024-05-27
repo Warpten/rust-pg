@@ -232,6 +232,8 @@ impl Buffer {
                 .buffer(self.handle))
         }
     }
+
+    #[inline] pub fn index_type(&self) -> vk::IndexType { self.index_type }
 }
 
 impl Drop for Buffer {
