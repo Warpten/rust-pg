@@ -31,7 +31,7 @@ impl DescriptorSetLayoutBuilder {
     value_builder! { sets, count, sets, u32 }
     value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
-    pub fn build(mut self, renderer : &Renderer) -> DescriptorSetLayout {
+    pub fn build(self, renderer : &Renderer) -> DescriptorSetLayout {
         DescriptorSetLayout::new(&renderer.device, self)
     }
 }

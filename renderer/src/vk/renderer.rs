@@ -4,19 +4,18 @@ use ash::vk::{self, ClearValue};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, vulkan::{Allocator, AllocatorCreateDesc}};
 use nohash_hasher::IntMap;
 
-use crate::{application::ApplicationRenderError, graph::{self, Graph}, traits::{self, handle::Handle}, window::Window};
+use crate::{application::ApplicationRenderError, traits::handle::Handle, window::Window};
 use crate::vk::frame_data::FrameData;
+use crate::vk::{command_buffer::CommandBuffer, command_pool::CommandPool};
 use crate::vk::context::Context;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::pipeline::pool::PipelinePool;
-use crate::vk::queue::{Queue, QueueAffinity, QueueFamily};
+use crate::vk::queue::{QueueAffinity, QueueFamily};
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 use crate::vk::swapchain::{Swapchain, SwapchainOptions};
-
-use super::{command_buffer::{CommandBuffer, CommandBufferBuilder}, command_pool::CommandPool};
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {

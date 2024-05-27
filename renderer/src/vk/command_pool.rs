@@ -19,22 +19,6 @@ impl CommandPool {
 
     pub fn device(&self) -> &LogicalDevice { &self.device }
 
-    pub(in crate) fn rent_one(&self, level : vk::CommandBufferLevel) -> vk::CommandBuffer {
-        self.rent(level, 1)[0]
-    }
-
-    pub(in crate) fn rent(&self, level : vk::CommandBufferLevel, count : u32) -> Vec<vk::CommandBuffer> {
-        let options = vk::CommandBufferAllocateInfo::default()
-            .command_pool(self.handle)
-            .level(level)
-            .command_buffer_count(count);
-
-        unsafe {
-            self.device.handle().allocate_command_buffers(&options)
-                .expect("Failed to allocate command buffers")
-        }
-    }
-
     /// Resets this command pool.
     /// 
     /// # Arguments

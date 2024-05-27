@@ -123,7 +123,6 @@ impl PhysicalDevice {
             queues_objs,
             physical_device_features2.features,
             IndexingFeatures::new(physical_device_descriptor_indexing_features),
-            surface
         ))
     }
 

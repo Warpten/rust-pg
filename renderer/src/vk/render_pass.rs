@@ -1,11 +1,9 @@
-use std::ops::Sub;
 use std::sync::Arc;
 
 use ash::vk;
 
 use crate::make_handle;
 use crate::traits::handle::Handle;
-use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
 
 pub struct RenderPass {
@@ -14,6 +12,10 @@ pub struct RenderPass {
 }
 
 impl RenderPass {
+    pub fn builder() -> RenderPassCreateInfo {
+        RenderPassCreateInfo::default()
+    }
+
     pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
         for &format in formats {
             let properties = device.physical_device.get_format_properties(format);
@@ -33,7 +35,7 @@ impl RenderPass {
         None
     }
 
-    pub fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
+    pub(in crate) fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
         Self {
             device : device.clone(),
             handle,

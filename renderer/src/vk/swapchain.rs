@@ -303,19 +303,6 @@ impl Swapchain {
         let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
         let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
 
-        let color_images = match self.present_images.get(0) {
-            Some(image) => vec![image],
-            None => vec![]
-        };
-        let depth_images = match self.depth_images.get(0) {
-            Some(image) => vec![image],
-            None => vec![]
-        };
-        let resolve_images = match self.resolve_images.get(0) {
-            Some(image) => vec![image],
-            None => vec![]
-        };
-
         RenderPassCreateInfo::default()
             .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)

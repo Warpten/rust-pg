@@ -7,7 +7,6 @@ use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::queue::{Queue, QueueAffinity};
-use crate::vk::surface::Surface;
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
@@ -37,7 +36,6 @@ impl LogicalDevice {
         queues : Vec<Queue>,
         features : vk::PhysicalDeviceFeatures,
         indexing_features : IndexingFeatures,
-        surface : &Arc<Surface>,
     )  -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
             instance: context.handle().clone(),

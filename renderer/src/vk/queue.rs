@@ -4,8 +4,7 @@ use ash::vk;
 use bitmask_enum::bitmask;
 
 use crate::{make_handle, traits};
-use crate::{traits::handle::Handle, vk::command_pool::CommandPool};
-use crate::vk::logical_device::LogicalDevice;
+use crate::traits::handle::Handle;
 use crate::vk::surface::Surface;
 
 /// A logical queue associated with a logical device.
