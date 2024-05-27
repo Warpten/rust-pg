@@ -30,7 +30,7 @@ impl Image { // Construction
     /// * `levels` - Number of levels of detail available for minified sampling of the image.
     /// * `layers` - 
     pub fn new(
-        name : &'static str,
+        name : String,
         device : &Arc<LogicalDevice>,
         create_info : vk::ImageCreateInfo,
         aspect_mask : vk::ImageAspectFlags,
@@ -40,6 +40,7 @@ impl Image { // Construction
             device.handle().create_image(&create_info, None)
                 .expect("Creating the image failed")
         };
+        device.set_handle_name(image, &name);
 
         let requirements = unsafe { device.handle().get_image_memory_requirements(image) };
 
@@ -47,7 +48,7 @@ impl Image { // Construction
             .lock()
             .expect("Failed to obtain allocator")
             .allocate(&AllocationCreateDesc {
-                name,
+                name : name.as_str(),
                 requirements,
                 location: gpu_allocator::MemoryLocation::GpuOnly,
                 linear: false,
@@ -86,7 +87,10 @@ impl Image { // Construction
     }
 
     pub fn from_swapchain(extent: &vk::Extent2D, device: &Arc<LogicalDevice>, format: vk::Format, images: Vec<vk::Image>) -> Vec<Image> {
+        let mut index = 0;
         images.iter().map(|&image| {
+            device.set_handle_name(image, &format!("Swapchain/Image #{}", index));
+
             unsafe {
                 let image_view_info = vk::ImageViewCreateInfo::default()
                     .view_type(vk::ImageViewType::TYPE_2D)
@@ -111,6 +115,10 @@ impl Image { // Construction
                     .create_image_view(&image_view_info, None)
                     .expect("Failed to create an image view on the swapchain image");
 
+                device.set_handle_name(image_view, &format!("Swapchain/ImageView #{}", index));
+
+                index += 1;
+
                 Self {
                     device: device.clone(),
                     handle: image,
@@ -127,6 +135,7 @@ impl Image { // Construction
                     layers : 1,
                 }
             }
+            
         }).collect::<Vec<_>>()
     }
 }

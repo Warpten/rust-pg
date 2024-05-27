@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::{ffi::CStr, fs};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -64,6 +65,10 @@ impl Shader {
                 .unwrap()
         };
 
+        if let Some(path) = path.to_str() {
+            device.set_handle_name(module, &path.to_owned());
+        }
+        
         Self {
             device : device.clone(),
             module,

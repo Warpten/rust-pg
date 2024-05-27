@@ -169,8 +169,6 @@ impl Renderer {
             swapchain_queue_families,
         );
 
-        logical_device.set_handle_name(swapchain.handle(), "Renderer swapchain");
-
         let frames = {
             let mut frames = Vec::<FrameData>::new();
 

@@ -93,7 +93,7 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                 .expect("Buffer creation failed");
             
             if !self.name.is_empty() {
-                renderer.device.set_handle_name(buffer, self.name.to_owned());
+                renderer.device.set_handle_name(buffer, &self.name.to_owned());
             }
 
             let requirements = renderer.device.handle().get_buffer_memory_requirements(buffer);
@@ -144,9 +144,11 @@ impl<'a, T : Sized + Copy> BufferBuilder<'a, T> {
                             .build_one(&renderer.device);
 
                         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-                        cmd.copy_buffer(&staging_buffer, &this, &[vk::BufferCopy::default()
-                            .size(size)
-                        ]);
+                        cmd.begin_label("Transfer command buffer", [0.0; 4], || {
+                            cmd.copy_buffer(&staging_buffer, &this, &[vk::BufferCopy::default()
+                                .size(size)
+                            ]);
+                        });
                         cmd.end();
                         cmd.submit_to_queue(transfer_queue, vk::Fence::null());
 

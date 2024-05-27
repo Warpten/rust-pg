@@ -294,8 +294,8 @@ impl Pipeline {
                 .expect("Creating a graphics pipeline failed")
         };
 
-        if let Some(name) = &info.name {
-            device.set_handle_name(pipelines[0], name.to_owned());
+        if let Some(name) = info.name {
+            device.set_handle_name(pipelines[0], &name.to_owned());
         }
 
         Self {

@@ -17,7 +17,7 @@ pub struct LogicalDevice {
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
 
     // Device-level debug utilities
-    debug_utils : Option<debug_utils::Device>,
+    pub(in crate) debug_utils : Option<debug_utils::Device>,
 
     // All queues
     pub queues : Vec<Queue>,
@@ -69,9 +69,9 @@ impl LogicalDevice {
     /// 
     /// * `handle` - A handle to the object to name.
     /// * `name` - The name to assign to that object.
-    pub(in crate) fn set_handle_name<T : vk::Handle, S : Into<String>>(&self, handle : T, name : S) {
+    pub(in crate) fn set_handle_name<T : vk::Handle>(&self, handle : T, name : &String) {
         if let Some(debug_utils) = &self.debug_utils {
-            let cname = CString::new(Into::<String>::into(name)).unwrap();
+            let cname = CString::new(&name[..]).unwrap();
 
             let marker_info = vk::DebugUtilsObjectNameInfoEXT::default()
                 .object_name(cname.as_c_str())
@@ -89,8 +89,8 @@ impl LogicalDevice {
     /// 
     /// * `nameable` - An object that exposes a handle.
     /// * `name` - The name to assign to that handle.
-    pub fn set_name<T, U, S>(&self, nameable : &T, name : S)
-        where T : Handle<U>, U : vk::Handle, S : Into<String> 
+    pub fn set_name<T, U>(&self, nameable : &T, name : &String)
+        where T : Handle<U>, U : vk::Handle
     {
         self.set_handle_name(nameable.handle(), name);
     }

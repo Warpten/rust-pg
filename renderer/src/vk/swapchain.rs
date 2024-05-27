@@ -218,8 +218,8 @@ impl Swapchain {
                 depth_aspect_flags |= vk::ImageAspectFlags::STENCIL;
             }
 
-            for _ in 0..present_images.len() {
-                depth_images.push(Image::new("Swapchain Depth Stencil",
+            for i in 0..present_images.len() {
+                depth_images.push(Image::new(format!("Swapchain/DepthStencil #{}", i),
                     device,
                     vk::ImageCreateInfo::default()
                         .image_type(vk::ImageType::TYPE_2D)
@@ -244,8 +244,8 @@ impl Swapchain {
         let resolve_images = {
             let mut resolve_images = Vec::<Image>::new();
             if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
-                for _ in 0..present_images.len() {
-                    resolve_images.push(Image::new("Swapchain Multisampling Resolve",
+                for i in 0..present_images.len() {
+                    resolve_images.push(Image::new(format!("Swapchain/Resolve #{}", i).to_owned(),
                         device,
                         vk::ImageCreateInfo::default()
                             .image_type(vk::ImageType::TYPE_2D)

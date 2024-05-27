@@ -124,11 +124,13 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
 
     let (image_acquired, cmd) = app.renderer.begin_frame(&data.render_pass, &data.framebuffers[app.renderer.frame_index()])?;
 
-    cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
-    cmd.set_viewport(0, &[viewport]);
-    cmd.set_scissors(0, &[scissors]);
-    cmd.bind_vertex_buffers(0, &[&data.buffer], &[0]);
-    cmd.draw(data.buffer.element_count(), 1, 0, 0);
+    cmd.begin_label("Draw frame", [1.0, 0.0, 0.0, 0.0], || {
+        cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
+        cmd.set_viewport(0, &[viewport]);
+        cmd.set_scissors(0, &[scissors]);
+        cmd.bind_vertex_buffers(0, &[&data.buffer], &[0]);
+        cmd.draw(data.buffer.element_count(), 1, 0, 0);
+    });
 
     app.renderer.end_frame(image_acquired, cmd)
 }

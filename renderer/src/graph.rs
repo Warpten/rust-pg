@@ -236,7 +236,7 @@ impl TextureState<'_> {
 
             let aspect_mask = Image::derive_aspect_flags(to, create_info.format);
 
-            self.handle = Image::new(self.texture_info.name(),
+            self.handle = Image::new(self.texture_info.name().to_owned(),
                 &self.device,
                 create_info,
                 aspect_mask).into();

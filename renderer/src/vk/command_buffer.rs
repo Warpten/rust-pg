@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ffi::{CStr, CString}, ops::Deref, sync::Arc};
 
 use ash::vk::{self, ClearValue};
 
@@ -15,6 +15,38 @@ pub struct CommandBuffer {
 impl CommandBuffer {
     pub fn builder() -> CommandBufferBuilder {
         CommandBufferBuilder { pool : vk::CommandPool::null(), level : vk::CommandBufferLevel::PRIMARY }
+    }
+
+    pub fn begin_label(&self, label : &'static str, color : [f32; 4], cb : impl Fn()) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                let name = CString::new(label).unwrap();
+
+                let info = vk::DebugUtilsLabelEXT::default()
+                    .label_name(name.as_c_str())
+                    .color(color);
+
+                debug_utils.cmd_begin_debug_utils_label(self.handle, &info);
+                cb();
+                debug_utils.cmd_end_debug_utils_label(self.handle);
+            } else {
+                cb();
+            }
+        }
+    }
+
+    pub fn insert_label(&self, label : &'static str, color : [f32; 4]) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                let name = CString::new(label).unwrap();
+
+                let info = vk::DebugUtilsLabelEXT::default()
+                    .label_name(name.as_c_str())
+                    .color(color);
+
+                debug_utils.cmd_insert_debug_utils_label(self.handle, &info);
+            }
+        }
     }
 
     pub fn begin(&self, flags : vk::CommandBufferUsageFlags) {
