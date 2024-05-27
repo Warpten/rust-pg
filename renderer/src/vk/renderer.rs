@@ -100,8 +100,6 @@ impl SwapchainOptions for RendererOptions {
     fn width(&self) -> u32 { self.resolution[0] }
     fn height(&self) -> u32 { self.resolution[1] }
 
-    fn present_mode(&self) -> vk::PresentModeKHR { vk::PresentModeKHR::MAILBOX }
-
     fn depth(&self) -> bool { self.depth }
     fn stencil(&self) -> bool { self.stencil }
     fn multisampling(&self) -> vk::SampleCountFlags { self.multisampling }
