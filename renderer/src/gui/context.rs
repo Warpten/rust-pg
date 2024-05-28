@@ -112,7 +112,7 @@ impl Interface {
             ViewportId::ROOT,
             target,
             Some(info.pixel_per_point),
-            None);
+            Some(info.renderer.device.physical_device.properties.limits.max_image_dimension2_d as usize));
 
         // Create a render pass.
         let render_pass = RenderPass::builder()
@@ -290,7 +290,7 @@ impl Interface {
                     continue;
                 }
             } else {
-                cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, self.pipeline.layout(), 0,
+                cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
                     &[*self.texture_desc_sets.get(&mesh.texture_id).unwrap()],
                     &[]
                 );

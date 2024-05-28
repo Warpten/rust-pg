@@ -14,7 +14,7 @@ pub struct PhysicalDevice {
     handle : vk::PhysicalDevice,
     context : Weak<Context>,
     memory_properties : vk::PhysicalDeviceMemoryProperties,
-    properties : vk::PhysicalDeviceProperties,
+    pub properties : vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
 }
 
