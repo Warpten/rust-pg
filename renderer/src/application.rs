@@ -149,7 +149,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 pub struct Application {
     pub context : Arc<Context>,
     pub renderer : Renderer,
-    window : Window,
+    pub window : Window,
 }
 
 impl Application {

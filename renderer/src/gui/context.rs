@@ -5,7 +5,8 @@ use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
-use raw_window_handle::HasDisplayHandle;
+use nohash_hasher::IntMap;
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
@@ -40,11 +41,13 @@ pub struct Interface {
     descriptor_set_layout : DescriptorSetLayout,
 
     extent : vk::Extent2D,
+    pixel_per_point : f32,
 
     vertex_buffers : Vec<Buffer>,
     index_buffers : Vec<Buffer>,
+    sampler : Sampler,
 
-    textures : HashMap<TextureId, Texture>,
+    textures : HashMap<TextureId, Texture>
 }
 
 struct InterfaceVertex;
@@ -79,22 +82,28 @@ impl Vertex for InterfaceVertex {
     }
 }
 
-struct InterfaceCreateInfo<'a> {
+pub struct InterfaceCreateInfo<'a> {
     fonts : FontDefinitions,
     style : Style,
     pixel_per_point : f32,
 
     renderer : &'a Renderer,
+}
 
-    // GUI-specific pipeline stuff
-    render_pass : RenderPass,
-    descriptor_set_layout : DescriptorSetLayout,
-    pipeline : Pipeline,
+impl InterfaceCreateInfo<'_> {
+    pub fn new(renderer : &Renderer, pixel_per_point : f32) -> Self {
+        InterfaceCreateInfo {
+            fonts : FontDefinitions::empty(),
+            style : todo!(),
+            pixel_per_point,
 
-    framebuffers : Vec<Framebuffer>,
-    vertex_buffers : Vec<Buffer>,
-    index_buffers : Vec<Buffer>,
-    sampler : Sampler,
+            renderer,
+        }
+    }
+
+    pub fn build<H : HasDisplayHandle>(self, window : &H) -> Interface {
+        Interface::new(self, window)
+    }
 }
 
 impl Interface {
@@ -207,6 +216,9 @@ impl Interface {
             framebuffers,
             vertex_buffers,
             index_buffers,
+            sampler,
+
+            pixel_per_point : info.pixel_per_point,
 
             extent : info.renderer.swapchain.extent,
             device : info.renderer.device.clone(),
@@ -238,10 +250,8 @@ impl Interface {
             self.update_texture(renderer, id, image_delta);
         }
 
-        let mut vertex_buffer = self.vertex_buffers[swapchain_image_index]
-            .map();
-        let mut index_buffer = self.index_buffers[swapchain_image_index]
-            .map();
+        let mut vertex_buffer = self.vertex_buffers[swapchain_image_index].map();
+        let mut index_buffer = self.index_buffers[swapchain_image_index].map();
 
         cmd.begin_render_pass(&self.render_pass, &self.framebuffers[swapchain_image_index], 
             vk::Rect2D::default()
@@ -250,7 +260,6 @@ impl Interface {
             &[],
             vk::SubpassContents::INLINE
         );
-
         cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
         cmd.bind_vertex_buffers(0, &[(&self.vertex_buffers[swapchain_image_index], 0)]);
         cmd.bind_index_buffer(&self.index_buffers[swapchain_image_index], 0);
@@ -264,9 +273,8 @@ impl Interface {
                 .height(self.extent.height as f32)
         ]);
 
-        let width_points = self.extent.width as f32 / self.scale_factor as f32;
-        let height_points = self.extent.height as f32 / self.scale_factor as f32;
-
+        let width_points = self.extent.width as f32 / self.pixel_per_point as f32;
+        let height_points = self.extent.height as f32 / self.pixel_per_point as f32;
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
 
@@ -283,15 +291,10 @@ impl Interface {
                 continue;
             }
 
-            if let egui::TextureId::User(user) = mesh.texture_id {
-                if let Some(descriptor) = self.user_textures[id as usize] {
-                    cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0, &[descriptor_set], &[]);
-                } else {
-                    continue;
-                }
-            } else {
+            let texture_info = self.textures.get(&mesh.texture_id);
+            if let Some(desc) = texture_info.map(|t| t.descriptor_set) {
                 cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
-                    &[*self.texture_desc_sets.get(&mesh.texture_id).unwrap()],
+                    &[desc],
                     &[]
                 );
             }
@@ -303,6 +306,27 @@ impl Interface {
             let i_slice = &mesh.indices;
             let i_size = size_of_val(&i_slice[0]);
             let i_copy_size = i_slice.len() * i_size;
+
+            unsafe {
+                vertex_buffer.copy_from(v_slice.as_ptr() as *const u8, v_copy_size);
+                index_buffer.copy_from(i_slice.as_ptr() as *const u8, i_copy_size);
+                vertex_buffer = vertex_buffer.add(v_copy_size);
+                index_buffer = index_buffer.add(i_copy_size);
+            }
+
+            // Record draw commands
+            cmd.set_scissors(0, &[
+                vk::Rect2D::default()
+                    .offset(vk::Offset2D::default()
+                        .x(min.x.round() as i32)
+                        .y(min.y.round() as i32)
+                    )
+                    .extent(vk::Extent2D::default()
+                        .width((max.x - min.x).round() as i32)
+                        .height((max.y - min.y).round() as i32)
+                    )
+            ]);
+            cmd.draw_indexed(mesh.indices.len(), 1, index_base, vertex_base);
         }
     }
     
@@ -433,7 +457,7 @@ impl Interface {
                 // ??? What's going on ???
             }
         } else {
-            self.textures.insert(tex_id, Texture {
+            self.user_textures.insert(tex_id, Texture {
                 image,
                 descriptor_set : todo!("Descriptor set")
             });

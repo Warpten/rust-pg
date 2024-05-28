@@ -1,6 +1,7 @@
 use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
+use renderer::gui::context::Interface;
 use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer};
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
@@ -17,6 +18,8 @@ mod casc;
 mod rendering;
 
 pub struct ApplicationData {
+    gui : Interface,
+
     pipeline : Pipeline,
     buffer : Buffer,
     render_pass: RenderPass,
@@ -101,7 +104,10 @@ fn setup(app : &mut Application) -> ApplicationData {
         pipeline,
         buffer,
         render_pass,
-        framebuffers
+        framebuffers,
+
+        gui : InterfaceCreateInfo::new(&app.renderer, 1.0)
+            .build(app.window)
     }
 }
 
@@ -142,7 +148,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
-    // Handle keyboard events, etc
+    app.gui.handle_event(&event);
 }
 
 fn main() {
