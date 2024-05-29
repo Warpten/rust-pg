@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::slice;
 use std::sync::Arc;
 use ash::vk;
 use nohash_hasher::IntMap;
@@ -6,42 +7,29 @@ use nohash_hasher::IntMap;
 use crate::make_handle;
 use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::renderer::Renderer;
-
-pub struct PoolDescriptorCount(pub u32);
-pub struct BindingDescriptorCount(pub u32);
 
 /// Facililates creating instances of [`DescriptorSetLayout`].
 pub struct DescriptorSetLayoutBuilder {
-    pub(in self) bindings : IntMap<u32, (vk::DescriptorType, vk::ShaderStageFlags, PoolDescriptorCount, BindingDescriptorCount)>,
+    pub(in self) bindings : IntMap<u32, (vk::DescriptorType, vk::ShaderStageFlags, u32)>,
     pub(in self) flags : vk::DescriptorSetLayoutCreateFlags,
+    pub(in self) pool_flags : vk::DescriptorPoolCreateFlags,
     pub(in self) sets : u32,
 }
 
 impl DescriptorSetLayoutBuilder {
     #[inline] pub fn binding(mut self, binding : u32, descriptor_type : vk::DescriptorType, stage : vk::ShaderStageFlags,
-        pool_descriptor_count : PoolDescriptorCount,
-        binding_descriptor_count : BindingDescriptorCount
+        binding_descriptor_count : u32
     ) -> Self {
-        self.bindings.insert(binding, (descriptor_type, stage, pool_descriptor_count, binding_descriptor_count));
+        self.bindings.insert(binding, (descriptor_type, stage, binding_descriptor_count));
         self
     }
 
+    value_builder! { pool_flags, vk::DescriptorPoolCreateFlags }
     value_builder! { sets, count, sets, u32 }
     value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
-    pub fn build(self, renderer : &Renderer) -> DescriptorSetLayout {
-        DescriptorSetLayout::new(&renderer.device, self)
-    }
-}
-
-impl Default for DescriptorSetLayoutBuilder {
-    fn default() -> Self {
-        Self {
-            sets: 64,
-            bindings : IntMap::default(),
-            flags : vk::DescriptorSetLayoutCreateFlags::empty(),
-        }
+    pub fn build(self, device : &Arc<LogicalDevice>) -> Arc<DescriptorSetLayout> {
+        DescriptorSetLayout::new(device, self)
     }
 }
 
@@ -62,22 +50,31 @@ pub struct DescriptorSetLayout {
 }
 
 impl DescriptorSetLayout {
-    pub(in self) fn new(device : &Arc<LogicalDevice>, info : DescriptorSetLayoutBuilder) -> Self {
+    pub fn builder() -> DescriptorSetLayoutBuilder {
+        DescriptorSetLayoutBuilder {
+            sets: 64,
+            bindings : IntMap::default(),
+            flags : vk::DescriptorSetLayoutCreateFlags::empty(),
+            pool_flags : vk::DescriptorPoolCreateFlags::empty(),
+        }
+    }
+
+    pub(in self) fn new(device : &Arc<LogicalDevice>, info : DescriptorSetLayoutBuilder) -> Arc<Self> {
         let binding_count = info.bindings.len();
         let mut bindings = Vec::<vk::DescriptorSetLayoutBinding>::with_capacity(binding_count);
         let mut pool_sizes = Vec::<vk::DescriptorPoolSize>::with_capacity(binding_count);
 
-        for (binding, (descriptor_type, stage_flags, pool_descriptor_count, binding_descriptor_count)) in &info.bindings {
+        for (binding, (descriptor_type, stage_flags, binding_descriptor_count)) in &info.bindings {
             bindings.push(vk::DescriptorSetLayoutBinding::default()
                 .binding(*binding)
                 .descriptor_type(*descriptor_type)
                 .stage_flags(*stage_flags)
-                .descriptor_count(binding_descriptor_count.0)
+                .descriptor_count(*binding_descriptor_count)
             );
 
             pool_sizes.push(vk::DescriptorPoolSize::default()
                 .ty(*descriptor_type)
-                .descriptor_count(pool_descriptor_count.0)
+                .descriptor_count(*binding_descriptor_count * info.sets)
             );
         }
 
@@ -99,13 +96,13 @@ impl DescriptorSetLayout {
                 .create_descriptor_pool(&pool_create_info, None)
                 .expect("Descriptor pool creation failed");
 
-            Self {
+            Arc::new(Self {
                 device : device.clone(),
                 layout,
                 pool,
                 info,
                 sets : HashMap::new(),
-            }
+            })
         }
     }
 
@@ -159,6 +156,16 @@ impl DescriptorSetLayout {
         unsafe {
             self.device.handle()
                 .update_descriptor_sets(&write_sets, &[]);
+        }
+    }
+
+    pub fn forget(&mut self, set : vk::DescriptorSet) {
+        self.device.wait_idle();
+
+        unsafe {
+            self.device.handle()
+                .free_descriptor_sets(self.pool, slice::from_ref(&set))
+                .expect("Failed to free a descriptor set");
         }
     }
 

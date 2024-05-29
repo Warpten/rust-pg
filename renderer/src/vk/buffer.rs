@@ -126,7 +126,7 @@ impl DynamicInitializer for BufferBuilder<DynamicInitializerTag> {
 }
 
 impl<T> BufferBuilder<T> {
-    value_builder! { sharing_mode, vk::SharindMode }
+    value_builder! { sharing_mode, vk::SharingMode }
     value_builder! { name, name, &'static str }
     value_builder! { index, index_type, vk::IndexType }
     value_builder! { linear, linear, bool }

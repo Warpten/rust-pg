@@ -287,7 +287,6 @@ impl RenderPassCreateInfo {
                         };
                         target.push(resolve_attachment_refs[*index as usize])
                     },
-                    SubpassAttachment::None => continue,
                 };
             }
 
@@ -300,18 +299,19 @@ impl RenderPassCreateInfo {
                 .pipeline_bind_point(*bind_point)
                 .color_attachments(&colors)
                 .resolve_attachments(&resolve);
-
-            match depth {
-                SubpassAttachment::Color(_, index) => {
-                    subpass_description = subpass_description.depth_stencil_attachment(&color_attachment_refs[*index as usize]);
-                },
-                SubpassAttachment::Depth(_, index) => {
-                    subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*index as usize]);
-                },
-                SubpassAttachment::Resolve(_, index) => {
-                    subpass_description = subpass_description.depth_stencil_attachment(&resolve_attachment_refs[*index as usize]);
-                },
-                SubpassAttachment::None => (),
+            
+            if let Some(depth) = depth {
+                match depth {
+                    SubpassAttachment::Color(_, index) => {
+                        subpass_description = subpass_description.depth_stencil_attachment(&color_attachment_refs[*index as usize]);
+                    },
+                    SubpassAttachment::Depth(_, index) => {
+                        subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*index as usize]);
+                    },
+                    SubpassAttachment::Resolve(_, index) => {
+                        subpass_description = subpass_description.depth_stencil_attachment(&resolve_attachment_refs[*index as usize]);
+                    },
+                }
             }
 
             subpasses.push(subpass_description);
@@ -357,7 +357,6 @@ pub enum SubpassAttachment {
     Color(SubpassAttachmentUse, u32),
     Depth(SubpassAttachmentUse, u32),
     Resolve(SubpassAttachmentUse, u32),
-    None
 }
 
 impl SubpassAttachment {

@@ -319,7 +319,7 @@ impl Swapchain {
                     SubpassAttachment::color(0),
                     SubpassAttachment::resolve(0)
                 ],
-                SubpassAttachment::None
+                None
             )
             .build(&self.device)
     }

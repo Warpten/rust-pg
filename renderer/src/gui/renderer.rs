@@ -1,4 +1,4 @@
-use ash::{vk, Device};
+use ash::vk;
 use bytemuck::bytes_of;
 use egui_winit::winit;
 use std::fmt::Debug;
@@ -14,9 +14,11 @@ use std::{
 };
 
 use crate::traits::handle::Handle;
-use crate::vk::buffer::{Buffer, BufferBuilder, StaticInitializer};
+use crate::vk::buffer::{Buffer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
 use crate::vk::command_pool::CommandPool;
+use crate::vk::descriptor::layout::DescriptorSetLayout;
+use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::image::{Image, ImageCreateInfo};
 use crate::vk::logical_device::LogicalDevice;
@@ -52,11 +54,11 @@ impl ViewportRendererState {
 #[derive(Clone)]
 struct ViewportRenderer {
     device: Arc<LogicalDevice>,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_set_layout: Arc<DescriptorSetLayout>,
     state: Arc<Mutex<Option<ViewportRendererState>>>,
 }
 impl ViewportRenderer {
-    fn new(device: Arc<LogicalDevice>, descriptor_set_layout: vk::DescriptorSetLayout) -> Self {
+    fn new(device: Arc<LogicalDevice>, descriptor_set_layout: Arc<DescriptorSetLayout>) -> Self {
         Self {
             device,
             descriptor_set_layout,
@@ -86,8 +88,9 @@ impl ViewportRenderer {
             .build(device)
     }
 
-    fn create_pipeline_layout(device: &Arc<LogicalDevice>, descriptor_set_layout: vk::DescriptorSetLayout) -> PipelineLayout {
+    fn create_pipeline_layout(device: &Arc<LogicalDevice>, descriptor_set_layout: &Arc<DescriptorSetLayout>) -> PipelineLayout {
         PipelineLayoutInfo::default()
+            .layout(descriptor_set_layout.as_ref())
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
@@ -168,12 +171,12 @@ impl ViewportRenderer {
         let mut buffers = vec![];
         for _ in 0..swapchain_count {
             buffers.push((
-                BufferBuilder::fixed_size()
+                StaticBufferBuilder::fixed_size()
                     .cpu_to_gpu()
                     .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .build(device, Self::vertex_buffer_size()),
-                BufferBuilder::fixed_size()
+                StaticBufferBuilder::fixed_size()
                     .cpu_to_gpu()
                     .usage(vk::BufferUsageFlags::INDEX_BUFFER)
                     .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -204,7 +207,7 @@ impl ViewportRenderer {
                 (state.render_pass, state.pipeline_layout, state.pipeline)
             } else {
                 let render_pass = Self::create_render_pass(&self.device, surface_format);
-                let pipeline_layout = Self::create_pipeline_layout(&self.device, self.descriptor_set_layout);
+                let pipeline_layout = Self::create_pipeline_layout(&self.device, &self.descriptor_set_layout);
                 let pipeline = Self::create_pipeline(&self.device, &render_pass, &pipeline_layout);
                 (render_pass, pipeline_layout, pipeline)
             }
@@ -441,8 +444,7 @@ impl ViewportRenderer {
 struct ManagedTextures {
     device: Arc<LogicalDevice>,
     queue: Queue,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_set_layout: Arc<DescriptorSetLayout>,
     sampler: Sampler,
 
     transfer_command_pool : CommandPool,
@@ -451,13 +453,9 @@ struct ManagedTextures {
     texture_desc_sets: HashMap<egui::TextureId, vk::DescriptorSet>,
     texture_images: HashMap<egui::TextureId, Image>,
 }
+
 impl ManagedTextures {
-    fn new(
-        device: Arc<LogicalDevice>,
-        queue: Queue,
-        descriptor_pool: vk::DescriptorPool,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-    ) -> Arc<Mutex<Self>> {
+    fn new(device: Arc<LogicalDevice>, queue: Queue, descriptor_set_layout : Arc<DescriptorSetLayout>) -> Arc<Mutex<Self>> {
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .anisotropy(false)
@@ -472,7 +470,6 @@ impl ManagedTextures {
 
             device,
             queue,
-            descriptor_pool,
             descriptor_set_layout,
             sampler,
             texture_desc_sets: HashMap::new(),
@@ -489,9 +486,8 @@ impl ManagedTextures {
                     image.pixels.len(),
                     "Mismatch between texture size and texel count"
                 );
-                image
-                    .pixels
-                    .iter()
+
+                image.pixels.iter()
                     .flat_map(|color| color.to_array())
                     .collect()
             }
@@ -506,15 +502,15 @@ impl ManagedTextures {
             .level(vk::CommandBufferLevel::PRIMARY)
             .build_one(&self.device);
 
-        let mut staging_buffer = BufferBuilder::fixed_size()
+        let mut staging_buffer = StaticBufferBuilder::fixed_size()
+            .name("GUI/Image Staging Buffer")
             .cpu_to_gpu()
             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
-            .name("GUI/Image Staging Buffer")
             .build(&self.device, data.len() as u64);
 
         staging_buffer.update(&data);
         
-        let texture_image = ImageCreateInfo::default()
+        let mut texture_image = ImageCreateInfo::default()
             .color()
             .extent(vk::Extent3D {
                 width: delta.image.width() as u32,
@@ -572,7 +568,7 @@ impl ManagedTextures {
 
         if let Some(pos) = delta.pos {
             // Blit texture data to existing texture if delta pos exists (e.g. font changed)
-            let existing_texture = self.texture_images.get(&texture_id);
+            let existing_texture = self.texture_images.get_mut(&texture_id);
             if let Some(existing_texture) = existing_texture {
                 let extent = vk::Extent3D {
                     width: delta.image.width() as u32,
@@ -584,17 +580,18 @@ impl ManagedTextures {
                     self.device.reset_fences(&[self.transfer_fence]);
 
                     cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-                    cmd.image_memory_barrier(&mut existing_texture, 
+                    cmd.image_memory_barrier(existing_texture, // Update the target image to a TRANSFER_DST layout
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::SHADER_READ,    vk::PipelineStageFlags::FRAGMENT_SHADER),
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
                         vk::DependencyFlags::BY_REGION,
-                        vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-                        
-                    cmd.image_memory_barrier(&mut texture_image, 
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL
+                    );    
+                    cmd.image_memory_barrier(&mut texture_image, // And the source to a TRANSFER_SRC layout
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::SHADER_READ,   vk::PipelineStageFlags::FRAGMENT_SHADER),
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::TRANSFER_READ, vk::PipelineStageFlags::TRANSFER),
                         vk::DependencyFlags::BY_REGION,
-                        vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+                        vk::ImageLayout::TRANSFER_SRC_OPTIMAL
+                    );
 
                     let top_left = vk::Offset3D {
                         x: pos[0] as i32,
@@ -608,12 +605,7 @@ impl ManagedTextures {
                     };
 
                     let region = vk::ImageBlit {
-                        src_subresource: vk::ImageSubresourceLayers {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            mip_level: 0,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
+                        src_subresource: texture_image.make_subresource_layer(0),
                         src_offsets: [
                             vk::Offset3D { x: 0, y: 0, z: 0 },
                             vk::Offset3D {
@@ -622,17 +614,12 @@ impl ManagedTextures {
                                 z: extent.depth as i32,
                             },
                         ],
-                        dst_subresource: vk::ImageSubresourceLayers {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            mip_level: 0,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
+                        dst_subresource: existing_texture.make_subresource_layer(0),
                         dst_offsets: [top_left, bottom_right],
                     };
-                    cmd.blit_image(&texture_image, &mut existing_texture, &[region], vk::Filter::NEAREST);
+                    cmd.blit_image(&texture_image, existing_texture, &[region], vk::Filter::NEAREST);
 
-                    cmd.image_memory_barrier(&mut existing_texture, 
+                    cmd.image_memory_barrier(existing_texture, 
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::TRANSFER_WRITE, vk::PipelineStageFlags::TRANSFER),
                         BarrierPhase(vk::QUEUE_FAMILY_IGNORED, vk::AccessFlags::SHADER_READ,    vk::PipelineStageFlags::FRAGMENT_SHADER),
                         vk::DependencyFlags::BY_REGION,
@@ -647,37 +634,16 @@ impl ManagedTextures {
             }
         } else {
             // Otherwise save the newly created texture
+            let dsc_set = self.descriptor_set_layout.request(DescriptorSetInfo::default()
+                .images(0, vec![
+                    vk::DescriptorImageInfo {
+                        sampler: self.sampler.handle(),
+                        image_view: texture_image_view,
+                        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+                    }
+                ])
+            );
 
-            // update dsc set
-            let dsc_set = {
-                unsafe {
-                    self.device
-                        .allocate_descriptor_sets(
-                            &vk::DescriptorSetAllocateInfo::builder()
-                                .descriptor_pool(self.descriptor_pool)
-                                .set_layouts(&[self.descriptor_set_layout]),
-                        )
-                        .unwrap()[0]
-                }
-            };
-            unsafe {
-                self.device.update_descriptor_sets(
-                    std::slice::from_ref(
-                        &vk::WriteDescriptorSet::builder()
-                            .dst_set(dsc_set)
-                            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .dst_array_element(0_u32)
-                            .dst_binding(0_u32)
-                            .image_info(std::slice::from_ref(
-                                &vk::DescriptorImageInfo::builder()
-                                    .image_view(texture_image_view)
-                                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                                    .sampler(self.sampler),
-                            )),
-                    ),
-                    &[],
-                );
-            }
             // Replace the old texture; this drops the associated Vulkan resources.
             self.texture_images.insert(texture_id, texture_image);
             self.texture_desc_sets.insert(texture_id, dsc_set);
@@ -754,23 +720,20 @@ pub(crate) enum RegistryCommand {
 
 struct UserTextures {
     device: Arc<LogicalDevice>,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_set_layout: Arc<DescriptorSetLayout>,
     texture_desc_sets: HashMap<u64, vk::DescriptorSet>,
     receiver: ImageRegistryReceiver,
 }
 impl UserTextures {
     fn new(
         device: Arc<LogicalDevice>,
-        descriptor_pool: vk::DescriptorPool,
-        descriptor_set_layout: vk::DescriptorSetLayout,
+        descriptor_set_layout: Arc<DescriptorSetLayout>,
         receiver: ImageRegistryReceiver,
     ) -> Arc<Mutex<Self>> {
         let texture_desc_sets = HashMap::new();
 
         Arc::new(Mutex::new(Self {
             device,
-            descriptor_pool,
             descriptor_set_layout,
             texture_desc_sets,
             receiver,
@@ -778,50 +741,19 @@ impl UserTextures {
     }
 
     fn register_user_texture(&mut self, id: u64, image_view: vk::ImageView, sampler: vk::Sampler) {
-        let dsc_set = {
-            unsafe {
-                self.texture_desc_sets.insert(
-                    id,
-                    self.device
-                        .allocate_descriptor_sets(
-                            &vk::DescriptorSetAllocateInfo::builder()
-                                .descriptor_pool(self.descriptor_pool)
-                                .set_layouts(&[self.descriptor_set_layout]),
-                        )
-                        .expect("Failed to allocate descriptor set")[0],
-                );
-            }
-            self.texture_desc_sets.get(&id).unwrap()
-        };
-        unsafe {
-            self.device.update_descriptor_sets(
-                std::slice::from_ref(
-                    &vk::WriteDescriptorSet::builder()
-                        .dst_set(*dsc_set)
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .dst_array_element(0_u32)
-                        .dst_binding(0_u32)
-                        .image_info(std::slice::from_ref(
-                            &vk::DescriptorImageInfo::builder()
-                                .image_view(image_view)
-                                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                                .sampler(sampler),
-                        )),
-                ),
-                &[],
-            );
-        }
+        let dsc_set = self.descriptor_set_layout.request(DescriptorSetInfo::default()
+            .images(0, vec![
+                vk::DescriptorImageInfo::default()
+                    .sampler(sampler)
+                    .image_view(image_view)
+                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            ])
+        );
     }
 
     fn unregister_user_texture(&mut self, id: u64) {
         if let Some(desc_set) = self.texture_desc_sets.remove(&id) {
-            unsafe {
-                self.device.wait_idle();
-
-                self.device
-                    .free_descriptor_sets(self.descriptor_pool, &[desc_set])
-                    .expect("Failed to free descriptor set.");
-            }
+            self.descriptor_set_layout.forget(desc_set);
         }
     }
 
@@ -833,20 +765,12 @@ impl UserTextures {
                     sampler,
                     id,
                 } => match id {
-                    egui::TextureId::Managed(_) => {
-                        panic!("This texture id is not for user texture: {:?}", id)
-                    }
-                    egui::TextureId::User(id) => {
-                        self.register_user_texture(id, image_view, sampler);
-                    }
+                    egui::TextureId::Managed(_) => panic!("This texture id is not for user texture: {:?}", id),
+                    egui::TextureId::User(id) => self.register_user_texture(id, image_view, sampler),
                 },
                 RegistryCommand::UnregisterUserTexture { id } => match id {
-                    egui::TextureId::Managed(_) => {
-                        panic!("This texture id is not for user texture: {:?}", id)
-                    }
-                    egui::TextureId::User(id) => {
-                        self.unregister_user_texture(id);
-                    }
+                    egui::TextureId::Managed(_) => panic!("This texture id is not for user texture: {:?}", id),
+                    egui::TextureId::User(id) => self.unregister_user_texture(id),
                 },
             }
         }
@@ -855,71 +779,33 @@ impl UserTextures {
 
 pub(crate) struct Renderer {
     device: Arc<LogicalDevice>,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_set_layout: Arc<DescriptorSetLayout>,
     viewport_renderers: HashMap<egui::ViewportId, ViewportRenderer>,
 
     managed_textures: Arc<Mutex<ManagedTextures>>,
     user_textures: Arc<Mutex<UserTextures>>,
 }
 impl Renderer {
-    fn create_descriptor_pool(device: &Device) -> vk::DescriptorPool {
-        unsafe {
-            device.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::builder()
-                    .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
-                    .max_sets(1024)
-                    .pool_sizes(std::slice::from_ref(
-                        &vk::DescriptorPoolSize::builder()
-                            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                            .descriptor_count(1024),
-                    )),
-                None,
-            )
-        }
-        .expect("Failed to create descriptor pool.")
-    }
-
-    fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
-        unsafe {
-            device.create_descriptor_set_layout(
-                &vk::DescriptorSetLayoutCreateInfo::builder().bindings(std::slice::from_ref(
-                    &vk::DescriptorSetLayoutBinding::builder()
-                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                        .descriptor_count(1)
-                        .binding(0)
-                        .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                )),
-                None,
-            )
-        }
-        .expect("Failed to create descriptor set layout.")
+    fn create_descriptor_set_layout(device: &Arc<LogicalDevice>) -> Arc<DescriptorSetLayout> {
+        DescriptorSetLayout::builder()
+            .sets(1024)
+            .pool_flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
+            .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
+            .build(device)
     }
 
     pub(crate) fn new(
         device: &Arc<LogicalDevice>,
-        queue: &Queue,
+        queue: Queue,
         receiver: Receiver<RegistryCommand>,
     ) -> Arc<Mutex<Self>> {
-        let descriptor_pool = Self::create_descriptor_pool(&device);
         let descriptor_set_layout = Self::create_descriptor_set_layout(&device);
         Arc::new(Mutex::new(Self {
             device: device.clone(),
-            descriptor_pool,
             descriptor_set_layout,
             viewport_renderers: HashMap::new(),
-            managed_textures: ManagedTextures::new(
-                device.clone(),
-                queue,
-                descriptor_pool,
-                descriptor_set_layout
-            ),
-            user_textures: UserTextures::new(
-                device.clone(),
-                descriptor_pool,
-                descriptor_set_layout,
-                receiver,
-            ),
+            managed_textures: ManagedTextures::new(device.clone(), queue, descriptor_set_layout.clone()),
+            user_textures: UserTextures::new(device.clone(), descriptor_set_layout, receiver),
         }))
     }
 
@@ -935,11 +821,7 @@ impl Renderer {
             .viewport_renderers
             .entry(viewport_id)
             .or_insert_with(|| {
-                ViewportRenderer::new(
-                    self.device.clone(),
-                    self.descriptor_set_layout,
-                    self.allocator.clone(),
-                )
+                ViewportRenderer::new(self.device.clone(), self.descriptor_set_layout)
             });
         viewport_renderer.create_egui_cmd(
             clipped_primitives,
@@ -961,32 +843,7 @@ impl Renderer {
             .collect::<Vec<_>>();
 
         for id in remove_viewports {
-            if let Some(mut viewport_renderer) = self.viewport_renderers.remove(&id) {
-                viewport_renderer.destroy();
-            }
-        }
-    }
-
-    pub(crate) fn destroy_root(&mut self) {
-        // wait device idle
-        unsafe {
-            self.device
-                .device_wait_idle()
-                .expect("Failed to wait device idle")
-        };
-
-        self.managed_textures
-            .lock()
-            .unwrap()
-            .destroy(&self.device, &self.allocator);
-        for (_, mut viewport_renderer) in self.viewport_renderers.drain() {
-            viewport_renderer.destroy();
-        }
-        unsafe {
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
+            self.viewport_renderers.remove(&id);
         }
     }
 }
@@ -1013,7 +870,7 @@ impl EguiCommand {
     /// and when you recreate swapchain.
     pub fn update_swapchain(&mut self, info: SwapchainUpdateInfo) {
         (self.swapchain_updater.take().expect(
-            "The swapchain has been updated more than once. Always update swapchain more than once.",
+            "The swapchain has been updated more than once. Never update the swapchain more than once.",
         ))(info);
     }
 
