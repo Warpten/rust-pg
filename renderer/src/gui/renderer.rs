@@ -143,7 +143,6 @@ impl ViewportRenderer {
         device: &Arc<LogicalDevice>,
         swap_images: &[Image],
         render_pass: &RenderPass,
-        surface_format: vk::Format,
         width: u32,
         height: u32,
     ) -> (Vec<Framebuffer>, Vec<vk::ImageView>) {
@@ -218,7 +217,6 @@ impl ViewportRenderer {
             &self.device,
             swapchain_images,
             &render_pass,
-            surface_format,
             width,
             height,
         );
@@ -541,12 +539,7 @@ impl ManagedTextures {
                 .buffer_offset(0)
                 .buffer_row_length(delta.image.width() as u32)
                 .buffer_image_height(delta.image.height() as u32)
-                .image_subresource(vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                    mip_level: 0,
-                })
+                .image_subresource(texture_image.make_subresource_layer(0, None, None))
                 .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
                 .image_extent(vk::Extent3D {
                     width: delta.image.width() as u32,
@@ -605,7 +598,7 @@ impl ManagedTextures {
                     };
 
                     let region = vk::ImageBlit {
-                        src_subresource: texture_image.make_subresource_layer(0),
+                        src_subresource: texture_image.make_subresource_layer(0, None, None),
                         src_offsets: [
                             vk::Offset3D { x: 0, y: 0, z: 0 },
                             vk::Offset3D {
@@ -614,7 +607,7 @@ impl ManagedTextures {
                                 z: extent.depth as i32,
                             },
                         ],
-                        dst_subresource: existing_texture.make_subresource_layer(0),
+                        dst_subresource: existing_texture.make_subresource_layer(0, None, None),
                         dst_offsets: [top_left, bottom_right],
                     };
                     cmd.blit_image(&texture_image, existing_texture, &[region], vk::Filter::NEAREST);
