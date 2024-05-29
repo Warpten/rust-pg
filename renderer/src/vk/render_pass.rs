@@ -53,12 +53,12 @@ impl Drop for RenderPass {
 }
 
 pub struct RenderPassCreateInfo {
-    color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout)>,
+    color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout, vk::ImageLayout)>,
     depth_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp)>,
     resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
 
     dependencies : Vec<vk::SubpassDependency>,
-    subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachment>, SubpassAttachment)>,
+    subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachment>, Option<SubpassAttachment>)>,
 }
 
 impl RenderPassCreateInfo {
@@ -77,9 +77,10 @@ impl RenderPassCreateInfo {
         samples : vk::SampleCountFlags,
         load : vk::AttachmentLoadOp,
         store : vk::AttachmentStoreOp,
+        initial_layout : vk::ImageLayout,
         final_layout : vk::ImageLayout
     ) -> Self {
-        self.color_images.push((format, samples, load, store, final_layout));
+        self.color_images.push((format, samples, load, store, initial_layout, final_layout));
         self
     }
 
@@ -187,7 +188,7 @@ impl RenderPassCreateInfo {
         mut self,
         bind_point : vk::PipelineBindPoint,
         attachments : &[SubpassAttachment],
-        depth_attachment : SubpassAttachment
+        depth_attachment : Option<SubpassAttachment>
     ) -> Self {
         self.subpasses.push((bind_point, attachments.to_vec(), depth_attachment));
         self
@@ -198,13 +199,13 @@ impl RenderPassCreateInfo {
 
         let mut attachment_index = 0;
         let mut color_attachment_refs = Vec::<vk::AttachmentReference>::new();
-        for (format, samples, load, store, final_layout) in self.color_images {
+        for (format, samples, load, store, initial_layout, final_layout) in self.color_images {
             descs.push(Self::make_attachment_description(
                 format,
                 samples,
                 (load, store),
                 (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
-                vk::ImageLayout::UNDEFINED,
+                initial_layout,
                 final_layout
             ));
             color_attachment_refs.push(vk::AttachmentReference::default()

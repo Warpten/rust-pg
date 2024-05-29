@@ -15,3 +15,4 @@ enumflags2 = "0.7.9"
 renderer = { path = "../renderer" }
 winit = "^0.29.4" # Synchronize this with whatever egui-winit depends on
 ash = { workspace = true }
+egui = { workspace = true }

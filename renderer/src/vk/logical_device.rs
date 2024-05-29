@@ -165,6 +165,13 @@ impl LogicalDevice {
                 .expect("Waiting for the fence failed");
         }
     }
+    
+    pub fn reset_fences(&self, fences : &[vk::Fence]) {
+        unsafe {
+            self.handle.reset_fences(fences)
+                .expect("Failed to reset fences");
+        }
+    }
 }
 
 impl LogicalDevice {

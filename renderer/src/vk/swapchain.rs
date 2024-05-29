@@ -302,7 +302,7 @@ impl Swapchain {
         let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
 
         RenderPassCreateInfo::default()
-            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
             .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
             .dependency(

@@ -174,11 +174,10 @@ pub struct Pipeline {
     device : Arc<LogicalDevice>,
     info : PipelineInfo,
     handle : vk::Pipeline,
-    layout : vk::PipelineLayout,
 }
 
 impl Pipeline {
-    #[inline] pub fn layout(&self) -> vk::PipelineLayout { &self.layout }
+    #[inline] pub fn layout(&self) -> vk::PipelineLayout { self.info.layout }
 
     pub(in self) fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
@@ -293,7 +292,6 @@ impl Pipeline {
             device : device.clone(),
             handle : pipelines[0],
             info,
-            layout,
         }
     }
 }

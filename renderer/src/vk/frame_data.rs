@@ -5,6 +5,7 @@ use crate::vk::command_pool::CommandPool;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::semaphore_pool::SemaphorePool;
 
+use super::command_buffer::CommandBuffer;
 use super::queue::QueueAffinity;
 
 pub struct FrameData {
@@ -32,6 +33,13 @@ impl FrameData {
                         .build(device)
                 }),
         }
+    }
+
+    pub fn make_command_buffer(&self, level : vk::CommandBufferLevel) -> CommandBuffer {
+        CommandBuffer::builder()
+            .level(level)
+            .pool(self.graphics_command_pool.as_ref().unwrap())
+            .build_one(&self.device)
     }
 }
 

@@ -17,6 +17,8 @@ use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 use crate::vk::swapchain::{Swapchain, SwapchainOptions};
 
+use super::{image, render_pass};
+
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DynamicState<T> {
     Fixed(T),

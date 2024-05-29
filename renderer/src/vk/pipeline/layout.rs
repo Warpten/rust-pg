@@ -20,11 +20,6 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn layouts(mut self, layouts : &[vk::DescriptorSetLayout]) -> Self {
-        self.descriptor_sets.extend_from_slice(layouts);
-        self
-    }
-
     pub fn push_constant(mut self, constant : vk::PushConstantRange) -> Self {
         self.push_constants.push(constant);
         self
@@ -35,18 +30,18 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn build(self, renderer : &Renderer) -> PipelineLayout {
+    pub fn build(self, device : &Arc<LogicalDevice>) -> PipelineLayout {
         let create_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&self.descriptor_sets)
             .push_constant_ranges(&self.push_constants);
 
         unsafe {
-            let layout = renderer.device.handle()
+            let layout = device.handle()
                 .create_pipeline_layout(&create_info, None)
                 .expect("Pipeline layout creation failed");
 
             PipelineLayout {
-                device : renderer.device.clone(),
+                device : device.clone(),
                 layout,
                 info : self
             }

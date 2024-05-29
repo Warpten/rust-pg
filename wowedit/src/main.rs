@@ -1,7 +1,7 @@
 use std::mem::{offset_of, size_of};
 
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
-use renderer::gui::context::Interface;
+use renderer::gui::context::{Interface, InterfaceCreateInfo};
 use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer};
 use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
@@ -106,8 +106,7 @@ fn setup(app : &mut Application) -> ApplicationData {
         render_pass,
         framebuffers,
 
-        gui : InterfaceCreateInfo::new(&app.renderer, 1.0)
-            .build(app.window)
+        gui : InterfaceCreateInfo::new(&app.renderer).build(&app.window)
     }
 }
 
@@ -140,21 +139,26 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
         cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
         cmd.set_viewport(0, &[viewport]);
         cmd.set_scissors(0, &[scissors]);
-        cmd.bind_vertex_buffers(0, &[&data.buffer], &[0]);
+        cmd.bind_vertex_buffers(0, &[(&data.buffer, 0)]);
         cmd.draw(data.buffer.element_count(), 1, 0, 0);
     });
 
     app.renderer.end_frame(image_acquired, &cmd)
 }
 
+pub fn ui(app: &mut Application, data: &mut ApplicationData, ctx : &egui::Context) {
+    
+}
+
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
-    app.gui.handle_event(&event);
+    _ = data.gui.handle_event(&event, &app.window);
 }
 
 fn main() {
     Application::build(setup)
         .prepare(prepare)
         .render(render)
+        .ui(ui)
         .window_event(window_event)
         .run();
 }

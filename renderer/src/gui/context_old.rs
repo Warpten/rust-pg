@@ -5,6 +5,8 @@ use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
+use egui_winit::winit::event::WindowEvent;
+use egui_winit::EventResponse;
 use nohash_hasher::IntMap;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use crate::traits::handle::Handle;
@@ -27,21 +29,32 @@ use crate::window::Window;
 // A GUI texture.
 struct Texture {
     image : Image,
-    descriptor_set : DescriptorSetInfo
+}
+
+impl Texture {
+    pub fn descriptor_set(&self, sampler : &Sampler) -> DescriptorSetInfo {
+        DescriptorSetInfo::default()
+            .images(0, vec![
+                vk::DescriptorImageInfo::default()
+                    .image_layout(self.image.layout())
+                    .sampler(sampler.handle())
+                    .image_view(self.image.view())
+            ])
+    }
 }
 
 pub struct Interface {
-    context : Context,
+    pub context : Context,
     egui : egui_winit::State,
 
     device : Arc<LogicalDevice>,
     render_pass : RenderPass,
     pipeline : Pipeline,
     framebuffers : Vec<Framebuffer>,
-    descriptor_set_layout : DescriptorSetLayout,
+    descriptor_set_layouts : Vec<DescriptorSetLayout>,
 
     extent : vk::Extent2D,
-    pixel_per_point : f32,
+    scale_factor : f64,
 
     vertex_buffers : Vec<Buffer>,
     index_buffers : Vec<Buffer>,
@@ -85,51 +98,46 @@ impl Vertex for InterfaceVertex {
 pub struct InterfaceCreateInfo<'a> {
     fonts : FontDefinitions,
     style : Style,
-    pixel_per_point : f32,
 
     renderer : &'a Renderer,
 }
 
 impl InterfaceCreateInfo<'_> {
-    pub fn new(renderer : &Renderer, pixel_per_point : f32) -> Self {
+    pub fn new<'a>(renderer : &'a Renderer) -> InterfaceCreateInfo<'a> {
         InterfaceCreateInfo {
             fonts : FontDefinitions::empty(),
-            style : todo!(),
-            pixel_per_point,
+            style : Style::default(),
 
             renderer,
         }
     }
 
-    pub fn build<H : HasDisplayHandle>(self, window : &H) -> Interface {
+    pub fn build(self, window : &Window) -> Interface {
         Interface::new(self, window)
     }
 }
 
 impl Interface {
-    pub(in crate) fn new<H>(
-        info : InterfaceCreateInfo,
-        target : &H
-    ) -> Self
-        where H : HasDisplayHandle
-    {
+    pub(in crate) fn new(info : InterfaceCreateInfo, target : &Window) -> Self {
         let context = Context::default();
         context.set_fonts(info.fonts);
         context.set_style(info.style);
 
-        let mut egui = egui_winit::State::new(context.clone(),
+        let egui = egui_winit::State::new(context.clone(),
             ViewportId::ROOT,
-            target,
-            Some(info.pixel_per_point),
+            target.handle(),
+            Some(target.handle().scale_factor() as f32),
             Some(info.renderer.device.physical_device.properties.limits.max_image_dimension2_d as usize));
 
         // Create a render pass.
-        let render_pass = RenderPass::builder()
+        let render_pass = info.renderer.swapchain.create_render_pass();
+         /*RenderPass::builder()
             .color_attachment(
                 info.renderer.swapchain.surface_format.format,
                 vk::SampleCountFlags::TYPE_1,
                 vk::AttachmentLoadOp::LOAD,
                 vk::AttachmentStoreOp::STORE,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR
             )
             .dependency(
@@ -143,16 +151,18 @@ impl Interface {
             .subpass(vk::PipelineBindPoint::GRAPHICS, &[
                 SubpassAttachment::color(0)
             ], SubpassAttachment::None)
-            .build(&info.renderer.device);
+            .build(&info.renderer.device);*/
 
         // Create a descriptor pool.
-        let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
-            .sets(1024)
-            .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, PoolDescriptorCount(1024), BindingDescriptorCount(1))
-            .build(&info.renderer);
+        let descriptor_set_layouts = (0..info.renderer.swapchain.image_count()).map(|_|
+            DescriptorSetLayoutBuilder::default()
+                .sets(1024)
+                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, PoolDescriptorCount(1024), BindingDescriptorCount(1))
+                .build(&info.renderer)
+        ).collect::<Vec<_>>();
 
         let pipeline_layout = PipelineLayoutInfo::default()
-            .layout(&descriptor_set_layout)
+            .layout(&descriptor_set_layouts[0])
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
@@ -166,11 +176,11 @@ impl Interface {
             .depth(DepthOptions::disabled())
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .render_pass(vk::RenderPass::null())
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .render_pass(render_pass.handle())
+            .samples(info.renderer.options().multisampling)
             .pool(&info.renderer.pipeline_cache)
             .vertex::<InterfaceVertex>()
-            .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::VERTEX)
+            .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&info.renderer.device);
 
@@ -182,15 +192,11 @@ impl Interface {
             .lod(0.0, vk::LOD_CLAMP_NONE)
             .build(&info.renderer.device);
 
-        let image_views = info.renderer.swapchain.present_images.iter()
-            .map(Image::view)
-            .collect::<Vec<_>>();
-
         let framebuffers = info.renderer.swapchain.create_framebuffers(&render_pass);
         let mut vertex_buffers = vec![];
         let mut index_buffers = vec![];
         // let mut update_buffers = vec![];
-        for i in 0..framebuffers.len() {
+        for _ in 0..framebuffers.len() {
             vertex_buffers.push(StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
@@ -211,20 +217,24 @@ impl Interface {
             context,
             egui,
             render_pass,
-            descriptor_set_layout,
+            descriptor_set_layouts,
             pipeline,
             framebuffers,
             vertex_buffers,
             index_buffers,
             sampler,
 
-            pixel_per_point : info.pixel_per_point,
+            scale_factor : target.handle().scale_factor(),
 
             extent : info.renderer.swapchain.extent,
             device : info.renderer.device.clone(),
 
             textures : HashMap::default(),
         }
+    }
+
+    pub fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> EventResponse {
+        self.egui.on_window_event(window.handle(), event)
     }
 
     pub fn begin_frame(&mut self, window : &Window) {
@@ -273,8 +283,8 @@ impl Interface {
                 .height(self.extent.height as f32)
         ]);
 
-        let width_points = self.extent.width as f32 / self.pixel_per_point as f32;
-        let height_points = self.extent.height as f32 / self.pixel_per_point as f32;
+        let width_points = self.extent.width as f32 / self.scale_factor as f32;
+        let height_points = self.extent.height as f32 / self.scale_factor as f32;
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
 
@@ -292,9 +302,9 @@ impl Interface {
             }
 
             let texture_info = self.textures.get(&mesh.texture_id);
-            if let Some(desc) = texture_info.map(|t| t.descriptor_set) {
+            if let Some(texture_info) = texture_info {
                 cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
-                    &[desc],
+                    &[self.descriptor_set_layouts[swapchain_image_index].request(texture_info.descriptor_set(&self.sampler))],
                     &[]
                 );
             }
@@ -312,7 +322,18 @@ impl Interface {
                 index_buffer.copy_from(i_slice.as_ptr() as *const u8, i_copy_size);
                 vertex_buffer = vertex_buffer.add(v_copy_size);
                 index_buffer = index_buffer.add(i_copy_size);
+                vertex_base += v_copy_size;
+                index_base += i_copy_size;
             }
+
+            let min = egui::Pos2 {
+                x : f32::clamp(clip_rect.min.x * self.scale_factor as f32, 0.0, self.extent.width as f32),
+                y : f32::clamp(clip_rect.min.y * self.scale_factor as f32, 0.0, self.extent.height as f32)
+            };
+            let max = egui::Pos2 {
+                x : f32::clamp(clip_rect.max.x * self.scale_factor as f32, min.x, self.extent.width as f32),
+                y : f32::clamp(clip_rect.max.y * self.scale_factor as f32, min.y, self.extent.height as f32),
+            };
 
             // Record draw commands
             cmd.set_scissors(0, &[
@@ -322,11 +343,11 @@ impl Interface {
                         .y(min.y.round() as i32)
                     )
                     .extent(vk::Extent2D::default()
-                        .width((max.x - min.x).round() as i32)
-                        .height((max.y - min.y).round() as i32)
+                        .width((max.x - min.x).round() as u32)
+                        .height((max.y - min.y).round() as u32)
                     )
             ]);
-            cmd.draw_indexed(mesh.indices.len(), 1, index_base, vertex_base);
+            cmd.draw_indexed(mesh.indices.len() as _, 1, index_base as _, vertex_base as _, 0);
         }
     }
     
@@ -457,9 +478,8 @@ impl Interface {
                 // ??? What's going on ???
             }
         } else {
-            self.user_textures.insert(tex_id, Texture {
-                image,
-                descriptor_set : todo!("Descriptor set")
+            self.textures.insert(tex_id, Texture {
+                image
             });
         }
     }

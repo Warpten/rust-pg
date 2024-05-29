@@ -8,6 +8,12 @@ pub struct Window {
     handle : winit::window::Window,
 }
 
+impl HasDisplayHandle for Window {
+    fn display_handle(&self) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        self.handle.display_handle()
+    }
+}
+
 impl Window {
     pub fn new(
         options : &ApplicationOptions,

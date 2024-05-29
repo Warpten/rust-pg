@@ -2136,6 +2136,7 @@ dependencies = [
  "anyhow",
  "ash",
  "bytes",
+ "egui",
  "enumflags2",
  "md5",
  "puffin",

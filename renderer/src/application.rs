@@ -39,7 +39,8 @@ pub type PrepareFn = fn() -> ApplicationOptions;
 pub type SetupFn<T> = fn(&mut Application) -> T;
 pub type UpdateFn<T> = fn(&mut Application, &mut T);
 pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), ApplicationRenderError>;
-pub type WindowEventFn<T> = fn(&mut Application, &mut T, event: &WindowEvent);
+pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
+pub type InterfaceFn<T> = fn(&mut Application, &mut T, ctx : &egui::Context);
 
 pub struct ApplicationBuilder<State : 'static> {
     pub prepare : Option<PrepareFn>,
@@ -47,6 +48,7 @@ pub struct ApplicationBuilder<State : 'static> {
     pub update : Option<UpdateFn<State>>,
     pub event : Option<WindowEventFn<State>>,
     pub render : Option<RenderFn<State>>,
+    pub ui : Option<InterfaceFn<State>>,
 }
 
 impl<T> ApplicationBuilder<T> {
@@ -65,6 +67,11 @@ impl<T> ApplicationBuilder<T> {
         self
     }
 
+    pub fn ui(mut self, ui : InterfaceFn<T>) -> Self {
+        self.ui = Some(ui);
+        self
+    }
+
     pub fn window_event(mut self, window_event: WindowEventFn<T>) -> Self {
         self.event = Some(window_event);
         self
@@ -75,14 +82,20 @@ impl<T> ApplicationBuilder<T> {
     }
 
     pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
-        if let Some(render_fn) = self.render {
+        let render_success = if let Some(render_fn) = self.render {
             match render_fn(application, data) {
                 Err(ApplicationRenderError::InvalidSwapchain) => true,
                 _ => false,
             }
         } else {
             false
+        };
+
+        if let Some(ui) = self.ui {
+            ui(application, data, todo!());
         }
+
+        render_success
     }
 }
 
@@ -155,11 +168,12 @@ pub struct Application {
 impl Application {
     pub fn build<T>(setup: SetupFn<T>) -> ApplicationBuilder<T> {
         ApplicationBuilder {
-            prepare: None,
             setup,
-            update: None,
-            event: None,
-            render: None,
+            prepare : None,
+            update : None,
+            event : None,
+            render : None,
+            ui : None
         }
     }
 

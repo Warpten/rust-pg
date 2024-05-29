@@ -177,13 +177,20 @@ impl CommandBuffer {
         }
     }
 
+    pub fn draw_indexed(&self, index_count : u32, instance_count : u32, first_index : u32, vertex_offset : i32, first_instance : u32) {
+        unsafe {
+            self.device.handle()
+                .cmd_draw_indexed(self.handle, index_count, instance_count, first_index, vertex_offset, first_instance)
+        }
+    }
+
     /// Binds vertex buffers to this command buffer.
     pub fn bind_vertex_buffers(&self, first_binding : u32, buffers : &[(&Buffer, vk::DeviceSize)]) {
         let mut handles = Vec::<vk::Buffer>::with_capacity(buffers.len());
         let mut offsets = Vec::<vk::DeviceSize>::with_capacity(buffers.len());
         for (buffer, offset) in buffers {
             handles.push(buffer.handle());
-            offsets.push(offset);
+            offsets.push(*offset);
         }
 
         unsafe {
@@ -237,7 +244,7 @@ impl CommandBuffer {
     pub fn bind_descriptor_sets(&self, point : vk::PipelineBindPoint, pipeline : &Pipeline, first_set : u32, descriptor_sets : &[vk::DescriptorSet], dynamic_offsets : &[u32]) {
         unsafe {
             self.device.handle()
-                .cmd_bind_descriptor_sets(self.handle, point, pipeline.layout(), first_set, descriptor_sets, dynamic_sets)
+                .cmd_bind_descriptor_sets(self.handle, point, pipeline.layout(), first_set, descriptor_sets, dynamic_offsets)
         }
     }
 
