@@ -28,7 +28,7 @@ impl DescriptorSetLayoutBuilder {
     value_builder! { sets, count, sets, u32 }
     value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> Arc<DescriptorSetLayout> {
+    pub fn build(self, device : &Arc<LogicalDevice>) -> DescriptorSetLayout {
         DescriptorSetLayout::new(device, self)
     }
 }
@@ -59,7 +59,7 @@ impl DescriptorSetLayout {
         }
     }
 
-    pub(in self) fn new(device : &Arc<LogicalDevice>, info : DescriptorSetLayoutBuilder) -> Arc<Self> {
+    pub(in self) fn new(device : &Arc<LogicalDevice>, info : DescriptorSetLayoutBuilder) -> Self {
         let binding_count = info.bindings.len();
         let mut bindings = Vec::<vk::DescriptorSetLayoutBinding>::with_capacity(binding_count);
         let mut pool_sizes = Vec::<vk::DescriptorPoolSize>::with_capacity(binding_count);
@@ -96,13 +96,13 @@ impl DescriptorSetLayout {
                 .create_descriptor_pool(&pool_create_info, None)
                 .expect("Descriptor pool creation failed");
 
-            Arc::new(Self {
+            Self {
                 device : device.clone(),
                 layout,
                 pool,
                 info,
                 sets : HashMap::new(),
-            })
+            }
         }
     }
 

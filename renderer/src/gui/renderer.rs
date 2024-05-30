@@ -54,14 +54,13 @@ impl ViewportRendererState {
 #[derive(Clone)]
 struct ViewportRenderer {
     device: Arc<LogicalDevice>,
-    descriptor_set_layout: Arc<DescriptorSetLayout>,
     state: Arc<Mutex<Option<ViewportRendererState>>>,
 }
+
 impl ViewportRenderer {
-    fn new(device: Arc<LogicalDevice>, descriptor_set_layout: Arc<DescriptorSetLayout>) -> Self {
+    fn new(device: Arc<LogicalDevice>) -> Self {
         Self {
             device,
-            descriptor_set_layout,
             state: Arc::new(Mutex::new(None)),
         }
     }
@@ -88,9 +87,9 @@ impl ViewportRenderer {
             .build(device)
     }
 
-    fn create_pipeline_layout(device: &Arc<LogicalDevice>, descriptor_set_layout: &Arc<DescriptorSetLayout>) -> PipelineLayout {
+    fn create_pipeline_layout(device: &Arc<LogicalDevice>, descriptor_set_layout: &DescriptorSetLayout) -> PipelineLayout {
         PipelineLayoutInfo::default()
-            .layout(descriptor_set_layout.as_ref())
+            .layout(descriptor_set_layout)
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
@@ -193,6 +192,7 @@ impl ViewportRenderer {
         surface_format: vk::Format,
         scale_factor: f32,
         physical_size: winit::dpi::PhysicalSize<u32>,
+        descriptor_set_layout: &DescriptorSetLayout
     ) {
         self.device.wait_idle();
 
@@ -206,7 +206,7 @@ impl ViewportRenderer {
                 (state.render_pass, state.pipeline_layout, state.pipeline)
             } else {
                 let render_pass = Self::create_render_pass(&self.device, surface_format);
-                let pipeline_layout = Self::create_pipeline_layout(&self.device, &self.descriptor_set_layout);
+                let pipeline_layout = Self::create_pipeline_layout(&self.device, &descriptor_set_layout);
                 let pipeline = Self::create_pipeline(&self.device, &render_pass, &pipeline_layout);
                 (render_pass, pipeline_layout, pipeline)
             }
@@ -243,14 +243,15 @@ impl ViewportRenderer {
     fn vertex_buffer_size() -> u64 { 1024 * 1024 * 4 }
     fn index_buffer_size() -> u64 { 1024 * 1024 * 4 }
 
-    fn create_egui_cmd(
-        &self,
+    fn create_egui_cmd<'a : 'b, 'b>(
+        &'a mut self,
         clipped_primitives: Vec<egui::ClippedPrimitive>,
         textures_delta: egui::TexturesDelta,
         managed_textures: Arc<Mutex<ManagedTextures>>,
         user_textures: Arc<Mutex<UserTextures>>,
         scale_factor: f32,
         physical_size: winit::dpi::PhysicalSize<u32>,
+        descriptor_set_layout: &'b mut DescriptorSetLayout,
     ) -> EguiCommand {
         EguiCommand {
             swapchain_recreate_required: {
@@ -277,12 +278,13 @@ impl ViewportRenderer {
                         &swapchain_images,
                         surface_format,
                         scale_factor,
-                        physical_size
+                        physical_size,
+                        descriptor_set_layout,
                     );
                 }
             })),
             recorder: Box::new({
-                let this = self.clone();
+                let mut this = self.clone();
                 move |cmd, index: usize| {
                     let state = this.state.lock().expect("Failed to lock state mutex.");
                     let state = state.as_ref().expect("State is none.");
@@ -292,10 +294,10 @@ impl ViewportRenderer {
                         user_textures.lock().expect("Failed to lock user textures.");
 
                     // update textures
-                    managed_textures.update_textures(textures_delta);
-                    user_textures.update_textures();
+                    managed_textures.update_textures(textures_delta, descriptor_set_layout);
+                    user_textures.update_textures(descriptor_set_layout);
 
-                    // get buffer ptr
+                    // Map buffer memory
                     let mut vertex_buffer_ptr = state.get_vertex_buffer(index).map();
                     let vertex_buffer_ptr_end =
                         unsafe { vertex_buffer_ptr.add(Self::vertex_buffer_size() as usize) };
@@ -303,14 +305,14 @@ impl ViewportRenderer {
                     let index_buffer_ptr_end =
                         unsafe { index_buffer_ptr.add(Self::index_buffer_size() as usize) };
 
-                    // begin render pass
+                    // Begin render pass
                     cmd.begin_render_pass(&state.render_pass, &state.framebuffers[index], vk::Rect2D::default()
-                        .extent(vk::Extent2D::default()
-                            .width(state.width)
-                            .height(state.height),
-                        ), &[], vk::SubpassContents::INLINE);
+                        .extent(vk::Extent2D {
+                            width : state.width,
+                            height : state.height
+                        }), &[], vk::SubpassContents::INLINE);
 
-                    // bind resources
+                    // Bind resources
                     cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &state.pipeline);
                     cmd.bind_vertex_buffers(0, &[(state.get_vertex_buffer(index), 0)]);
                     cmd.bind_index_buffer(state.get_index_buffer(index), 0);
@@ -442,7 +444,7 @@ impl ViewportRenderer {
 struct ManagedTextures {
     device: Arc<LogicalDevice>,
     queue: Queue,
-    descriptor_set_layout: Arc<DescriptorSetLayout>,
+    // descriptor_set_layout: Arc<DescriptorSetLayout>,
     sampler: Sampler,
 
     transfer_command_pool : CommandPool,
@@ -453,7 +455,7 @@ struct ManagedTextures {
 }
 
 impl ManagedTextures {
-    fn new(device: Arc<LogicalDevice>, queue: Queue, descriptor_set_layout : Arc<DescriptorSetLayout>) -> Arc<Mutex<Self>> {
+    fn new(device: Arc<LogicalDevice>, queue: Queue) -> Arc<Mutex<Self>> {
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .anisotropy(false)
@@ -468,14 +470,14 @@ impl ManagedTextures {
 
             device,
             queue,
-            descriptor_set_layout,
+            // descriptor_set_layout,
             sampler,
             texture_desc_sets: HashMap::new(),
             texture_images: HashMap::new(),
         }))
     }
 
-    fn update_texture(&mut self, texture_id: egui::TextureId, delta: egui::epaint::ImageDelta) {
+    fn update_texture(&mut self, texture_id: egui::TextureId, delta: egui::epaint::ImageDelta, descriptor_set_layout : &mut DescriptorSetLayout) {
         // Extract pixel data from egui
         let data: Vec<u8> = match &delta.image {
             egui::ImageData::Color(image) => {
@@ -627,7 +629,7 @@ impl ManagedTextures {
             }
         } else {
             // Otherwise save the newly created texture
-            let dsc_set = self.descriptor_set_layout.request(DescriptorSetInfo::default()
+            let dsc_set = descriptor_set_layout.request(DescriptorSetInfo::default()
                 .images(0, vec![
                     vk::DescriptorImageInfo {
                         sampler: self.sampler.handle(),
@@ -647,9 +649,9 @@ impl ManagedTextures {
         self.texture_desc_sets.remove_entry(&id);
     }
 
-    fn update_textures(&mut self, textures_delta: egui::TexturesDelta) {
+    fn update_textures(&mut self, textures_delta: egui::TexturesDelta, descriptor_set_layout : &mut DescriptorSetLayout) {
         for (id, image_delta) in textures_delta.set {
-            self.update_texture(id, image_delta);
+            self.update_texture(id, image_delta, descriptor_set_layout);
         }
         for id in textures_delta.free {
             self.free_texture(id);
@@ -713,28 +715,25 @@ pub(crate) enum RegistryCommand {
 
 struct UserTextures {
     device: Arc<LogicalDevice>,
-    descriptor_set_layout: Arc<DescriptorSetLayout>,
     texture_desc_sets: HashMap<u64, vk::DescriptorSet>,
     receiver: ImageRegistryReceiver,
 }
 impl UserTextures {
     fn new(
         device: Arc<LogicalDevice>,
-        descriptor_set_layout: Arc<DescriptorSetLayout>,
         receiver: ImageRegistryReceiver,
     ) -> Arc<Mutex<Self>> {
         let texture_desc_sets = HashMap::new();
 
         Arc::new(Mutex::new(Self {
             device,
-            descriptor_set_layout,
             texture_desc_sets,
             receiver,
         }))
     }
 
-    fn register_user_texture(&mut self, id: u64, image_view: vk::ImageView, sampler: vk::Sampler) {
-        let dsc_set = self.descriptor_set_layout.request(DescriptorSetInfo::default()
+    fn register_user_texture(&mut self, descriptor_set_layout : &mut DescriptorSetLayout, id: u64, image_view: vk::ImageView, sampler: vk::Sampler) {
+        let dsc_set = descriptor_set_layout.request(DescriptorSetInfo::default()
             .images(0, vec![
                 vk::DescriptorImageInfo::default()
                     .sampler(sampler)
@@ -744,13 +743,13 @@ impl UserTextures {
         );
     }
 
-    fn unregister_user_texture(&mut self, id: u64) {
+    fn unregister_user_texture(&mut self, descriptor_set_layout : &mut DescriptorSetLayout, id: u64) {
         if let Some(desc_set) = self.texture_desc_sets.remove(&id) {
-            self.descriptor_set_layout.forget(desc_set);
+            descriptor_set_layout.forget(desc_set);
         }
     }
 
-    fn update_textures(&mut self) {
+    fn update_textures(&mut self, descriptor_set_layout : &mut DescriptorSetLayout) {
         for command in self.receiver.try_iter().collect::<Vec<_>>() {
             match command {
                 RegistryCommand::RegisterUserTexture {
@@ -759,11 +758,11 @@ impl UserTextures {
                     id,
                 } => match id {
                     egui::TextureId::Managed(_) => panic!("This texture id is not for user texture: {:?}", id),
-                    egui::TextureId::User(id) => self.register_user_texture(id, image_view, sampler),
+                    egui::TextureId::User(id) => self.register_user_texture(descriptor_set_layout, id, image_view, sampler),
                 },
                 RegistryCommand::UnregisterUserTexture { id } => match id {
                     egui::TextureId::Managed(_) => panic!("This texture id is not for user texture: {:?}", id),
-                    egui::TextureId::User(id) => self.unregister_user_texture(id),
+                    egui::TextureId::User(id) => self.unregister_user_texture(descriptor_set_layout, id),
                 },
             }
         }
@@ -772,14 +771,14 @@ impl UserTextures {
 
 pub(crate) struct Renderer {
     device: Arc<LogicalDevice>,
-    descriptor_set_layout: Arc<DescriptorSetLayout>,
+    descriptor_set_layout: DescriptorSetLayout,
     viewport_renderers: HashMap<egui::ViewportId, ViewportRenderer>,
 
     managed_textures: Arc<Mutex<ManagedTextures>>,
     user_textures: Arc<Mutex<UserTextures>>,
 }
 impl Renderer {
-    fn create_descriptor_set_layout(device: &Arc<LogicalDevice>) -> Arc<DescriptorSetLayout> {
+    fn create_descriptor_set_layout(device: &Arc<LogicalDevice>) -> DescriptorSetLayout {
         DescriptorSetLayout::builder()
             .sets(1024)
             .pool_flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET)
@@ -792,13 +791,12 @@ impl Renderer {
         queue: Queue,
         receiver: Receiver<RegistryCommand>,
     ) -> Arc<Mutex<Self>> {
-        let descriptor_set_layout = Self::create_descriptor_set_layout(&device);
         Arc::new(Mutex::new(Self {
             device: device.clone(),
-            descriptor_set_layout,
+            descriptor_set_layout : Self::create_descriptor_set_layout(&device),
             viewport_renderers: HashMap::new(),
-            managed_textures: ManagedTextures::new(device.clone(), queue, descriptor_set_layout.clone()),
-            user_textures: UserTextures::new(device.clone(), descriptor_set_layout, receiver),
+            managed_textures: ManagedTextures::new(device.clone(), queue),
+            user_textures: UserTextures::new(device.clone(), receiver),
         }))
     }
 
@@ -813,9 +811,7 @@ impl Renderer {
         let viewport_renderer = self
             .viewport_renderers
             .entry(viewport_id)
-            .or_insert_with(|| {
-                ViewportRenderer::new(self.device.clone(), self.descriptor_set_layout)
-            });
+            .or_insert_with(|| ViewportRenderer::new(self.device.clone()));
         viewport_renderer.create_egui_cmd(
             clipped_primitives,
             textures_delta,
@@ -823,6 +819,7 @@ impl Renderer {
             self.user_textures.clone(),
             scale_factor,
             physical_size,
+            &mut self.descriptor_set_layout
         )
     }
 

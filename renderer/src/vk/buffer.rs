@@ -15,7 +15,6 @@ use crate::traits::handle::Handle;
 use crate::vk::command_buffer::CommandBuffer;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueAffinity;
-use crate::vk::renderer::Renderer;
 
 use super::command_pool::CommandPool;
 

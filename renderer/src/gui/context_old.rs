@@ -7,12 +7,10 @@ use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
-use nohash_hasher::IntMap;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
-use crate::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayout, DescriptorSetLayoutBuilder, PoolDescriptorCount};
+use crate::vk::descriptor::layout::DescriptorSetLayout;
 use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::helpers::{prepare_buffer_image_copy, with_delta};
@@ -21,7 +19,7 @@ use crate::vk::logical_device::LogicalDevice;
 use crate::vk::pipeline::layout::PipelineLayoutInfo;
 use crate::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
 use crate::vk::queue::{Queue, QueueAffinity};
-use crate::vk::render_pass::{RenderPass, SubpassAttachment};
+use crate::vk::render_pass::RenderPass;
 use crate::vk::renderer::Renderer;
 use crate::vk::sampler::Sampler;
 use crate::window::Window;
@@ -155,10 +153,10 @@ impl Interface {
 
         // Create a descriptor pool.
         let descriptor_set_layouts = (0..info.renderer.swapchain.image_count()).map(|_|
-            DescriptorSetLayoutBuilder::default()
+            DescriptorSetLayout::builder()
                 .sets(1024)
-                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, PoolDescriptorCount(1024), BindingDescriptorCount(1))
-                .build(&info.renderer)
+                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
+                .build(&info.renderer.device)
         ).collect::<Vec<_>>();
 
         let pipeline_layout = PipelineLayoutInfo::default()
@@ -168,7 +166,7 @@ impl Interface {
                 .offset(0)
                 .size(size_of::<f32>() as u32 * 2) // Screen size
             )
-            .build(&info.renderer);
+            .build(&info.renderer.device);
 
         let pipeline = PipelineInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -202,14 +200,14 @@ impl Interface {
                 .linear(true)
                 .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
                 .index(vk::IndexType::UINT16)
-                .build(&info.renderer, 1024 * 1024 * 4)
+                .build(&info.renderer.device, 1024 * 1024 * 4)
             );
 
             index_buffers.push(StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .build(&info.renderer, 1024 * 1024 * 2)
+                .build(&info.renderer.device, 1024 * 1024 * 2)
             );
         }
 
@@ -366,7 +364,7 @@ impl Interface {
             .cpu_to_gpu()
             .linear(true)
             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
-            .build(&renderer, &data);
+            .build(&renderer.device, &renderer.transfer_pool, &data);
 
         let mut image = ImageCreateInfo::default()
             .color()
@@ -434,12 +432,12 @@ impl Interface {
                     vk::DependencyFlags::BY_REGION,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL
                 );
-                let dst_subresource = existing_texture.image.make_subresource_layer(0);
+                let dst_subresource = existing_texture.image.make_subresource_layer(0, None, None);
                 cmd.blit_image(&image,
                     &mut existing_texture.image,
                     &[
                         vk::ImageBlit::default()
-                            .src_subresource(image.make_subresource_layer(0))
+                            .src_subresource(image.make_subresource_layer(0, None, None))
                             .src_offsets([
                                 vk::Offset3D { x: 0, y: 0, z: 0 },
                                 vk::Offset3D {
