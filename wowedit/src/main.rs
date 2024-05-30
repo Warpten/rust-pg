@@ -4,7 +4,7 @@ use renderer::application::{Application, ApplicationOptions, ApplicationRenderEr
 use renderer::gui::context::{Interface, InterfaceCreateInfo};
 use renderer::traits::handle::Handle;
 use renderer::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer};
-use renderer::vk::descriptor::layout::DescriptorSetLayoutBuilder;
+use renderer::vk::descriptor::layout::{DescriptorSetLayout, DescriptorSetLayoutBuilder};
 use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
@@ -59,7 +59,7 @@ fn setup(app : &mut Application) -> ApplicationData {
     let buffer = DynamicBufferBuilder::dynamic()
         .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
         .gpu_only()
-        .build(&app.renderer, &[
+        .build(&app.renderer.device, &app.renderer.transfer_pool, &[
             TerrainVertex {
                 pos : [ 0.0f32, -0.5f32],
                 color : [ 1.0f32, 0.0f32, 0.0f32 ]
@@ -74,17 +74,17 @@ fn setup(app : &mut Application) -> ApplicationData {
             }
         ]);
 
-    let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
+    let descriptor_set_layout = DescriptorSetLayout::builder()
         // This is a workaround for an Intel driver crash.
-        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, PoolDescriptorCount(1), BindingDescriptorCount(1))
-        .build(&app.renderer);
+        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
+        .build(&app.renderer.device);
 
     let pipeline_layout = PipelineLayoutInfo::default()
         .layout(&descriptor_set_layout)
-        .build(&app.renderer);
+        .build(&app.renderer.device);
 
-    let render_pass = app.renderer.swapchain.create_render_pass();
-    let framebuffers = app.renderer.swapchain.create_framebuffers(&render_pass);
+    let render_pass = app.renderer.swapchain.create_render_pass(true, true);
+    let framebuffers = app.renderer.swapchain.create_framebuffers(&render_pass, true, true);
 
     let pipeline = PipelineInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -146,10 +146,6 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
     app.renderer.end_frame(image_acquired, &cmd)
 }
 
-pub fn ui(app: &mut Application, data: &mut ApplicationData, ctx : &egui::Context) {
-    
-}
-
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
     _ = data.gui.handle_event(&event, &app.window);
 }
@@ -158,7 +154,6 @@ fn main() {
     Application::build(setup)
         .prepare(prepare)
         .render(render)
-        .ui(ui)
         .window_event(window_event)
         .run();
 }

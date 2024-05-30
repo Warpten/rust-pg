@@ -261,7 +261,7 @@ impl RenderPassCreateInfo {
             let mut resolves = vec![];
 
             for attachment in &attachments {
-                let r#ref = match attachment {
+                match attachment {
                     SubpassAttachment::Color(use_as, index) => {
                         let target = match use_as {
                             SubpassAttachmentUse::Color => &mut colors,
@@ -297,8 +297,11 @@ impl RenderPassCreateInfo {
         for (bind_point, colors, resolve, depth) in &subpass_data {
             let mut subpass_description = vk::SubpassDescription::default()
                 .pipeline_bind_point(*bind_point)
-                .color_attachments(&colors)
-                .resolve_attachments(&resolve);
+                .color_attachments(colors);
+
+            if !resolve.is_empty() {
+                subpass_description = subpass_description.resolve_attachments(resolve);
+            }
             
             if let Some(depth) = depth {
                 match depth {

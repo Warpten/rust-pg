@@ -252,12 +252,12 @@ impl Image { // Getters
     /// * `aspect_mask` - An optional parameter specifying which components of this image to access.
     pub fn make_subresource_layer(&self, mip_level : u32, layers : Option<Range<u32>>, aspect_mask : Option<vk::ImageAspectFlags>) -> vk::ImageSubresourceLayers {
         let base_array_layer = match layers {
-            Some(layers) => u32::clamp(layers.start, self.layers.start, self.layers.end),
+            Some(ref layers) => u32::clamp(layers.start, self.layers.start, self.layers.end),
             None => self.layers.start,
         };
 
         let end_array_layer = match layers {
-            Some(layers) => u32::clamp(layers.end, base_array_layer + 1, self.layers.end),
+            Some(ref layers) => u32::clamp(layers.end, base_array_layer + 1, self.layers.end),
             None => self.layers.end
         };
         let layer_count = end_array_layer - base_array_layer;

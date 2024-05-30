@@ -124,7 +124,7 @@ pub struct Renderer {
     active_frame_index : usize,
     active_image_index : usize,
 
-    pub(in crate) transfer_pool : CommandPool,
+    pub transfer_pool : CommandPool,
 }
 
 impl Renderer {

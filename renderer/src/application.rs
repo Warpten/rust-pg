@@ -48,7 +48,6 @@ pub struct ApplicationBuilder<State : 'static> {
     pub update : Option<UpdateFn<State>>,
     pub event : Option<WindowEventFn<State>>,
     pub render : Option<RenderFn<State>>,
-    pub ui : Option<InterfaceFn<State>>,
 }
 
 impl<T> ApplicationBuilder<T> {
@@ -64,11 +63,6 @@ impl<T> ApplicationBuilder<T> {
 
     pub fn render(mut self, render: RenderFn<T>) -> Self {
         self.render = Some(render);
-        self
-    }
-
-    pub fn ui(mut self, ui : InterfaceFn<T>) -> Self {
-        self.ui = Some(ui);
         self
     }
 
@@ -90,10 +84,6 @@ impl<T> ApplicationBuilder<T> {
         } else {
             false
         };
-
-        if let Some(ui) = self.ui {
-            ui(application, data, todo!());
-        }
 
         render_success
     }
@@ -173,7 +163,6 @@ impl Application {
             update : None,
             event : None,
             render : None,
-            ui : None
         }
     }
 

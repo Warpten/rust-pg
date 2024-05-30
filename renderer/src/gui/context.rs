@@ -19,7 +19,7 @@ use crate::vk::logical_device::LogicalDevice;
 use crate::vk::pipeline::layout::PipelineLayoutInfo;
 use crate::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
 use crate::vk::queue::{Queue, QueueAffinity};
-use crate::vk::render_pass::RenderPass;
+use crate::vk::render_pass::{RenderPass, SubpassAttachment};
 use crate::vk::renderer::Renderer;
 use crate::vk::sampler::Sampler;
 use crate::window::Window;
@@ -41,6 +41,13 @@ impl Texture {
     }
 }
 
+struct FrameData {
+    vertex_buffer : Buffer,
+    index_buffer : Buffer,
+    framebuffer : Framebuffer,
+    descriptor_set_layout : DescriptorSetLayout,
+}
+
 pub struct Interface {
     pub context : Context,
     egui : egui_winit::State,
@@ -48,14 +55,11 @@ pub struct Interface {
     device : Arc<LogicalDevice>,
     render_pass : RenderPass,
     pipeline : Pipeline,
-    framebuffers : Vec<Framebuffer>,
-    descriptor_set_layouts : Vec<DescriptorSetLayout>,
+    frame_data : Vec<FrameData>,
 
     extent : vk::Extent2D,
     scale_factor : f64,
 
-    vertex_buffers : Vec<Buffer>,
-    index_buffers : Vec<Buffer>,
     sampler : Sampler,
 
     textures : HashMap<TextureId, Texture>
@@ -101,7 +105,7 @@ pub struct InterfaceCreateInfo<'a> {
 }
 
 impl InterfaceCreateInfo<'_> {
-    pub fn new<'a>(renderer : &'a Renderer) -> InterfaceCreateInfo<'a> {
+    pub fn new(renderer : &Renderer) -> InterfaceCreateInfo {
         InterfaceCreateInfo {
             fonts : FontDefinitions::empty(),
             style : Style::default(),
@@ -128,8 +132,7 @@ impl Interface {
             Some(info.renderer.device.physical_device.properties.limits.max_image_dimension2_d as usize));
 
         // Create a render pass.
-        let render_pass = info.renderer.swapchain.create_render_pass();
-         /*RenderPass::builder()
+        let render_pass = RenderPass::builder()
             .color_attachment(
                 info.renderer.swapchain.surface_format.format,
                 vk::SampleCountFlags::TYPE_1,
@@ -148,8 +151,9 @@ impl Interface {
             )
             .subpass(vk::PipelineBindPoint::GRAPHICS, &[
                 SubpassAttachment::color(0)
-            ], SubpassAttachment::None)
-            .build(&info.renderer.device);*/
+            ], None)
+            .build(&info.renderer.device);
+        info.renderer.device.set_handle_name(render_pass.handle(), &"GUI Render pass".to_owned());
 
         // Create a descriptor pool.
         let descriptor_set_layouts = (0..info.renderer.swapchain.image_count()).map(|_|
@@ -160,13 +164,14 @@ impl Interface {
         ).collect::<Vec<_>>();
 
         let pipeline_layout = PipelineLayoutInfo::default()
-            .layout(&descriptor_set_layouts[0])
+            .layouts(&descriptor_set_layouts)
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
                 .size(size_of::<f32>() as u32 * 2) // Screen size
             )
             .build(&info.renderer.device);
+        info.renderer.device.set_handle_name(pipeline_layout.handle(), &"GUI Pipeline layout".to_owned());
 
         let pipeline = PipelineInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -175,12 +180,13 @@ impl Interface {
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .render_pass(render_pass.handle())
-            .samples(info.renderer.options().multisampling)
+            .samples(vk::SampleCountFlags::TYPE_1)
             .pool(&info.renderer.pipeline_cache)
             .vertex::<InterfaceVertex>()
             .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&info.renderer.device);
+        info.renderer.device.set_handle_name(pipeline.handle(), &"GUI Pipeline".to_owned());
 
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
@@ -189,37 +195,41 @@ impl Interface {
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .lod(0.0, vk::LOD_CLAMP_NONE)
             .build(&info.renderer.device);
+        info.renderer.device.set_handle_name(sampler.handle(), &"GUI Sampler".to_owned());
 
-        let framebuffers = info.renderer.swapchain.create_framebuffers(&render_pass);
-        let mut vertex_buffers = vec![];
-        let mut index_buffers = vec![];
-        // let mut update_buffers = vec![];
-        for _ in 0..framebuffers.len() {
-            vertex_buffers.push(StaticBufferBuilder::fixed_size()
+        let framebuffers = info.renderer.swapchain.create_framebuffers(&render_pass, false, false);
+
+        let mut frame_data = vec![];
+        for (framebuffer, descriptor_set_layout) in framebuffers.into_iter().zip(descriptor_set_layouts.into_iter()) {
+            let vertex_buffer = StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
                 .index(vk::IndexType::UINT16)
-                .build(&info.renderer.device, 1024 * 1024 * 4)
-            );
+                .build(&info.renderer.device, 1024 * 1024 * 4);
+            info.renderer.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
 
-            index_buffers.push(StaticBufferBuilder::fixed_size()
+            let index_buffer = StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .build(&info.renderer.device, 1024 * 1024 * 2)
-            );
+                .build(&info.renderer.device, 1024 * 1024 * 2);
+            info.renderer.device.set_handle_name(index_buffer.handle(), &"GUI Vertex buffer".to_owned());
+
+            frame_data.push(FrameData {
+                vertex_buffer,
+                index_buffer,
+                framebuffer,
+                descriptor_set_layout,
+            });
         }
 
         Self {
             context,
             egui,
             render_pass,
-            descriptor_set_layouts,
             pipeline,
-            framebuffers,
-            vertex_buffers,
-            index_buffers,
+            frame_data,
             sampler,
 
             scale_factor : target.handle().scale_factor(),
@@ -258,10 +268,12 @@ impl Interface {
             self.update_texture(renderer, id, image_delta);
         }
 
-        let mut vertex_buffer = self.vertex_buffers[swapchain_image_index].map();
-        let mut index_buffer = self.index_buffers[swapchain_image_index].map();
+        let frame_data = &mut self.frame_data[swapchain_image_index];
 
-        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[swapchain_image_index], 
+        let mut vertex_buffer = frame_data.vertex_buffer.map();
+        let mut index_buffer = frame_data.index_buffer.map();
+
+        cmd.begin_render_pass(&self.render_pass, &frame_data.framebuffer, 
             vk::Rect2D::default()
                 .offset(vk::Offset2D::default().x(0).y(0))
                 .extent(self.extent),
@@ -269,8 +281,8 @@ impl Interface {
             vk::SubpassContents::INLINE
         );
         cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
-        cmd.bind_vertex_buffers(0, &[(&self.vertex_buffers[swapchain_image_index], 0)]);
-        cmd.bind_index_buffer(&self.index_buffers[swapchain_image_index], 0);
+        cmd.bind_vertex_buffers(0, &[(&frame_data.vertex_buffer, 0)]);
+        cmd.bind_index_buffer(&frame_data.index_buffer, 0);
         cmd.set_viewport(0, &[
             vk::Viewport::default()
                 .x(0.0)
@@ -302,7 +314,7 @@ impl Interface {
             let texture_info = self.textures.get(&mesh.texture_id);
             if let Some(texture_info) = texture_info {
                 cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
-                    &[self.descriptor_set_layouts[swapchain_image_index].request(texture_info.descriptor_set(&self.sampler))],
+                    &[frame_data.descriptor_set_layout.request(texture_info.descriptor_set(&self.sampler))],
                     &[]
                 );
             }

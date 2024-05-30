@@ -296,16 +296,26 @@ impl Swapchain {
         })
     }
 
-    pub fn create_render_pass(&self) -> RenderPass {
+    pub fn create_render_pass(&self, depth : bool, resolve : bool) -> RenderPass {
         let color_format = self.present_images.get(0).map(Image::format).expect("Unable to find the format of the presentation image");
-        let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
-        let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
 
-        RenderPassCreateInfo::default()
-            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
-            .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
-            .dependency(
+        let mut subpass_attachments = vec![SubpassAttachment::color(0)];
+        
+        let mut create_info = RenderPassCreateInfo::default()
+            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+
+        if depth {
+            let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
+            create_info = create_info.depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE);
+        }
+
+        if resolve {
+            let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
+            create_info = create_info.resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR);
+            subpass_attachments.push(SubpassAttachment::resolve(0));
+        }
+
+        create_info.dependency(
                 vk::SUBPASS_EXTERNAL,
                 0,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
@@ -313,30 +323,30 @@ impl Swapchain {
                 vk::AccessFlags::empty(),
                 vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
             )
-            .subpass(
-                vk::PipelineBindPoint::GRAPHICS,
-                &[
-                    SubpassAttachment::color(0),
-                    SubpassAttachment::resolve(0)
-                ],
-                None
-            )
+            .subpass(vk::PipelineBindPoint::GRAPHICS, &subpass_attachments, None)
             .build(&self.device)
     }
 
-    pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
+    pub fn create_framebuffers(&self, render_pass : &RenderPass, resolve : bool, depth : bool) -> Vec<Framebuffer> {
         let mut framebuffers = Vec::<Framebuffer>::with_capacity(self.present_images.len());
         for i in 0..self.present_images.len() {
             let mut attachment = Vec::<vk::ImageView>::new();
             if self.resolve_images.is_empty() {
                 attachment.push(self.present_images[i].view());
-                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
-                    attachment.push(depth_image);
+                if depth {
+                    if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
+                        attachment.push(depth_image);
+                    }
                 }
             } else {
-                attachment.push(self.resolve_images[i].view());
-                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
-                    attachment.push(depth_image);
+                if resolve {
+                    attachment.push(self.resolve_images[i].view());
+                }
+
+                if depth {
+                    if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
+                        attachment.push(depth_image);
+                    }
                 }
                 attachment.push(self.present_images[i].view());
             }

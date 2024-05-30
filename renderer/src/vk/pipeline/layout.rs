@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use ash::vk;
 use crate::make_handle;
-use crate::traits::handle::Handle;
+use crate::traits::handle::{Handle, Handles};
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::renderer::Renderer;
 
@@ -17,6 +17,13 @@ impl PipelineLayoutInfo {
         where L : Handle<vk::DescriptorSetLayout>
     {
         self.descriptor_sets.push(layout.handle());
+        self
+    }
+
+    pub fn layouts<L>(mut self, layout : &[L]) -> Self
+        where L : Handle<vk::DescriptorSetLayout>
+    {
+        self.descriptor_sets.extend(layout.handles());
         self
     }
 
