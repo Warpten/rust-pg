@@ -2,14 +2,13 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::vk::context::Context;
-use crate::vk::renderer::{Renderer, RendererOptions};
+use crate::{orchestration::{orchestrator::{Renderer, RendererBuilder}, traits::RenderableFactoryProvider}, vk::{context::Context, renderer::RendererOptions}};
 use crate::window::Window;
 
-#[derive(Debug)]
 pub struct ApplicationOptions {
-    pub(crate) title : String,
-    pub(crate) renderer : RendererOptions,
+    pub title : String,
+    pub renderer : RendererOptions,
+    pub renderables : Vec<RenderableFactoryProvider>,
 }
 
 impl Default for ApplicationOptions {
@@ -17,6 +16,7 @@ impl Default for ApplicationOptions {
         Self {
             renderer: Default::default(),
             title: "WorldEdit".to_owned(),
+            renderables : vec![],
         }
     }
 }
@@ -28,6 +28,11 @@ impl ApplicationOptions {
     }
 
     value_builder! { renderer, renderer, RendererOptions }
+
+    #[inline] pub fn add_renderable(mut self, renderable_factory : RenderableFactoryProvider) -> Self {
+        self.renderables.push(renderable_factory);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -40,7 +45,7 @@ pub type SetupFn<T> = fn(&mut Application) -> T;
 pub type UpdateFn<T> = fn(&mut Application, &mut T);
 pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), ApplicationRenderError>;
 pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
-pub type InterfaceFn<T> = fn(&mut Application, &mut T, ctx : &egui::Context);
+pub type InterfaceFn<T> = fn(&mut T, ctx : &mut egui::Context);
 
 pub struct ApplicationBuilder<State : 'static> {
     pub prepare : Option<PrepareFn>,
@@ -76,29 +81,28 @@ impl<T> ApplicationBuilder<T> {
     }
 
     pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
-        let render_success = if let Some(render_fn) = self.render {
+        if let Some(render_fn) = self.render {
             match render_fn(application, data) {
                 Err(ApplicationRenderError::InvalidSwapchain) => true,
                 _ => false,
             }
         } else {
             false
-        };
-
-        render_success
+        }
     }
 }
 
 #[allow(dead_code, unused)]
 fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     let event_loop = EventLoop::new().unwrap();
-    let settings = {
+    let mut settings = {
         if let Some(prepare) = builder.prepare {
             prepare()
         } else {
             ApplicationOptions::default()
         }
     };
+
     let mut app = Application::new(settings, &event_loop);
     let mut app_data = (builder.setup)(&mut app);
     let mut dirty_swapchain = false;
@@ -109,7 +113,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
-        if !app.window.is_minimized() {
+        if !app.renderer.context.window.is_minimized() {
             
             if dirty_swapchain {
                 app.recreate_swapchain();
@@ -141,7 +145,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => app.renderer.device.wait_idle(),
+                Event::LoopExiting => todo!(), // app.orchestrator.device.wait_idle(),
                 _ => { }
             }
         }
@@ -152,7 +156,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 pub struct Application {
     pub context : Arc<Context>,
     pub renderer : Renderer,
-    pub window : Window,
+    // pub options : ApplicationOptions,
 }
 
 impl Application {
@@ -166,11 +170,11 @@ impl Application {
         }
     }
 
-    pub fn new(settings : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
-        let window = Window::new(&settings, event_loop);
+    pub fn new(options : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
+        let window = Window::new(&options, event_loop);
 
         let context = Arc::new(unsafe {
-            let mut all_extensions = settings.renderer.instance_extensions.clone();
+            let mut all_extensions = options.renderer.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
             all_extensions.push(ash::ext::debug_utils::NAME.into());
             all_extensions.dedup();
@@ -178,10 +182,15 @@ impl Application {
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         });
 
+        let mut orchestrator = RendererBuilder::default(&context);
+        for renderable in options.renderables {
+            orchestrator.add_renderable(renderable);
+        }
+
         Self {
             context : context.clone(),
-            renderer : Renderer::new(settings.renderer, &context, &window),
-            window,
+            renderer : orchestrator.build(options.renderer, window),
+            // window,
         }
     }
 

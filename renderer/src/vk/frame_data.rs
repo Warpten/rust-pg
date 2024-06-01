@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 use ash::vk;
@@ -6,6 +7,7 @@ use crate::vk::logical_device::LogicalDevice;
 use crate::vk::semaphore_pool::SemaphorePool;
 
 use super::command_buffer::CommandBuffer;
+use super::framebuffer::Framebuffer;
 use super::queue::QueueAffinity;
 
 pub struct FrameData {
@@ -13,12 +15,15 @@ pub struct FrameData {
     pub index : usize,
     pub semaphore_pool : SemaphorePool,
     pub in_flight : vk::Fence,
+    pub framebuffer : Framebuffer,
+    pub(in crate) image_available : vk::Semaphore,
+    pub(in crate) render_finished : vk::Semaphore,
 
     pub graphics_command_pool : Option<CommandPool>,
 }
 
 impl FrameData {
-    pub fn new(index : usize, device : &Arc<LogicalDevice>) -> Self {
+    pub fn new(index : usize, device : &Arc<LogicalDevice>, framebuffer : Framebuffer) -> Self {
         Self {
             device : device.clone(),
             index,
@@ -32,6 +37,9 @@ impl FrameData {
                         .reset()
                         .build(device)
                 }),
+            framebuffer,
+            image_available : device.create_semaphore(),
+            render_finished : device.create_semaphore()
         }
     }
 
@@ -46,6 +54,8 @@ impl FrameData {
 impl Drop for FrameData {
     fn drop(&mut self) {
         unsafe {
+            self.device.handle().destroy_semaphore(self.image_available, None);
+            self.device.handle().destroy_semaphore(self.render_finished, None);
             self.device.handle().destroy_fence(self.in_flight, None);
         }
     }

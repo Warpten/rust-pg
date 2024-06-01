@@ -13,7 +13,7 @@ use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
 use crate::vk::surface::Surface;
 
-use super::{image::ImageCreateInfo, render_pass::{RenderPassCreateInfo, SubpassAttachment}};
+use super::{image::ImageCreateInfo, render_pass::{RenderPassCreateInfo, SubpassAttachment}, renderer::RendererOptions};
 
 pub struct Swapchain {
     device : Arc<LogicalDevice>,
@@ -296,57 +296,51 @@ impl Swapchain {
         })
     }
 
-    pub fn create_render_pass(&self, depth : bool, resolve : bool) -> RenderPass {
+    pub fn create_render_pass(&self) -> RenderPassCreateInfo {
         let color_format = self.present_images.get(0).map(Image::format).expect("Unable to find the format of the presentation image");
+        let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
+        let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
 
-        let mut subpass_attachments = vec![SubpassAttachment::color(0)];
-        
-        let mut create_info = RenderPassCreateInfo::default()
-            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
-
-        if depth {
-            let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
-            create_info = create_info.depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE);
-        }
-
-        if resolve {
-            let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
-            create_info = create_info.resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR);
-            subpass_attachments.push(SubpassAttachment::resolve(0));
-        }
-
-        create_info.dependency(
-                vk::SUBPASS_EXTERNAL,
-                0,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            )
-            .subpass(vk::PipelineBindPoint::GRAPHICS, &subpass_attachments, None)
-            .build(&self.device)
+        RenderPassCreateInfo::default()
+            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
+            .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
     }
 
-    pub fn create_framebuffers(&self, render_pass : &RenderPass, resolve : bool, depth : bool) -> Vec<Framebuffer> {
+    pub fn get_clear_values(&self, settings : &RendererOptions) -> Vec<vk::ClearValue> {
+        let mut clears = vec![
+            vk::ClearValue {
+                color : vk::ClearColorValue {
+                    float32: settings.clear_color,
+                },
+            },
+            // TODO: Remember nuking this if somehow we add support for non-depth enabled framebuffers
+            vk::ClearValue {
+                depth_stencil : vk::ClearDepthStencilValue {
+                    depth : 1.0f32,
+                    stencil : 0,
+                }
+            }
+        ];
+
+
+
+        clears
+    }
+
+    pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
         let mut framebuffers = Vec::<Framebuffer>::with_capacity(self.present_images.len());
         for i in 0..self.present_images.len() {
             let mut attachment = Vec::<vk::ImageView>::new();
             if self.resolve_images.is_empty() {
                 attachment.push(self.present_images[i].view());
-                if depth {
-                    if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
-                        attachment.push(depth_image);
-                    }
+                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
+                    attachment.push(depth_image);
                 }
             } else {
-                if resolve {
-                    attachment.push(self.resolve_images[i].view());
-                }
-
-                if depth {
-                    if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
-                        attachment.push(depth_image);
-                    }
+                attachment.push(self.resolve_images[i].view());
+                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) { 
+                    attachment.push(depth_image);
                 }
                 attachment.push(self.present_images[i].view());
             }

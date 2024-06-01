@@ -1,5 +1,6 @@
 use std::mem::{offset_of, size_of};
 
+use egui::{FontDefinitions, Style};
 use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
 use renderer::gui::context::{Interface, InterfaceCreateInfo};
 use renderer::traits::handle::Handle;
@@ -8,22 +9,17 @@ use renderer::vk::descriptor::layout::{DescriptorSetLayout, DescriptorSetLayoutB
 use renderer::vk::framebuffer::Framebuffer;
 use renderer::vk::pipeline::layout::PipelineLayoutInfo;
 use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
-use renderer::vk::render_pass::RenderPass;
+use renderer::vk::render_pass::{RenderPass, SubpassAttachment};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
+use rendering::geometry::GeometryRendererBuilder;
 use winit::event::WindowEvent;
 
 mod casc;
 mod rendering;
 
 pub struct ApplicationData {
-    gui : Interface,
-
-    pipeline : Pipeline,
-    buffer : Buffer,
-    render_pass: RenderPass,
-    framebuffers : Vec<Framebuffer>,
 }
 
 #[derive(Copy, Clone)]
@@ -56,58 +52,7 @@ impl Vertex for TerrainVertex {
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
-    let buffer = DynamicBufferBuilder::dynamic()
-        .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-        .gpu_only()
-        .build(&app.renderer.device, &app.renderer.transfer_pool, &[
-            TerrainVertex {
-                pos : [ 0.0f32, -0.5f32],
-                color : [ 1.0f32, 0.0f32, 0.0f32 ]
-            },
-            TerrainVertex {
-                pos : [ 0.5f32, 0.5f32],
-                color : [ 0.0f32, 1.0f32, 0.0f32 ]
-            },
-            TerrainVertex {
-                pos : [ -0.5f32, 0.5f32],
-                color : [ 0.0f32, 0.0f32, 1.0f32 ]
-            }
-        ]);
-
-    let descriptor_set_layout = DescriptorSetLayout::builder()
-        // This is a workaround for an Intel driver crash.
-        // .binding(0, vk::DescriptorType::UNIFORM_BUFFER, vk::ShaderStageFlags::ALL, 1)
-        .build(&app.renderer.device);
-
-    let pipeline_layout = PipelineLayoutInfo::default()
-        .layout(&descriptor_set_layout)
-        .build(&app.renderer.device);
-
-    let render_pass = app.renderer.swapchain.create_render_pass(true, true);
-    let framebuffers = app.renderer.swapchain.create_framebuffers(&render_pass, true, true);
-
-    let pipeline = PipelineInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-        .layout(pipeline_layout.handle())
-        .depth(DepthOptions::enabled())
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::CLOCKWISE)
-        .render_pass(render_pass.handle())
-        .samples(app.renderer.options().multisampling)
-        .pool(&app.renderer.pipeline_cache)
-        .vertex::<TerrainVertex>()
-        .add_shader("./assets/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
-        .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
-        .build(&app.renderer.device);
-
-    ApplicationData {
-        pipeline,
-        buffer,
-        render_pass,
-        framebuffers,
-
-        gui : InterfaceCreateInfo::new(&app.renderer).build(&app.window)
-    }
+    ApplicationData { }
 }
 
 fn prepare() -> ApplicationOptions {
@@ -118,36 +63,20 @@ fn prepare() -> ApplicationOptions {
             .resolution([1280, 720])
             .multisampling(vk::SampleCountFlags::TYPE_4)
         )
+        .add_renderable(|_device, _swapchain, _pipeline_cache| {
+            Box::new(GeometryRendererBuilder { })
+        })
+        /*.add_renderable(|device, swapchain, pipeline_cache| {
+            Box::new(Interface::builder())
+        })*/
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
-    let viewport = vk::Viewport::default()
-        .x(0.0f32)
-        .y(0.0f32)
-        .min_depth(0.0f32)
-        .max_depth(1.0f32)
-        .width(app.renderer.swapchain.extent.width as _)
-        .height(app.renderer.swapchain.extent.height as _);
-
-    let scissors = vk::Rect2D::default()
-        .offset(vk::Offset2D { x: 0, y: 0 })
-        .extent(app.renderer.swapchain.extent);
-
-    let (image_acquired, cmd) = app.renderer.begin_frame(&data.render_pass, &data.framebuffers[app.renderer.frame_index()])?;
-
-    cmd.label("Draw application frame".to_owned(), [1.0, 0.0, 0.0, 0.0], || {
-        cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &data.pipeline);
-        cmd.set_viewport(0, &[viewport]);
-        cmd.set_scissors(0, &[scissors]);
-        cmd.bind_vertex_buffers(0, &[(&data.buffer, 0)]);
-        cmd.draw(data.buffer.element_count(), 1, 0, 0);
-    });
-
-    app.renderer.end_frame(image_acquired, &cmd)
+    app.renderer.draw_frame()
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
-    _ = data.gui.handle_event(&event, &app.window);
+    // _ = app.renderer.gui.handle_event(&event, &app.window);
 }
 
 fn main() {

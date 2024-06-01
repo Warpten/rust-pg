@@ -28,6 +28,10 @@ impl Window {
         }
     }
 
+    pub fn pixel_per_point(&self) -> f32 {
+        self.handle.scale_factor() as _
+    }
+
     pub fn surface_extensions(&self) -> Vec<*const i8> {
         let raw_display_handle : RawDisplayHandle = self.handle().display_handle()
             .map(Into::into)

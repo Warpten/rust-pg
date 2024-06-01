@@ -17,8 +17,9 @@ pub fn with_delta(delta : &ImageDelta, copy : vk::BufferImageCopy) -> vk::Buffer
         .buffer_image_height(delta.image.height() as u32)
         .buffer_row_length(delta.image.width() as u32)
         .image_offset(vk::Offset3D::default())
-        .image_extent(vk::Extent3D::default()
-            .width(delta.image.width() as u32)
-            .height(delta.image.height() as u32)
-        )
+        .image_extent(vk::Extent3D {
+            width : delta.image.width() as u32,
+            height : delta.image.height() as u32,
+            depth : 1,
+        })
 }

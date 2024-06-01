@@ -3,9 +3,10 @@ use std::{ops::Range, sync::{Arc, Mutex}};
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 
-use crate::{graph::buffer::Buffer, make_handle, vk::logical_device::LogicalDevice};
+use crate::vk::logical_device::LogicalDevice;
+use crate::make_handle;
 
-use super::{command_buffer::CommandBuffer, renderer::Renderer};
+use super::command_buffer::CommandBuffer;
 
 pub struct Image {
     device : Arc<LogicalDevice>,
@@ -286,63 +287,6 @@ impl Image { // Utilities
         aspect_flags
     }
 
-    pub fn from_buffer(&self, renderer : &Renderer, buffer : Buffer, cb : impl FnOnce(&CommandBuffer)) {
-        let cmd = CommandBuffer::builder()
-            .pool(&renderer.transfer_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .build_one(&renderer.device);
-
-        {
-            let image_memory_barrier = vk::ImageMemoryBarrier::default()
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .src_access_mask(vk::AccessFlags::NONE_KHR)
-                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .old_layout(vk::ImageLayout::UNDEFINED)
-                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .subresource_range(vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_array_layer(self.layers.start)
-                    .layer_count(self.layer_count())
-                    .base_mip_level(self.levels.start)
-                    .level_count(self.level_count())
-                );
-
-            cmd.pipeline_barrier(
-                vk::PipelineStageFlags::HOST,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::BY_REGION,
-                &[], &[], &[image_memory_barrier]
-            );
-        }
-
-        cb(&cmd);
-
-        {
-            let image_memory_barrier = vk::ImageMemoryBarrier::default()
-                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                .dst_access_mask(vk::AccessFlags::SHADER_READ)
-                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .subresource_range(vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_array_layer(self.layers.start)
-                    .layer_count(self.layer_count())
-                    .base_mip_level(self.levels.start)
-                    .level_count(self.level_count())
-                );
-
-            cmd.pipeline_barrier(
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::VERTEX_SHADER,
-                vk::DependencyFlags::BY_REGION,
-                &[], &[], &[image_memory_barrier]
-            );
-        }
-    }
-    
     /// Records a layout transition for this image.
     ///
     /// # Arguments

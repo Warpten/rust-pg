@@ -3,7 +3,6 @@ use ash::vk;
 use crate::make_handle;
 use crate::traits::handle::{Handle, Handles};
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::renderer::Renderer;
 
 #[derive(Default)]
 pub struct PipelineLayoutInfo {

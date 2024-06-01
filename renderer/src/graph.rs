@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use ash::vk;
 use nohash_hasher::IntMap;
@@ -13,8 +12,6 @@ use crate::vk::command_buffer::CommandBuffer;
 use crate::vk::command_pool::CommandPool;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::queue::QueueAffinity;
-use crate::vk::renderer::Renderer;
 
 pub mod attachment;
 pub mod buffer;
@@ -23,18 +20,17 @@ pub mod resource;
 pub mod pass;
 pub mod texture;
 
-pub struct Graph<'a> {
+pub struct Graph {
     pub(in crate) passes : Manager<Pass>,
     pub(in crate) textures : Manager<Texture>,
     pub(in crate) buffers : Manager<Buffer>,
     pub(in crate) attachments : Manager<Attachment>,
 
-    renderer : &'a Renderer,
     // Optionally provides a command pool for the given queue family.
     command_pools : IntMap<u32, CommandPool>,
 }
 
-impl Graph<'_> { // Graph compilation functions
+impl Graph { // Graph compilation functions
     /// Builds this graph into a render pass.
     pub fn build(&mut self) {
         let topology = {
@@ -54,7 +50,7 @@ impl Graph<'_> { // Graph compilation functions
         };
 
         // Walk the topology and process resources
-        let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);
+        /*let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);
         let command_buffer : CommandBuffer = todo!(); // self.get_command_buffer(&graphics_queues[0], vk::CommandBufferLevel::SECONDARY);
 
         let mut texture_state_tracker = HashMap::<TextureID, TextureState>::new();
@@ -96,7 +92,7 @@ impl Graph<'_> { // Graph compilation functions
             }
 
             // Persist the command buffer here.
-        }
+        }*/
     }
 
     fn process_texture(
@@ -123,15 +119,14 @@ impl Graph<'_> { // Graph compilation functions
     fn process_attachment(&self, pass : &Pass, attachment : &Attachment, options : &AttachmentOptions) {}
 }
 
-impl Graph<'_> { // Public API
-    pub fn new<'a>(renderer : &'a Renderer) -> Graph {
+impl Graph { // Public API
+    pub fn new() -> Graph {
         Graph {
             passes: Default::default(),
             textures: Default::default(),
             buffers: Default::default(),
             attachments: Default::default(),
 
-            renderer,
             command_pools : IntMap::<u32, CommandPool>::default(),
         }
     }
