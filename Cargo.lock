@@ -2137,6 +2137,7 @@ dependencies = [
  "ash",
  "bytes",
  "egui",
+ "egui-winit",
  "enumflags2",
  "md5",
  "puffin",

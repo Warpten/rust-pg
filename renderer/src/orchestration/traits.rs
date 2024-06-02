@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use ash::vk;
-use egui_winit::winit::event::WindowEvent;
+use egui_winit::{winit::event::WindowEvent, EventResponse};
 
 use crate::{vk::{command_buffer::CommandBuffer, logical_device::LogicalDevice, pipeline::pool::PipelinePool, render_pass::RenderPassCreateInfo, swapchain::Swapchain}, window::Window};
 
-use super::orchestrator::RenderingContext;
+use super::renderer::RenderingContext;
 
 /// The counterpart to [`Renderable`] for initialization of Vulkan structures.
 pub trait RenderableFactory {
@@ -17,9 +17,8 @@ pub trait RenderableFactory {
 
 /// Describes an object that needs to emit draw commands.
 pub trait Renderable {
-    fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> bool {
-        false
-    }
+    /// Handles window events.
+    fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> Option<EventResponse> { Some(EventResponse { repaint : false, consumed : false }) }
 
     /// Adds draw commands for the current frame.
     /// 
@@ -30,9 +29,7 @@ pub trait Renderable {
     fn draw_frame(&mut self, cmd : &CommandBuffer, frame_index : usize);
     
     /// Specifies how the contents of this pass are recorded to a command buffer.
-    fn contents_type(&self) -> vk::SubpassContents {
-        vk::SubpassContents::INLINE
-    }
+    fn contents_type(&self) -> vk::SubpassContents { vk::SubpassContents::INLINE }
 }
 
 pub type RenderableFactoryProvider = fn(&Arc<LogicalDevice>, &Arc<Swapchain>, &Arc<PipelinePool>) -> Box<dyn RenderableFactory>;

@@ -1,15 +1,8 @@
 use std::mem::{offset_of, size_of};
 
-use egui::{FontDefinitions, Style};
-use renderer::application::{Application, ApplicationOptions, ApplicationRenderError};
-use renderer::gui::context::{Interface, InterfaceCreateInfo};
-use renderer::traits::handle::Handle;
-use renderer::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer};
-use renderer::vk::descriptor::layout::{DescriptorSetLayout, DescriptorSetLayoutBuilder};
-use renderer::vk::framebuffer::Framebuffer;
-use renderer::vk::pipeline::layout::PipelineLayoutInfo;
-use renderer::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
-use renderer::vk::render_pass::{RenderPass, SubpassAttachment};
+use renderer::application::{Application, ApplicationOptions, RendererError};
+use renderer::gui::context::Interface;
+use renderer::vk::pipeline::Vertex;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -20,35 +13,6 @@ mod casc;
 mod rendering;
 
 pub struct ApplicationData {
-}
-
-#[derive(Copy, Clone)]
-struct TerrainVertex {
-    pos : [f32; 2],
-    color : [f32; 3],
-}
-
-impl Vertex for TerrainVertex {
-    fn bindings() -> Vec<(u32, vk::VertexInputRate)> {
-        vec![
-            (size_of::<Self>() as u32, vk::VertexInputRate::VERTEX)
-        ]
-    }
-
-    fn format_offset() -> Vec<vk::VertexInputAttributeDescription> {
-        vec![
-            vk::VertexInputAttributeDescription::default()
-                .format(vk::Format::R32G32_SFLOAT)
-                .binding(0)
-                .location(0)
-                .offset(offset_of!(TerrainVertex, pos) as u32),
-            vk::VertexInputAttributeDescription::default()
-                .format(vk::Format::R32G32B32_SFLOAT)
-                .binding(0)
-                .location(1)
-                .offset(offset_of!(TerrainVertex, color) as u32),
-        ]
-    }
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
@@ -71,7 +35,7 @@ fn prepare() -> ApplicationOptions {
         })
 }
 
-pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
+pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
     app.renderer.draw_frame()
 }
 

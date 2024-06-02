@@ -6,7 +6,6 @@ use crate::vk::logical_device::LogicalDevice;
 use crate::vk::semaphore_pool::SemaphorePool;
 
 use super::command_buffer::CommandBuffer;
-use super::framebuffer::Framebuffer;
 use super::queue::QueueAffinity;
 
 pub struct FrameData {
@@ -14,7 +13,6 @@ pub struct FrameData {
     pub index : usize,
     pub semaphore_pool : SemaphorePool,
     pub in_flight : vk::Fence,
-    pub framebuffer : Framebuffer,
     pub(in crate) image_available : vk::Semaphore,
     pub(in crate) render_finished : vk::Semaphore,
 
@@ -23,7 +21,7 @@ pub struct FrameData {
 }
 
 impl FrameData {
-    pub fn new(index : usize, device : &Arc<LogicalDevice>, framebuffer : Framebuffer) -> Self {
+    pub fn new(index : usize, device : &Arc<LogicalDevice>) -> Self {
         let graphics_queue = device.get_queue(QueueAffinity::Graphics, 0).unwrap();
         let graphics_command_pool = CommandPool::builder(graphics_queue.family())
             .reset()
@@ -41,7 +39,6 @@ impl FrameData {
             semaphore_pool : SemaphorePool::new(device),
             graphics_command_pool,
             cmd,
-            framebuffer,
             image_available : device.create_semaphore(),
             render_finished : device.create_semaphore(),
         }

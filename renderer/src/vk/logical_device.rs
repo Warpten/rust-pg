@@ -122,9 +122,10 @@ impl LogicalDevice {
     /// # Arguments
     /// 
     /// * `queue` - The queue on which to submit.
-    /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
-    /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
-    ///             completed execution.
+    /// * `command_buffers`   - An array of command buffers to submit.
+    /// * `wait_info`         - An array of semaphores to wait on before executing the command buffers.
+    /// * `signal_semaphores` - An array of semaphores that will be signalled when all command buffers have completed execution.
+    /// * `fence`             - A fence that will be signalled when all command buffers have completed execution.
     pub fn submit(&self,
         queue : &impl Handle<vk::Queue>,
         command_buffers : &[&CommandBuffer],

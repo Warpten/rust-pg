@@ -1,7 +1,8 @@
 use std::{mem::{offset_of, size_of}, sync::Arc};
 
 use ash::vk;
-use renderer::{orchestration::{orchestrator::RenderingContext, traits::{Renderable, RenderableFactory}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_buffer::CommandBuffer, command_pool::{CommandPool, CommandPoolBuilder}, descriptor::layout::DescriptorSetLayout, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::RenderPassCreateInfo, swapchain::Swapchain}};
+use egui_winit::EventResponse;
+use renderer::{orchestration::{renderer::RenderingContext, traits::{Renderable, RenderableFactory}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_buffer::CommandBuffer, command_pool::{CommandPool, CommandPoolBuilder}, descriptor::layout::DescriptorSetLayout, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::RenderPassCreateInfo, swapchain::Swapchain}};
 use renderer::vk::render_pass::SubpassAttachment;
 
 #[derive(Copy, Clone)]
@@ -54,7 +55,7 @@ impl RenderableFactory for GeometryRendererBuilder {
             ).subpass(vk::PipelineBindPoint::GRAPHICS, &[
                 SubpassAttachment::color(0),
                 SubpassAttachment::resolve(0)
-            ], None)
+            ], SubpassAttachment::depth(0).into())
     }
 }
 
@@ -144,4 +145,10 @@ impl Renderable for GeometryRenderer {
             cmd.draw(self.buffer.element_count(), 1, 0, 0);
         });
     }
+
+    fn handle_event(&mut self, event : &winit::event::WindowEvent, window : &renderer::window::Window) -> Option<EventResponse> {
+        None
+    }
+    
+    fn contents_type(&self) -> vk::SubpassContents { vk::SubpassContents::INLINE }
 }

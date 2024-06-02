@@ -8,7 +8,6 @@ use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
-use crate::orchestration::orchestrator::RenderingContext;
 use crate::orchestration::traits::{Renderable, RenderableFactory};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
@@ -108,14 +107,13 @@ impl RenderableFactory for InterfaceCreateInfo {
         ).subpass(vk::PipelineBindPoint::GRAPHICS, &[
             SubpassAttachment::color(0),
             SubpassAttachment::resolve(0)
-        ], None)
+        ], Some(SubpassAttachment::depth(0)))
     }
 }
 
 impl Renderable for Interface {
-    fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> bool {
-        let result = self.egui.on_window_event(window.handle(), event);
-        result.consumed
+    fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> Option<EventResponse> {
+        Some(self.egui.on_window_event(window.handle(), event))
     }
     
     fn draw_frame(&mut self, cmd : &CommandBuffer, frame_index : usize) {
@@ -187,6 +185,7 @@ impl Interface {
         let egui_context = Context::default();
         egui_context.set_fonts(fonts);
         egui_context.set_style(style);
+        egui_context.set_visuals(egui::Visuals::light());
 
         let egui = egui_winit::State::new(egui_context.clone(),
             ViewportId::ROOT,
@@ -284,10 +283,6 @@ impl Interface {
 
             textures : HashMap::default(),
         }
-    }
-
-    pub fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> EventResponse {
-        self.egui.on_window_event(window.handle(), event)
     }
 
     pub fn begin_frame(&mut self, window : &Window) {

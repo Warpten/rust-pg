@@ -2,21 +2,24 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::{orchestration::{orchestrator::{Renderer, RendererBuilder}, traits::RenderableFactoryProvider}, vk::{context::Context, renderer::RendererOptions}};
+use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
+use crate::vk::{context::Context, renderer::RendererOptions};
 use crate::window::Window;
+
+type OrchestratorFn = fn(Arc<Context>) -> Orchestrator;
 
 pub struct ApplicationOptions {
     pub title : String,
-    pub renderer : RendererOptions,
-    pub renderables : Vec<RenderableFactoryProvider>,
+    pub renderer_options : RendererOptions,
+    pub orchestrator : OrchestratorFn,
 }
 
 impl Default for ApplicationOptions {
     fn default() -> Self {
         Self {
-            renderer: Default::default(),
+            renderer_options: Default::default(),
             title: "WorldEdit".to_owned(),
-            renderables : vec![],
+            orchestrator : Orchestrator::new,
         }
     }
 }
@@ -27,23 +30,20 @@ impl ApplicationOptions {
         self
     }
 
-    value_builder! { renderer, renderer, RendererOptions }
+    value_builder! { renderer, renderer_options, RendererOptions }
+    value_builder! { orchestrator, orchestrator, OrchestratorFn }
 
-    #[inline] pub fn add_renderable(mut self, renderable_factory : RenderableFactoryProvider) -> Self {
-        self.renderables.push(renderable_factory);
-        self
-    }
 }
 
 #[derive(Debug)]
-pub enum ApplicationRenderError {
+pub enum RendererError {
     InvalidSwapchain,
 }
 
 pub type PrepareFn = fn() -> ApplicationOptions;
 pub type SetupFn<T> = fn(&mut Application) -> T;
 pub type UpdateFn<T> = fn(&mut Application, &mut T);
-pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), ApplicationRenderError>;
+pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), RendererError>;
 pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
 pub type InterfaceFn<T> = fn(&mut T, ctx : &mut egui::Context);
 
@@ -83,7 +83,7 @@ impl<T> ApplicationBuilder<T> {
     pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
         if let Some(render_fn) = self.render {
             match render_fn(application, data) {
-                Err(ApplicationRenderError::InvalidSwapchain) => true,
+                Err(RendererError::InvalidSwapchain) => true,
                 _ => false,
             }
         } else {
@@ -145,7 +145,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => todo!(), // app.orchestrator.device.wait_idle(),
+                Event::LoopExiting => app.orchestrator.context.device.wait_idle(),
                 _ => { }
             }
         }
@@ -155,8 +155,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 pub struct Application {
     pub context : Arc<Context>,
-    pub renderer : Renderer,
-    // pub options : ApplicationOptions,
+    pub orchestrator : RendererOrchestrator,
 }
 
 impl Application {
@@ -174,7 +173,7 @@ impl Application {
         let window = Window::new(&options, event_loop);
 
         let context = Arc::new(unsafe {
-            let mut all_extensions = options.renderer.instance_extensions.clone();
+            let mut all_extensions = options.renderer_options.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
             all_extensions.push(ash::ext::debug_utils::NAME.into());
             all_extensions.dedup();
@@ -182,15 +181,11 @@ impl Application {
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         });
 
-        let mut orchestrator = RendererBuilder::default(&context);
-        for renderable in options.renderables {
-            orchestrator.add_renderable(renderable);
-        }
+        let orchestrator = (options.orchestrator)(&context).build(options.renderer_options, window);
 
         Self {
             context : context.clone(),
-            renderer : orchestrator.build(options.renderer, window),
-            // window,
+            orchestrator
         }
     }
 

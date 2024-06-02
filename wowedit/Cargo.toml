@@ -16,3 +16,4 @@ renderer = { path = "../renderer" }
 winit = "^0.29.4" # Synchronize this with whatever egui-winit depends on
 ash = { workspace = true }
 egui = { workspace = true }
+egui-winit = { workspace = true }
