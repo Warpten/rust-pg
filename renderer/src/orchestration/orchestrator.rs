@@ -6,6 +6,7 @@ use std::{hint, slice};
 use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 use ash::vk;
+use egui_winit::winit::event::WindowEvent;
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use nohash_hasher::IntMap;
@@ -178,75 +179,48 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    pub fn handle_event(&mut self, event : &WindowEvent) -> bool {
+        for renderable in &mut self.renderables {
+            if renderable.handle_event(event, &self.context.window) { return true; }
+        }
+
+        false
+    }
+
     /// Takes care of drawing an entire frame.
     pub fn draw_frame(&mut self) -> Result<(), ApplicationRenderError> {
         let (image_acquired, _) = self.acquire_next_image()?;
 
         let frame = &self.frames[self.frame_index]; // Current frame data.
 
-        let cmd = CommandBuffer::builder()
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .pool(frame.graphics_command_pool.as_ref().unwrap())
-            .build_one(&self.context.device);
-
-        cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        cmd.begin_render_pass(&self.context.render_pass, &frame.framebuffer, vk::Rect2D {
+        frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        frame.cmd.begin_render_pass(&self.context.render_pass, &frame.framebuffer, vk::Rect2D {
             offset : vk::Offset2D { x: 0, y : 0 },
             extent : self.context.swapchain.extent
         }, &self.clear_values, self.renderables[0].contents_type());
 
         for i in 0..self.renderables.len() {
             if i > 0 {
-                cmd.next_subpass(self.renderables[i].contents_type());
+                frame.cmd.next_subpass(self.renderables[i].contents_type());
             }
 
-            self.renderables[i].draw_frame(&cmd, self.frame_index);
+            self.renderables[i].draw_frame(&frame.cmd, self.frame_index);
         }
 
-        cmd.end_render_pass();
-        cmd.end();
-        self.submit_and_present(&cmd, image_acquired)?;
+        frame.cmd.end_render_pass();
+        frame.cmd.end();
+
+        let signal_semaphore = self.submit_frame(&[(image_acquired, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]);
+        self.present_frame(signal_semaphore)?;
 
         Ok(())
-    }
-
-    // TODO: rework this to record/replay by reusing command buffers across frames
-    /// Begins a new frame.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `render_pass` - The render pass that is the subject of this call.
-    pub fn begin_frame(&mut self, render_pass : &RenderPass) -> Result<(vk::Semaphore, CommandBuffer), ApplicationRenderError> {
-        let (image_acquired, _) = self.acquire_next_image()?;
-
-        let frame = &self.frames[self.frame_index];
-
-        let cmd = CommandBuffer::builder()
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .pool(frame.graphics_command_pool.as_ref().unwrap())
-            .build_one(&self.context.device);
-        
-        cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        cmd.begin_render_pass(render_pass, &frame.framebuffer, vk::Rect2D {
-            offset : vk::Offset2D { x: 0, y : 0 },
-            extent : self.context.swapchain.extent
-        }, &self.clear_values, vk::SubpassContents::INLINE);
-
-        Ok((image_acquired, cmd))
-    }
-
-    /// Ends the current frame.
-    pub fn end_frame(&mut self, image_acquired : vk::Semaphore, cmd : &CommandBuffer) -> Result<(), ApplicationRenderError> {
-        cmd.end_render_pass();
-        cmd.end();
-        self.submit_and_present(cmd, image_acquired)
     }
 
     /// Acquires the next available image from the swapchain. Returns a semaphore that will be signaled when the image is acquired as well
     /// as the index of said image in the swapchain. This index is different from the frame index.
     /// 
     /// This function returns a semaphore that will be signalled when an image is available.
-    pub fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
+    fn acquire_next_image(&mut self) -> Result<(vk::Semaphore, usize), ApplicationRenderError> {
         self.context.device.wait_for_fence(self.frames[self.frame_index].in_flight);
 
         let acquired_semaphore = self.frames[self.frame_index].image_available;
@@ -282,11 +256,18 @@ impl Renderer {
     /// # Returns
     /// 
     /// A [`vk::Semaphore`] that will be signalled when all command buffers have completed execution.
-    pub fn submit_frame(&mut self, command_buffers : &[&CommandBuffer], wait_info : &[(vk::Semaphore, vk::PipelineStageFlags)]) -> vk::Semaphore {
+    fn submit_frame(&mut self, wait_info : &[(vk::Semaphore, vk::PipelineStageFlags)]) -> vk::Semaphore {
         let signal_semaphore = self.frames[self.frame_index].render_finished;
 
         let graphics_queue = self.context.device.get_queues(QueueAffinity::Graphics)[0];
-        self.context.device.submit(graphics_queue, command_buffers, wait_info, &[signal_semaphore], self.frames[self.frame_index].in_flight);
+        self.context.device.submit(graphics_queue,
+            &[
+                &self.frames[self.frame_index].cmd
+            ],
+            wait_info,
+            &[signal_semaphore],
+            self.frames[self.frame_index].in_flight
+        );
     
         signal_semaphore
     }
@@ -296,7 +277,7 @@ impl Renderer {
     /// # Arguments
     /// 
     /// * `wait_semaphore` - The semaphore to wait on in order to present the image that was acquired.
-    pub fn present_frame(&mut self, wait_semaphore: vk::Semaphore) -> Result<(), ApplicationRenderError> {
+    fn present_frame(&mut self, wait_semaphore: vk::Semaphore) -> Result<(), ApplicationRenderError> {
         let wait_semaphores = [wait_semaphore];
         let swapchains = [self.context.swapchain.handle()];
         let image_indices = [self.image_index as u32];
@@ -321,18 +302,6 @@ impl Renderer {
                 Err(error) => panic!("Error while presenting frame: {:?}", error)
             }
         }
-    }
-    
-    /// Submits the provided command buffer to the graphics queue and presents the image to the swapchain.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `cmd` - The command buffer to submit.
-    /// * `wait_semaphore` - The semaphore to wait on. This semaphore is signalled once an image has been acquired from the swapchain.
-    pub fn submit_and_present(&mut self, cmd : &CommandBuffer, wait_semaphore : vk::Semaphore) -> Result<(), ApplicationRenderError> {
-        let signal_semaphore = self.submit_frame(&[cmd], &[(wait_semaphore, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]);
-
-        self.present_frame(signal_semaphore)
     }
 }
 

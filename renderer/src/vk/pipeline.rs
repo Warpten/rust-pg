@@ -30,6 +30,7 @@ pub struct PipelineInfo {
 
     layout : vk::PipelineLayout,
     render_pass : vk::RenderPass,
+    subpass : u32,
     shaders : Vec<(PathBuf, vk::ShaderStageFlags)>,
     depth : DepthOptions,
     cull_mode : vk::CullModeFlags,
@@ -56,9 +57,14 @@ impl PipelineInfo {
         self
     }
 
+    #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass, subpass : u32) -> Self {
+        self.render_pass = render_pass;
+        self.subpass = subpass;
+        self
+    }
+
     value_builder! { depth, depth, DepthOptions }
     value_builder! { layout, layout, vk::PipelineLayout }
-    value_builder! { render_pass, render_pass, vk::RenderPass }
     value_builder! { cull_mode, mode, cull_mode, vk::CullModeFlags }
     value_builder! { samples, samples, vk::SampleCountFlags }
     value_builder! { front_face, front, front_face, vk::FrontFace }
@@ -100,7 +106,6 @@ impl Default for PipelineInfo {
             name : Some("Default Pipeline"),
 
             layout: vk::PipelineLayout::default(),
-            render_pass: vk::RenderPass::null(),
             shaders: vec![],
             depth : DepthOptions {
                 test : true,
@@ -120,6 +125,9 @@ impl Default for PipelineInfo {
             vertex_format_offset : vec![],
 
             pool : None,
+
+            render_pass : vk::RenderPass::null(),
+            subpass : 0,
         }
     }
 }
@@ -272,6 +280,7 @@ impl Pipeline {
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blend_state)
             .render_pass(info.render_pass)
+            .subpass(info.subpass)
             .layout(info.layout);
 
         let pipelines = unsafe {

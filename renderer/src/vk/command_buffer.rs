@@ -40,6 +40,28 @@ impl CommandBuffer {
         }
     }
 
+    pub fn begin_label(&self, label : String, color : [f32; 4]) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                let name = CString::new(label).unwrap();
+
+                let info = vk::DebugUtilsLabelEXT::default()
+                    .label_name(name.as_c_str())
+                    .color(color);
+
+                debug_utils.cmd_begin_debug_utils_label(self.handle, &info);
+            }
+        }
+    }
+
+    pub fn end_label(&self) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                debug_utils.cmd_end_debug_utils_label(self.handle);
+            }
+        }
+    }
+
     pub fn label(&self, label : String, color : [f32; 4], cb : impl Fn()) {
         unsafe {
             if let Some(debug_utils) = &self.device.debug_utils {

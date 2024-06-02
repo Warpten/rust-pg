@@ -66,9 +66,9 @@ fn prepare() -> ApplicationOptions {
         .add_renderable(|_device, _swapchain, _pipeline_cache| {
             Box::new(GeometryRendererBuilder { })
         })
-        /*.add_renderable(|device, swapchain, pipeline_cache| {
+        .add_renderable(|_device, _swapchain, _pipeline_cache| {
             Box::new(Interface::builder())
-        })*/
+        })
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), ApplicationRenderError> {
@@ -76,7 +76,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), A
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
-    // _ = app.renderer.gui.handle_event(&event, &app.window);
+    _ = app.renderer.handle_event(&event);
 }
 
 fn main() {

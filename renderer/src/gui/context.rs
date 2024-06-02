@@ -20,11 +20,11 @@ use crate::vk::framebuffer::Framebuffer;
 use crate::vk::helpers::{prepare_buffer_image_copy, with_delta};
 use crate::vk::image::{Image, ImageCreateInfo};
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::pipeline::layout::PipelineLayoutInfo;
+use crate::vk::pipeline::layout::{PipelineLayout, PipelineLayoutInfo};
 use crate::vk::pipeline::pool::PipelinePool;
 use crate::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
 use crate::vk::queue::{Queue, QueueAffinity};
-use crate::vk::render_pass::{RenderPass, RenderPassCreateInfo};
+use crate::vk::render_pass::{RenderPass, RenderPassCreateInfo, SubpassAttachment};
 use crate::vk::sampler::Sampler;
 use crate::vk::swapchain::Swapchain;
 use crate::window::Window;
@@ -86,7 +86,7 @@ pub struct InterfaceCreateInfo {
 impl InterfaceCreateInfo {
     pub fn new() -> InterfaceCreateInfo {
         InterfaceCreateInfo {
-            fonts : || FontDefinitions::empty(),
+            fonts : || FontDefinitions::default(),
             style : || Style::default(),
         }
     }
@@ -98,13 +98,56 @@ impl RenderableFactory for InterfaceCreateInfo {
     }
 
     fn express_dependencies(&self, create_info : RenderPassCreateInfo) -> RenderPassCreateInfo {
-        create_info
+        create_info.dependency(
+            0,
+            1,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::empty()
+        ).subpass(vk::PipelineBindPoint::GRAPHICS, &[
+            SubpassAttachment::color(0),
+            SubpassAttachment::resolve(0)
+        ], None)
     }
 }
 
 impl Renderable for Interface {
-    fn draw_frame(&self, cmd : &CommandBuffer, frame_index : usize) {
-        todo!()
+    fn handle_event(&mut self, event : &WindowEvent, window : &Window) -> bool {
+        let result = self.egui.on_window_event(window.handle(), event);
+        result.consumed
+    }
+    
+    fn draw_frame(&mut self, cmd : &CommandBuffer, frame_index : usize) {
+        let window = &self.rendering_context.window;
+
+        let raw_input = self.egui.take_egui_input(window.handle());
+        self.context.begin_frame(raw_input);
+
+        // egui calls here...
+        // ...
+
+        egui::SidePanel::left("some_panel").show(&self.context, |ui| {
+            ui.heading("Hello");
+            ui.label("Hello egui!");
+        });
+
+        egui::Window::new("My Window")
+            .resizable(true)
+            .scroll2([true, true])
+            .show(&self.context, |ui| {
+                ui.heading("Hello");
+                ui.label("Hello egui!");
+                ui.separator();
+                ui.hyperlink("https://github.com/emilk/egui");
+            });
+
+
+        let output = self.context.end_frame();
+        self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
+
+        let clipped_meshes = self.context.tessellate(output.shapes, self.scale_factor as _);
+        self.paint(cmd, frame_index, clipped_meshes, output.textures_delta);
     }
 }
 
@@ -122,6 +165,7 @@ pub struct Interface {
     egui : egui_winit::State,
 
     rendering_context : Arc<RenderingContext>,
+    pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     command_pool : CommandPool,
     frame_data : Vec<FrameData>,
@@ -174,8 +218,8 @@ impl Interface {
             .depth(DepthOptions::disabled())
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .render_pass(context.render_pass.handle())
-            .samples(vk::SampleCountFlags::TYPE_1)
+            .render_pass(context.render_pass.handle(), 1)
+            .samples(context.options.multisampling)
             .pool(&context.pipeline_cache)
             .vertex::<InterfaceVertex>()
             .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
@@ -200,7 +244,6 @@ impl Interface {
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                .index(vk::IndexType::UINT16)
                 .build(&context.device, 1024 * 1024 * 4);
             context.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
 
@@ -208,8 +251,9 @@ impl Interface {
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .build(&context.device, 1024 * 1024 * 2);
-            context.device.set_handle_name(index_buffer.handle(), &"GUI Vertex buffer".to_owned());
+                .index(vk::IndexType::UINT32)
+                .build(&context.device, 1024 * 1024 * 4);
+            context.device.set_handle_name(index_buffer.handle(), &"GUI Index buffer".to_owned());
 
             frame_data.push(FrameData {
                 vertex_buffer,
@@ -227,6 +271,7 @@ impl Interface {
             egui,
             
             rendering_context : context.clone(),
+            pipeline_layout,
             pipeline,
 
             frame_data,
@@ -272,91 +317,88 @@ impl Interface {
         let mut vertex_buffer = frame_data.vertex_buffer.map();
         let mut index_buffer = frame_data.index_buffer.map();
 
-        cmd.begin_render_pass(&self.rendering_context.render_pass, &frame_data.framebuffer, 
-            vk::Rect2D {
-                offset : vk::Offset2D { x : 0, y : 0 },
-                extent : self.extent
-            }, &[], vk::SubpassContents::INLINE
-        );
-        cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
-        cmd.bind_vertex_buffers(0, &[(&frame_data.vertex_buffer, 0)]);
-        cmd.bind_index_buffer(&frame_data.index_buffer, 0);
-        cmd.set_viewport(0, &[
-            vk::Viewport::default()
-                .x(0.0)
-                .y(0.0)
-                .min_depth(0.0)
-                .max_depth(1.0)
-                .width(self.extent.width as f32)
-                .height(self.extent.height as f32)
-        ]);
-
-        let width_points = self.extent.width as f32 / self.scale_factor as f32;
-        let height_points = self.extent.height as f32 / self.scale_factor as f32;
-        cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
-        cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
-
-        // Render the meshes
-        let mut vertex_base = 0;
-        let mut index_base = 0;
-        for egui::ClippedPrimitive { clip_rect, primitive } in clipped_meshes {
-            let mesh = match primitive {
-                Primitive::Mesh(mesh) => mesh,
-                Primitive::Callback(_) => todo!(),
-            };
-
-            if mesh.is_empty() {
-                continue;
-            }
-
-            let texture_info = self.textures.get(&mesh.texture_id);
-            if let Some(texture_info) = texture_info {
-                cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
-                    &[frame_data.descriptor_set_layout.request(texture_info.descriptor_set(&self.sampler))],
-                    &[]
-                );
-            }
-
-            let v_slice = &mesh.vertices;
-            let v_size = size_of_val(&v_slice[0]);
-            let v_copy_size = v_slice.len() * v_size;
-
-            let i_slice = &mesh.indices;
-            let i_size = size_of_val(&i_slice[0]);
-            let i_copy_size = i_slice.len() * i_size;
-
-            unsafe {
-                vertex_buffer.copy_from(v_slice.as_ptr() as *const u8, v_copy_size);
-                index_buffer.copy_from(i_slice.as_ptr() as *const u8, i_copy_size);
-                vertex_buffer = vertex_buffer.add(v_copy_size);
-                index_buffer = index_buffer.add(i_copy_size);
-                vertex_base += v_copy_size;
-                index_base += i_copy_size;
-            }
-
-            let min = egui::Pos2 {
-                x : f32::clamp(clip_rect.min.x * self.scale_factor as f32, 0.0, self.extent.width as f32),
-                y : f32::clamp(clip_rect.min.y * self.scale_factor as f32, 0.0, self.extent.height as f32)
-            };
-            let max = egui::Pos2 {
-                x : f32::clamp(clip_rect.max.x * self.scale_factor as f32, min.x, self.extent.width as f32),
-                y : f32::clamp(clip_rect.max.y * self.scale_factor as f32, min.y, self.extent.height as f32),
-            };
-
-            // Record draw commands
-            cmd.set_scissors(0, &[
-                vk::Rect2D::default()
-                    .offset(vk::Offset2D::default()
-                        .x(min.x.round() as i32)
-                        .y(min.y.round() as i32)
-                    )
-                    .extent(vk::Extent2D::default()
-                        .width((max.x - min.x).round() as u32)
-                        .height((max.y - min.y).round() as u32)
-                    )
+        cmd.begin_label("GUI rendering".to_owned(), [1.0, 1.0, 0.0, 0.0]);
+            cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
+            cmd.bind_vertex_buffers(0, &[(&frame_data.vertex_buffer, 0)]);
+            cmd.bind_index_buffer(&frame_data.index_buffer, 0);
+            cmd.set_viewport(0, &[
+                vk::Viewport::default()
+                    .x(0.0)
+                    .y(0.0)
+                    .min_depth(0.0)
+                    .max_depth(1.0)
+                    .width(self.extent.width as f32)
+                    .height(self.extent.height as f32)
             ]);
-            cmd.draw_indexed(mesh.indices.len() as _, 1, index_base as _, vertex_base as _, 0);
-        }
+
+            let width_points = self.extent.width as f32 / self.scale_factor as f32;
+            let height_points = self.extent.height as f32 / self.scale_factor as f32;
+            cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
+            cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
+
+            // Render the meshes
+            let mut vertex_base = 0;
+            let mut index_base = 0;
+            for egui::ClippedPrimitive { clip_rect, primitive } in clipped_meshes {
+                let mesh = match primitive {
+                    Primitive::Mesh(mesh) => mesh,
+                    Primitive::Callback(_) => todo!(),
+                };
+
+                if mesh.is_empty() {
+                    continue;
+                }
+
+                let texture_info = self.textures.get(&mesh.texture_id);
+                if let Some(texture_info) = texture_info {
+                    cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
+                        &[frame_data.descriptor_set_layout.request(texture_info.descriptor_set(&self.sampler))],
+                        &[]
+                    );
+                }
+
+                let v_slice = &mesh.vertices;
+                let v_size = size_of_val(&v_slice[0]);
+                let v_copy_size = v_slice.len() * v_size;
+
+                let i_slice = &mesh.indices;
+                let i_size = size_of_val(&i_slice[0]);
+                let i_copy_size = i_slice.len() * i_size;
+
+                unsafe {
+                    vertex_buffer.copy_from(v_slice.as_ptr() as *const u8, v_copy_size);
+                    index_buffer.copy_from(i_slice.as_ptr() as *const u8, i_copy_size);
+                    vertex_buffer = vertex_buffer.add(v_copy_size);
+                    index_buffer = index_buffer.add(i_copy_size);
+                }
+
+                let min = egui::Pos2 {
+                    x : f32::clamp(clip_rect.min.x * self.scale_factor as f32, 0.0, self.extent.width as f32),
+                    y : f32::clamp(clip_rect.min.y * self.scale_factor as f32, 0.0, self.extent.height as f32)
+                };
+                let max = egui::Pos2 {
+                    x : f32::clamp(clip_rect.max.x * self.scale_factor as f32, min.x, self.extent.width as f32),
+                    y : f32::clamp(clip_rect.max.y * self.scale_factor as f32, min.y, self.extent.height as f32),
+                };
+
+                // Record draw commands
+                cmd.set_scissors(0, &[
+                    vk::Rect2D::default()
+                        .offset(vk::Offset2D::default()
+                            .x(min.x.round() as i32)
+                            .y(min.y.round() as i32)
+                        )
+                        .extent(vk::Extent2D::default()
+                            .width((max.x - min.x).round() as u32)
+                            .height((max.y - min.y).round() as u32)
+                        )
+                ]);
+                cmd.draw_indexed(mesh.indices.len() as _, 1, index_base as _, vertex_base as _, 0);
+                
+                vertex_base += mesh.vertices.len();
+                index_base += mesh.indices.len();
+            }
+        cmd.end_label();
     }
     
     fn update_texture(&mut self, tex_id : TextureId, delta : ImageDelta) {
@@ -400,6 +442,8 @@ impl Interface {
             .pool(&self.command_pool)
             .build_one(&self.rendering_context.device);
 
+        cmd.begin_label("GUI texture upload".to_owned(), [0.0; 4]);
+
         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         // Transition the new image to transfer dest
         cmd.image_memory_barrier(&mut image,
@@ -422,6 +466,8 @@ impl Interface {
         );
         cmd.end();
 
+        cmd.end_label();
+
         self.rendering_context.device.submit(graphics_queue, &[&cmd], &[], &[], fence);
         self.rendering_context.device.wait_for_fence(fence);
 
@@ -432,6 +478,7 @@ impl Interface {
             if let Some(existing_texture) = existing_texture {
                 self.rendering_context.device.reset_fences(slice::from_ref(&fence));
 
+                cmd.begin_label("GUI texture blit".to_owned(), [0.0; 4]);
                 cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT); // Reuse this command buffer
 
                 // Transition the existing image to transfer dst
@@ -483,6 +530,7 @@ impl Interface {
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
                 );
                 cmd.end();
+                cmd.end_label();
 
                 self.rendering_context.device.submit(graphics_queue, &[&cmd], &[], &[], fence);
                 self.rendering_context.device.wait_for_fence(fence);

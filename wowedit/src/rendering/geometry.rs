@@ -103,7 +103,7 @@ impl GeometryRenderer {
             .depth(DepthOptions::enabled())
             .cull_mode(vk::CullModeFlags::BACK)
             .front_face(vk::FrontFace::CLOCKWISE)
-            .render_pass(context.render_pass.handle())
+            .render_pass(context.render_pass.handle(), 0)
             .samples(context.options.multisampling)
             .pool(&context.pipeline_cache)
             .vertex::<TerrainVertex>()
@@ -123,7 +123,7 @@ impl GeometryRenderer {
 }
 
 impl Renderable for GeometryRenderer {
-    fn draw_frame(&self, cmd : &CommandBuffer, _frame_index : usize) {
+    fn draw_frame(&mut self, cmd : &CommandBuffer, _frame_index : usize) {
         let viewport = vk::Viewport::default()
             .x(0.0f32)
             .y(0.0f32)

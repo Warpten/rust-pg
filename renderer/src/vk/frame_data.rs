@@ -1,4 +1,3 @@
-use std::mem::MaybeUninit;
 use std::sync::Arc;
 
 use ash::vk;
@@ -19,34 +18,39 @@ pub struct FrameData {
     pub(in crate) image_available : vk::Semaphore,
     pub(in crate) render_finished : vk::Semaphore,
 
-    pub graphics_command_pool : Option<CommandPool>,
+    pub graphics_command_pool : CommandPool,
+    pub cmd : CommandBuffer,
 }
 
 impl FrameData {
     pub fn new(index : usize, device : &Arc<LogicalDevice>, framebuffer : Framebuffer) -> Self {
+        let graphics_queue = device.get_queue(QueueAffinity::Graphics, 0).unwrap();
+        let graphics_command_pool = CommandPool::builder(graphics_queue.family())
+            .reset()
+            .build(device);
+
+        let cmd = CommandBuffer::builder()
+            .pool(&graphics_command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .build_one(device);
+
         Self {
             device : device.clone(),
             index,
             in_flight : device.create_fence(vk::FenceCreateFlags::SIGNALED),
             semaphore_pool : SemaphorePool::new(device),
-            graphics_command_pool : device.get_queues(QueueAffinity::Graphics)
-                .first()
-                .map(|queue| queue.family())
-                .map(|family| {
-                    CommandPool::builder(family)
-                        .reset()
-                        .build(device)
-                }),
+            graphics_command_pool,
+            cmd,
             framebuffer,
             image_available : device.create_semaphore(),
-            render_finished : device.create_semaphore()
+            render_finished : device.create_semaphore(),
         }
     }
 
     pub fn make_command_buffer(&self, level : vk::CommandBufferLevel) -> CommandBuffer {
         CommandBuffer::builder()
             .level(level)
-            .pool(self.graphics_command_pool.as_ref().unwrap())
+            .pool(&self.graphics_command_pool)
             .build_one(&self.device)
     }
 }
