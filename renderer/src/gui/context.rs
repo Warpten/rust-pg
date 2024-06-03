@@ -4,8 +4,10 @@ use std::slice;
 use std::sync::Arc;
 use ash::vk::{self};
 use bytemuck::bytes_of;
-use egui::epaint::{ImageDelta, Primitive};
+use egui::epaint::{ImageDelta, Primitive, Shadow};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
+use egui_winit::winit::event::WindowEvent;
+use egui_winit::EventResponse;
 use crate::orchestration::rendering::{Renderer, RenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
@@ -80,6 +82,10 @@ impl Renderer for Interface {
             framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
         }
         framebuffers
+    }
+
+    fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
+        self.egui.on_window_event(self.rendering_context.window.handle(), event)
     }
     
     fn record_commands(&mut self, framebuffer : &Framebuffer, frame : &FrameData) {
@@ -183,6 +189,11 @@ impl Interface {
         egui_context.set_fonts(fonts);
         egui_context.set_style(style);
         egui_context.set_visuals(egui::Visuals::light());
+        // TODO: This is a bandaid fix, shadows are broken
+        /*egui_context.style_mut(|style| {
+            style.visuals.window_shadow = Shadow::NONE;
+            style.visuals.popup_shadow = Shadow::NONE;
+        });*/
 
         let egui = egui_winit::State::new(egui_context.clone(),
             ViewportId::ROOT,
@@ -212,10 +223,15 @@ impl Interface {
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
             .layout(pipeline_layout.handle())
             .depth(DepthOptions::disabled())
+            .color_blend_attachment(vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::ONE)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA))
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .render_pass(render_pass.handle(), 0)
-            .samples(context.options.multisampling)
+            .samples(vk::SampleCountFlags::TYPE_1)
             .pool(&context.pipeline_cache)
             .vertex::<InterfaceVertex>()
             .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)

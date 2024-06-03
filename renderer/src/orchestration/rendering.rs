@@ -6,6 +6,8 @@ use std::{hint, slice};
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
+use egui_winit::winit::event::WindowEvent;
+use egui_winit::EventResponse;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
@@ -32,6 +34,10 @@ pub trait Renderer {
 
     fn marker_label(&self) -> String;
     fn marker_color(&self) -> [f32; 4];
+
+    fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
+        EventResponse { repaint : false, consumed : false }
+    }
 }
 
 pub struct RenderingContext {
@@ -200,6 +206,19 @@ impl RendererOrchestrator {
         self.present_frame(signal_semaphore)?;
 
         Ok(())
+    }
+
+    pub fn handle_event(&mut self, event : &WindowEvent) {
+        let mut repaint_instructions = Vec::<bool>::with_capacity(self.renderers.len());
+        for i in 0..self.renderers.len() {
+            let event_response = self.renderers[i].handle_event(event);
+            repaint_instructions.push(event_response.repaint);
+            if event_response.consumed {
+                break;
+            }
+        }
+
+        // TOOD: do somethign with the repaint instructions.
     }
 
     fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {

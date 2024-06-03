@@ -36,6 +36,7 @@ pub struct PipelineInfo {
     cull_mode : vk::CullModeFlags,
     front_face : vk::FrontFace,
     topology : vk::PrimitiveTopology,
+    color_blend_attachments : Vec<vk::PipelineColorBlendAttachmentState>,
 
     specialization_data: Vec<u8>,
     specialization_entries: Vec<vk::SpecializationMapEntry>,
@@ -60,6 +61,11 @@ impl PipelineInfo {
     #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass, subpass : u32) -> Self {
         self.render_pass = render_pass;
         self.subpass = subpass;
+        self
+    }
+
+    #[inline] pub fn color_blend_attachment(mut self, attachment : vk::PipelineColorBlendAttachmentState) -> Self {
+        self.color_blend_attachments.push(attachment);
         self
     }
 
@@ -114,6 +120,7 @@ impl Default for PipelineInfo {
             },
             cull_mode: vk::CullModeFlags::BACK,
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            color_blend_attachments : vec![],
 
             specialization_data : vec![],
             specialization_entries : vec![],
@@ -255,22 +262,11 @@ impl Pipeline {
         let depth_stencil_state = info.depth.build();
 
         // TODO: This array needs to be synced with render_pass.subpasses[all].colorAttachmentCount
-        let color_blend_attachment_states = [
-            vk::PipelineColorBlendAttachmentState::default()
-                .blend_enable(false)
-                .src_color_blend_factor(vk::BlendFactor::SRC_COLOR)
-                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_DST_COLOR)
-                .color_blend_op(vk::BlendOp::ADD)
-                .src_alpha_blend_factor(vk::BlendFactor::ZERO)
-                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-                .alpha_blend_op(vk::BlendOp::ADD)
-                .color_write_mask(vk::ColorComponentFlags::RGBA)
-        ];
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
             .blend_constants([0.0f32; 4])
-            .attachments(&color_blend_attachment_states);
+            .attachments(&info.color_blend_attachments);
 
         let create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stage_create_infos[..])

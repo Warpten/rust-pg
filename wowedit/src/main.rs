@@ -37,7 +37,7 @@ pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), R
 }
 
 pub fn window_event(app: &mut Application, data: &mut ApplicationData, event: &WindowEvent) {
-    // _ = app.orchestrator.handle_event(&event);
+    _ = app.orchestrator.handle_event(&event);
 }
 
 fn main() {
