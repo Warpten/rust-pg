@@ -102,7 +102,7 @@ impl GeometryRenderer {
             ).subpass(vk::PipelineBindPoint::GRAPHICS, &[
                 SubpassAttachment::color(0),
                 SubpassAttachment::resolve(0)
-            ], SubpassAttachment::depth(0).into())
+            ], None)
             .build(&context.device);
 
         Self::initialize(context, render_pass)
@@ -117,15 +117,15 @@ impl GeometryRenderer {
             .gpu_only()
             .build(&context.device, &transfer_pool, &[
                 TerrainVertex {
-                    pos : [ 0.0f32, -0.5f32],
+                    pos : [ 0.0f32, -0.5f32 ],
                     color : [ 1.0f32, 0.0f32, 0.0f32 ]
                 },
                 TerrainVertex {
-                    pos : [ 0.5f32, 0.5f32],
+                    pos : [ 0.5f32, 0.5f32 ],
                     color : [ 0.0f32, 1.0f32, 0.0f32 ]
                 },
                 TerrainVertex {
-                    pos : [ -0.5f32, 0.5f32],
+                    pos : [ -0.5f32, 0.5f32 ],
                     color : [ 0.0f32, 0.0f32, 1.0f32 ]
                 }
             ]);

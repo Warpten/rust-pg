@@ -238,6 +238,9 @@ impl Pipeline {
         // TODO: Allow for depth bias configuration
         let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
             .cull_mode(info.cull_mode)
+            // .depth_clamp_enable(false)
+            // .rasterizer_discard_enable(false)
+            // .depth_bias_enable(false)
             .line_width(1.0f32) // Any value larger than 1 requires a GPU feature
             .polygon_mode(vk::PolygonMode::FILL)
             .front_face(info.front_face);
