@@ -17,6 +17,23 @@ fn setup(app : &mut Application) -> ApplicationData {
     ApplicationData { }
 }
 
+fn render_interface(context : &Interface) {
+    egui::SidePanel::left("some_panel").show(&context.context, |ui| {
+        ui.heading("Hello");
+        ui.label("Hello egui!");
+    });
+
+    egui::Window::new("My Window")
+        .resizable(true)
+        .scroll2([true, true])
+        .show(&context.context, |ui| {
+            ui.heading("Hello");
+            ui.label("Hello egui!");
+            ui.separator();
+            ui.hyperlink("https://github.com/emilk/egui");
+        });
+}
+
 fn prepare() -> ApplicationOptions {
     ApplicationOptions::default()
         .title("Send help")
@@ -28,7 +45,7 @@ fn prepare() -> ApplicationOptions {
         .orchestrator(|context| {
             Orchestrator::new(context)
                 .add_renderer(|c, i| Box::new(GeometryRenderer::supplier(c, i)))
-                .add_renderer(|c, i| Box::new(Interface::supplier(c, i)))
+                .add_renderer(|c, i| Box::new(Interface::supplier(c, i, render_interface)))
         })
 }
 

@@ -97,21 +97,7 @@ impl Renderer for Interface {
         // egui calls here...
         // ...
 
-        egui::SidePanel::left("some_panel").show(&self.context, |ui| {
-            ui.heading("Hello");
-            ui.label("Hello egui!");
-        });
-
-        egui::Window::new("My Window")
-            .resizable(true)
-            .scroll2([true, true])
-            .show(&self.context, |ui| {
-                ui.heading("Hello");
-                ui.label("Hello egui!");
-                ui.separator();
-                ui.hyperlink("https://github.com/emilk/egui");
-            });
-
+        (self.delegate)(&self);
 
         let output = self.context.end_frame();
         self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
@@ -149,11 +135,13 @@ pub struct Interface {
 
     sampler : Sampler,
 
-    textures : HashMap<TextureId, Texture>
+    textures : HashMap<TextureId, Texture>,
+
+    delegate : fn(&Self),
 }
 
 impl Interface {
-    pub fn supplier(context : &Arc<RenderingContext>, is_presenting : bool) -> Self {
+    pub fn supplier(context : &Arc<RenderingContext>, is_presenting : bool, delegate : fn(&Self)) -> Self {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
         } else {
@@ -180,20 +168,15 @@ impl Interface {
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE
             ).build(&context.device);
 
-        Self::new(FontDefinitions::default(), Style::default(), &context, render_pass)
+        Self::new(FontDefinitions::default(), Style::default(), &context, render_pass, delegate)
     }
 
-    pub fn new(fonts : FontDefinitions, style : Style, context : &Arc<RenderingContext>, render_pass : RenderPass) -> Self {
+    pub fn new(fonts : FontDefinitions, style : Style, context : &Arc<RenderingContext>, render_pass : RenderPass, delegate : fn(&Self)) -> Self {
         let egui_context = Context::default();
         // TODO: Make these configurable
         egui_context.set_fonts(fonts);
         egui_context.set_style(style);
         egui_context.set_visuals(egui::Visuals::light());
-        // TODO: This is a bandaid fix, shadows are broken
-        /*egui_context.style_mut(|style| {
-            style.visuals.window_shadow = Shadow::NONE;
-            style.visuals.popup_shadow = Shadow::NONE;
-        });*/
 
         let egui = egui_winit::State::new(egui_context.clone(),
             ViewportId::ROOT,
@@ -293,6 +276,8 @@ impl Interface {
 
             textures : HashMap::default(),
             render_pass,
+
+            delegate,
         }
     }
 
