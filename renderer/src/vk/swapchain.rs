@@ -296,15 +296,23 @@ impl Swapchain {
         })
     }
 
-    pub fn create_render_pass(&self) -> RenderPassCreateInfo {
+    pub fn create_render_pass(&self, is_presenting : bool) -> RenderPassCreateInfo {
+        // TODO: Fix this for cases where multisampling is not active
+
         let color_format = self.present_images.get(0).map(Image::format).expect("Unable to find the format of the presentation image");
         let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
         let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
 
+        let final_format = if is_presenting {
+            vk::ImageLayout::PRESENT_SRC_KHR
+        } else {
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        };
+
         RenderPassCreateInfo::default()
             .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
             .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
-            .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
+            .resolve_attachment(resolve_format, final_format)
     }
 
     pub fn get_clear_values(&self, settings : &RendererOptions) -> Vec<vk::ClearValue> {

@@ -6,7 +6,7 @@ use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
 use crate::vk::{context::Context, renderer::RendererOptions};
 use crate::window::Window;
 
-type OrchestratorFn = fn(Arc<Context>) -> Orchestrator;
+type OrchestratorFn = fn(&Arc<Context>) -> Orchestrator;
 
 pub struct ApplicationOptions {
     pub title : String,
@@ -113,7 +113,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
-        if !app.renderer.context.window.is_minimized() {
+        if !app.orchestrator.context.window.is_minimized() {
             
             if dirty_swapchain {
                 app.recreate_swapchain();

@@ -2,8 +2,7 @@ use std::{mem::{offset_of, size_of}, sync::Arc};
 
 use ash::vk;
 use egui_winit::EventResponse;
-use renderer::{orchestration::{renderer::RenderingContext, traits::{Renderable, RenderableFactory}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_buffer::CommandBuffer, command_pool::{CommandPool, CommandPoolBuilder}, descriptor::layout::DescriptorSetLayout, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::RenderPassCreateInfo, swapchain::Swapchain}};
-use renderer::vk::render_pass::SubpassAttachment;
+use renderer::{orchestration::rendering::{Renderer, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, descriptor::layout::DescriptorSetLayout, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -34,17 +33,65 @@ impl Vertex for TerrainVertex {
     }
 }
 
-pub struct GeometryRendererBuilder {
-
-}
-
-impl RenderableFactory for GeometryRendererBuilder {
-    fn build(&self, context : &std::sync::Arc<RenderingContext>) -> Box<dyn Renderable> {
-        Box::new(GeometryRenderer::new(self, context))
+impl Renderer for GeometryRenderer {
+    fn create_framebuffers(&mut self, swapchain : &Arc<Swapchain>) -> Vec<Framebuffer> {
+        swapchain.create_framebuffers(&self.render_pass)
     }
 
-    fn express_dependencies(&self, create_info : RenderPassCreateInfo) -> RenderPassCreateInfo {
-        create_info
+    fn record_commands(&mut self, framebuffer : &Framebuffer, frame : &FrameData) {
+        let viewport = vk::Viewport::default()
+            .x(0.0f32)
+            .y(0.0f32)
+            .min_depth(0.0f32)
+            .max_depth(1.0f32)
+            .width(self.swapchain.extent.width as _)
+            .height(self.swapchain.extent.height as _);
+
+        let scissors = vk::Rect2D::default()
+            .offset(vk::Offset2D { x: 0, y: 0 })
+            .extent(self.swapchain.extent);
+
+        frame.cmd.begin_render_pass(&self.render_pass, framebuffer, vk::Rect2D {
+            offset : vk::Offset2D { x: 0, y : 0 },
+            extent : self.swapchain.extent
+        }, &[
+            vk::ClearValue {
+                color : vk::ClearColorValue {
+                    float32: [0.2, 0.2, 0.2, 1.0],
+                },
+            },
+            vk::ClearValue {
+                depth_stencil : vk::ClearDepthStencilValue {
+                    depth : 1.0f32,
+                    stencil : 0,
+                }
+            }
+        ], vk::SubpassContents::INLINE);
+        frame.cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
+        frame.cmd.set_viewport(0, &[viewport]);
+        frame.cmd.set_scissors(0, &[scissors]);
+        frame.cmd.bind_vertex_buffers(0, &[(&self.buffer, 0)]);
+        frame.cmd.draw(self.buffer.element_count(), 1, 0, 0);
+        frame.cmd.end_render_pass();
+    }
+
+    fn marker_label(&self) -> String { "Geometry renderer".to_owned() }
+    fn marker_color(&self) -> [f32; 4] { [0.0; 4] }
+}
+
+pub struct GeometryRenderer {
+    buffer : Buffer,
+    transfer_pool : CommandPool,
+    descriptor_set_layout : DescriptorSetLayout,
+    pipeline_layout : PipelineLayout,
+    pipeline : Pipeline,
+    swapchain : Arc<Swapchain>,
+    render_pass : RenderPass,
+}
+
+impl GeometryRenderer {
+    pub fn supplier(context : &Arc<RenderingContext>, is_presenting : bool) -> Self {
+        let render_pass = context.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
                 0,
@@ -56,20 +103,12 @@ impl RenderableFactory for GeometryRendererBuilder {
                 SubpassAttachment::color(0),
                 SubpassAttachment::resolve(0)
             ], SubpassAttachment::depth(0).into())
+            .build(&context.device);
+
+        Self::initialize(context, render_pass)
     }
-}
 
-pub struct GeometryRenderer {
-    buffer : Buffer,
-    transfer_pool : CommandPool,
-    descriptor_set_layout : DescriptorSetLayout,
-    pipeline_layout : PipelineLayout,
-    pipeline : Pipeline,
-    swapchain : Arc<Swapchain>,
-}
-
-impl GeometryRenderer {
-    pub fn new(builder : &GeometryRendererBuilder, context : &RenderingContext) -> Self {
+    pub fn initialize(context : &Arc<RenderingContext>, render_pass : RenderPass) -> Self {
         let transfer_pool = CommandPool::builder(&context.transfer_queue)
             .build(&context.device);
 
@@ -104,7 +143,7 @@ impl GeometryRenderer {
             .depth(DepthOptions::enabled())
             .cull_mode(vk::CullModeFlags::BACK)
             .front_face(vk::FrontFace::CLOCKWISE)
-            .render_pass(context.render_pass.handle(), 0)
+            .render_pass(render_pass.handle(), 0)
             .samples(context.options.multisampling)
             .pool(&context.pipeline_cache)
             .vertex::<TerrainVertex>()
@@ -118,37 +157,8 @@ impl GeometryRenderer {
             descriptor_set_layout,
             pipeline_layout,
             pipeline,
+            render_pass,
             swapchain : context.swapchain.clone(),
         }
     }
-}
-
-impl Renderable for GeometryRenderer {
-    fn draw_frame(&mut self, cmd : &CommandBuffer, _frame_index : usize) {
-        let viewport = vk::Viewport::default()
-            .x(0.0f32)
-            .y(0.0f32)
-            .min_depth(0.0f32)
-            .max_depth(1.0f32)
-            .width(self.swapchain.extent.width as _)
-            .height(self.swapchain.extent.height as _);
-
-        let scissors = vk::Rect2D::default()
-            .offset(vk::Offset2D { x: 0, y: 0 })
-            .extent(self.swapchain.extent);
-
-        cmd.label("Draw application frame".to_owned(), [1.0, 0.0, 0.0, 0.0], || {
-            cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
-            cmd.set_viewport(0, &[viewport]);
-            cmd.set_scissors(0, &[scissors]);
-            cmd.bind_vertex_buffers(0, &[(&self.buffer, 0)]);
-            cmd.draw(self.buffer.element_count(), 1, 0, 0);
-        });
-    }
-
-    fn handle_event(&mut self, event : &winit::event::WindowEvent, window : &renderer::window::Window) -> Option<EventResponse> {
-        None
-    }
-    
-    fn contents_type(&self) -> vk::SubpassContents { vk::SubpassContents::INLINE }
 }

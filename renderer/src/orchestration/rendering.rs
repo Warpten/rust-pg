@@ -1,21 +1,24 @@
+use std::cmp::Ordering;
+use std::collections::HashSet;
+use std::ffi::CStr;
 use std::mem::ManuallyDrop;
-use std::slice;
+use std::{hint, slice};
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
+use nohash_hasher::IntMap;
 
 use crate::application::RendererError;
 use crate::traits::handle::Handle;
-use crate::vk::command_buffer::{CommandBuffer, CommandBufferBuilder};
 use crate::vk::context::Context;
 use crate::vk::frame_data::FrameData;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::logical_device::LogicalDevice;
+use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::pipeline::pool::PipelinePool;
 use crate::vk::queue::{QueueAffinity, QueueFamily};
-use crate::vk::render_pass::RenderPass;
 use crate::vk::renderer::RendererOptions;
 use crate::vk::surface::Surface;
 use crate::vk::swapchain::Swapchain;
@@ -23,16 +26,9 @@ use crate::window::Window;
 
 /// A renderer is effectively a type that declares the need to work with its own render pass.
 pub trait Renderer {
-    /// Creates a render pass for this stage.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `context` - The rendering context.
-    /// * `is_presenting`` - Indicates if this stage is expected to present to whatever surface is used by the swapchain.
-    fn create_render_pass(&self, context : &Arc<RenderingContext>, is_presenting : bool) -> RenderPass;
-
     /// Returns a recorded command buffer that contains all the commands needed to render the contents of this renderer.
-    fn record_commands(&self, render_pass : &RenderPass, framebuffer : &Framebuffer, frame_data : &FrameData);
+    fn record_commands(&mut self, framebuffer : &Framebuffer, frame_data : &FrameData);
+    fn create_framebuffers(&mut self, swapchain : &Arc<Swapchain>) -> Vec<Framebuffer>;
 
     fn marker_label(&self) -> String;
     fn marker_color(&self) -> [f32; 4];
@@ -53,22 +49,24 @@ pub struct RenderingContext {
     pub options : RendererOptions,
 }
 
+pub type RendererFn = fn(context : &Arc<RenderingContext>, is_presenting : bool) -> Box<dyn Renderer>;
+
 pub struct Orchestrator {
     context : Arc<Context>,
-    renderers : Vec<Box<dyn Renderer>>,
+    renderers : Vec<RendererFn>,
 }
 impl Orchestrator {
     /// Creates a new orchestrator. This object is in charge of preparing Vulkan structures for rendering
     /// as well as the way command buffers will be recorded and executed.
-    pub fn new(context : Arc<Context>) -> Self {
+    pub fn new(context : &Arc<Context>) -> Self {
         Self {
-            context,
+            context : context.clone(),
             renderers : vec![],
         }
     }
 
     /// Adds a renderable to this orchestrator. See the documentation on [`Renderer`] for more informations.
-    pub fn add_renderer(mut self, renderer : Box<dyn Renderer>) -> Self {
+    pub fn add_renderer(mut self, renderer : RendererFn) -> Self {
         self.renderers.push(renderer);
         self
     }
@@ -115,17 +113,9 @@ impl Orchestrator {
         }).unwrap();
 
         let pipeline_cache = Arc::new(PipelinePool::new(device.clone(), (settings.get_pipeline_cache_file)()));
-
-        let frames = {
-            let mut frames = Vec::<FrameData>::with_capacity(swapchain.image_count());
-            for i in 0..swapchain.image_count() {
-                frames.push(FrameData::new(i, &device));
-            }
-            frames
-        };
         
         let context = Arc::new(RenderingContext {
-            context : self.context,
+            context : self.context.clone(),
             surface,
             device,
             graphics_queue,
@@ -143,30 +133,35 @@ impl Orchestrator {
     }
 
     fn finalize(self, context : Arc<RenderingContext>) -> RendererOrchestrator {
-        let mut render_passes = vec![];
         let mut framebuffers = vec![];
+        let mut created_renderers = vec![];
         let renderer_count = self.renderers.len();
         for (i, renderer) in self.renderers.iter().enumerate() {
-            let render_pass = renderer.create_render_pass(&context, i + 1 == renderer_count);
+            let mut renderer = renderer(&context, i + 1 == renderer_count);
 
-            framebuffers.extend(context.swapchain.create_framebuffers(&render_pass));
-            render_passes.push(render_pass);
+            framebuffers.extend(renderer.create_framebuffers(&context.swapchain));
+            created_renderers.push(renderer);
         }
 
-        assert_eq!(render_passes.len(), self.renderers.len());
-        assert_eq!(render_passes.len() * context.swapchain.image_count(), framebuffers.len());
+        assert_eq!(renderer_count * context.swapchain.image_count(), framebuffers.len());
 
         // Create frame data
+        let frames = {
+            let mut frames = Vec::<FrameData>::with_capacity(context.swapchain.image_count());
+            for i in 0..context.swapchain.image_count() {
+                frames.push(FrameData::new(i, &context.device));
+            }
+            frames
+        };
 
         RendererOrchestrator {
             context : context.clone(),
 
-            renderers : self.renderers,
-            render_passes,
+            renderers : created_renderers,
             framebuffers,
 
             // Frame-specific data
-            frames : vec![],
+            frames,
             frame_index : 0,
             image_index : 0
         }
@@ -180,7 +175,6 @@ pub struct RendererOrchestrator {
     // This should be a bidimensional array but for the sake of memory layout, we use a single dimensional array.
     // The layout is effectively [renderer 1's framebuffers], [renderer 2's framebuffers], ...
     framebuffers : Vec<Framebuffer>,
-    render_passes : Vec<RenderPass>,
     
     frames : Vec<FrameData>,
     image_index : usize,
@@ -193,12 +187,11 @@ impl RendererOrchestrator {
 
         frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         for i in 0..self.renderers.len() {
-            let renderer = &self.renderers[i];
-            let render_pass = &self.render_passes[i];
+            let renderer = &mut self.renderers[i];
             let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
 
             frame.cmd.begin_label(renderer.marker_label(), renderer.marker_color());
-            renderer.record_commands(render_pass, framebuffer, frame);
+            renderer.record_commands(framebuffer, frame);
             frame.cmd.end_label();
         }
         frame.cmd.end();
@@ -276,4 +269,122 @@ impl RendererOrchestrator {
             }
         }
     }
+}
+
+/// Selects a [`PhysicalDevice`] and its associated graphics and presentation [`queue families`](QueueFamily).
+///
+/// Device selection is done according to its classification, with the following order:
+///
+/// 1. [`vk::PhysicalDeviceType::DISCRETE_GPU`]
+/// 2. [`vk::PhysicalDeviceType::INTEGRATED_GPU`]
+/// 3. [`vk::PhysicalDeviceType::VIRTUAL_GPU`]
+/// 4. [`vk::PhysicalDeviceType::CPU`]
+/// 5. [`vk::PhysicalDeviceType::OTHER`]
+///
+/// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
+fn select(context : &Arc<Context>, surface : &Arc<Surface>, settings : &RendererOptions) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
+    context.get_physical_devices(|left, right| {
+        // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
+        match (right.properties().device_type, left.properties().device_type) {
+            // Base equality case
+            (a, b) if a == b => Ordering::Equal,
+
+            // DISCRETE_GPU > ALL
+            (vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
+
+            // DISCRETE > INTEGRATED > ALL
+            (vk::PhysicalDeviceType::INTEGRATED_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
+
+            // DISCRETE, INTEGRATED > VIRTUAL > ALL
+            (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
+
+            // DISCRETE, INTEGRATED, VIRTUAL > CPU > ALL
+            (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
+            (vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
+
+            // ALL > OTHER
+            (vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
+
+            // Default case for branch solver
+            (_, _) => unsafe { hint::unreachable_unchecked() },
+        }
+    })
+    .into_iter()
+    .filter(|device| -> bool {
+        // 1. First, check for device extensions.
+        // We start by collecting a device's extensions and then remove them from the extensions
+        // we asked for. If no extension subside, we're good.
+        let extensions_supported = {
+            let device_extensions_names = device.get_extensions().into_iter()
+                .map(|device_extension| {
+                    unsafe {
+                        CStr::from_ptr(device_extension.extension_name.as_ptr()).to_owned()
+                    }
+                }).collect::<Vec<_>>();
+
+            let mut required_extensions = settings.device_extensions.iter()
+                .collect::<HashSet<_>>();
+            for extension_name in device_extensions_names {
+                required_extensions.remove(&extension_name);
+            }
+
+            required_extensions.is_empty()
+        };
+
+        // 2. Finally, check for swapchain support.
+        let supports_present = {
+            let surface_formats = unsafe {
+                surface.loader.get_physical_device_surface_formats(device.handle(), surface.handle())
+                    .expect("Failed to get physical device surface formats")
+            };
+
+            let surface_present_modes = unsafe {
+                surface.loader.get_physical_device_surface_present_modes(device.handle(), surface.handle())
+                    .expect("Failed to get physical device surface present modes")
+            };
+
+            !surface_formats.is_empty() && !surface_present_modes.is_empty()
+        };
+
+        return extensions_supported && supports_present
+    }).find_map(|device| {
+        // At this point, the current device is eligible and we just need to check for a present queue and a graphics queue.
+        // To do that, we will grab the queue's families.
+
+        let mut graphics_queue = None;
+        let mut present_queue = None;
+        let mut transfer_queue = None;
+
+        for family in &device.queue_families[..] {
+            if family.is_graphics() {
+                graphics_queue = Some(family.clone());
+
+                // If this family can present as well just use it as a graphics+present queue
+                if family.can_present(&surface, device.handle()) {
+                    present_queue = Some(family.clone());
+                }
+            }
+
+            // Default to the first available present queue
+            if family.can_present(&surface, device.handle()) && present_queue.is_none() {
+                present_queue = Some(family.clone());
+            }
+
+            // If this family can transfer and no transfer queue is found,
+            // If this family can transfer and is only a transfer queue
+            if family.is_transfer() && ((!family.is_graphics() && !family.is_compute()) || transfer_queue.is_none()) {
+                transfer_queue = Some(family.clone());
+            }
+        }
+
+        match (graphics_queue, present_queue, transfer_queue) {
+            (Some(g), Some(p), Some(t)) => Some((device, g, p, t)),
+            _ => None
+        }
+    }).expect("Failed to select a physical device and an associated queue family")
 }
