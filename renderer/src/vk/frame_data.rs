@@ -35,7 +35,7 @@ impl FrameData {
         Self {
             device : device.clone(),
             index,
-            in_flight : device.create_fence(vk::FenceCreateFlags::SIGNALED),
+            in_flight : device.create_fence(vk::FenceCreateFlags::SIGNALED, format!("Frame in flight fence {}", index).into()),
             semaphore_pool : SemaphorePool::new(device),
             graphics_command_pool,
             cmd,

@@ -26,7 +26,7 @@ impl RenderPass {
     /// 
     /// * `swapchain` - The swapchain for which a framebuffer is created
     /// * `image` - An image from the swapchain.
-    pub fn create_framebuffer(&self, swapchain : &Arc<Swapchain>, image : &SwapchainImage) -> Framebuffer {
+    pub fn create_framebuffer(&self, swapchain : &Swapchain, image : &SwapchainImage) -> Framebuffer {
         let mut attachments = vec![];
 
         // The attachments on this render pass dictates what we pull from the swapchain image

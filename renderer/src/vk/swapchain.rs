@@ -3,16 +3,15 @@ use std::{borrow::Borrow, ops::Range, sync::Arc};
 use ash::vk;
 use ash::prelude::VkResult;
 
-use crate::make_handle;
+use crate::{make_handle, window::Window};
 use crate::traits::handle::Handle;
 use crate::vk::context::Context;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
-use crate::vk::surface::Surface;
 
-use super::{image::ImageCreateInfo, render_pass::RenderPassCreateInfo, renderer::RendererOptions};
+use super::{image::ImageCreateInfo, render_pass::RenderPassCreateInfo};
 
 pub struct SwapchainImage {
     pub present : Image,
@@ -21,23 +20,22 @@ pub struct SwapchainImage {
 }
 
 pub struct Swapchain {
-    device : Arc<LogicalDevice>,
-    pub surface : Arc<Surface>,
-
+    // Surface
     handle : vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
+    pub surface_format : vk::SurfaceFormatKHR,
+
+    // Device
+    device : Arc<LogicalDevice>,
     
+    // Images
     pub extent : vk::Extent2D,
     pub images : Vec<SwapchainImage>,
-    // pub present_images : Vec<Image>,
-    // pub depth_images   : Vec<Image>,
-    // pub resolve_images : Vec<Image>,
-    pub sample_count   : vk::SampleCountFlags,
-
-    pub queue_families : Vec<QueueFamily>,
+    pub sample_count : vk::SampleCountFlags,
     layer_count : u32,
 
-    pub surface_format : vk::SurfaceFormatKHR,
+    // Queues
+    pub queue_families : Vec<QueueFamily>,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -96,6 +94,7 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            self.images.clear();
             self.loader.destroy_swapchain(self.handle, None);
         }
     }
@@ -103,6 +102,16 @@ impl Drop for Swapchain {
 
 impl Swapchain {
     #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
+
+    fn select_format<T : SwapchainOptions>(options : &T, formats : Vec<vk::SurfaceFormatKHR>) -> vk::SurfaceFormatKHR {
+        for format in &formats {
+            if options.select_surface_format(format) {
+                return *format;
+            }
+        }
+
+        formats[0]
+    }
 
     /// Creates a new swapchain.
     /// 
@@ -123,28 +132,14 @@ impl Swapchain {
     pub fn new<T : SwapchainOptions>(
         instance : &Arc<Context>,
         device : &Arc<LogicalDevice>,
-        surface : &Arc<Surface>,
+        window : &Arc<Window>,
         options : &T,
         queue_families : Vec<QueueFamily>,
-    ) -> Arc<Self> {
-        let surface_format = {
-            let surface_formats = unsafe {
-                surface.loader
-                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle())
-                    .expect("Failed to get physical device surface formats")
-            };
+    ) -> Self {
+        let surface_format = Self::select_format(options, window.get_surface_formats(&device.physical_device));
 
-            surface_formats.iter()
-                .find(|&v| options.select_surface_format(v))
-                .unwrap_or(&surface_formats[0])
-                .clone()
-        };
+        let surface_capabilities = window.get_surface_capabilities(&device.physical_device);
 
-        let surface_capabilities = unsafe {
-            surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle())
-                .expect("Failed to get physical device surface capabilities")
-        };
         let extent = if surface_capabilities.current_extent.width != u32::MAX {
             surface_capabilities.current_extent
         } else {
@@ -163,12 +158,10 @@ impl Swapchain {
             image_count
         };
 
-        let present_modes = unsafe {
-            surface.loader.get_physical_device_surface_present_modes(device.physical_device.handle(), surface.handle())
-                .expect("Failed to get physical device surface present modes")
-        };
+        let present_modes = window.get_present_modes(&device.physical_device);
 
-        let queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
+        let mut queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
+        queue_family_indices.dedup();
 
         let sharing_mode = if queue_family_indices.len() == 1 {
             vk::SharingMode::EXCLUSIVE
@@ -177,7 +170,7 @@ impl Swapchain {
         };
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
-            .surface(surface.handle())
+            .surface(window.surface())
             .min_image_count(image_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)
@@ -231,11 +224,10 @@ impl Swapchain {
             })
         }
 
-        Arc::new(Self {
+        Self {
             device : device.clone(),
             extent,
             handle,
-            surface : surface.clone(),
             layer_count : options.layers().len() as _,
             loader : swapchain_loader,
             images,
@@ -243,7 +235,7 @@ impl Swapchain {
             sample_count : options.multisampling(),
 
             surface_format
-        })
+        }
     }
 
     fn make_depth_image<T : SwapchainOptions>(

@@ -2,12 +2,10 @@ use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
 
 use ash::vk;
 
-use crate::make_handle;
+use crate::{make_handle, window::Window};
 use crate::vk::context::Context;
 use crate::vk::logical_device::{IndexingFeatures, LogicalDevice};
 use crate::vk::queue::{Queue, QueueFamily};
-
-use super::surface::Surface;
 
 #[derive(Clone)]
 pub struct PhysicalDevice {
@@ -57,7 +55,7 @@ impl PhysicalDevice {
         queue_families : Vec<(u32, &QueueFamily)>,
         get_queue_priority : F,
         extensions : &Vec<CString>,
-        surface : &Arc<Surface>,
+        window : &Arc<Window>,
     ) -> Arc<LogicalDevice>
         where F : Fn(u32, &QueueFamily) -> f32
     {
@@ -114,7 +112,7 @@ impl PhysicalDevice {
 
         // Now, get all the queues
         let queues_objs = queue_families.iter().flat_map(|(count, family)| {
-            (0..*count).map(|index| Queue::new(family, index, &device, surface, self.handle))
+            (0..*count).map(|index| Queue::new(family, index, &device, window, &self))
         }).collect::<Vec<_>>();
 
         Arc::new(LogicalDevice::new(instance,

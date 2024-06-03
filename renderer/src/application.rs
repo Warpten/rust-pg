@@ -11,15 +11,21 @@ type OrchestratorFn = fn(&Arc<Context>) -> Orchestrator;
 pub struct ApplicationOptions {
     pub title : String,
     pub renderer_options : RendererOptions,
+    pub device_extensions : Vec<CString>,
+    pub instance_extensions : Vec<CString>,
     pub orchestrator : OrchestratorFn,
 }
 
 impl Default for ApplicationOptions {
     fn default() -> Self {
         Self {
-            renderer_options: Default::default(),
             title: "WorldEdit".to_owned(),
+
             orchestrator : Orchestrator::new,
+
+            renderer_options: Default::default(),
+            device_extensions : vec![],
+            instance_extensions : vec![],
         }
     }
 }
@@ -30,9 +36,18 @@ impl ApplicationOptions {
         self
     }
 
+    #[inline] pub fn instance_extension(mut self, value : CString) -> Self {
+        self.instance_extensions.push(value);
+        self
+    }
+
+    #[inline] pub fn device_extension(mut self, value : CString) -> Self {
+        self.device_extensions.push(value);
+        self
+    }
+
     value_builder! { renderer, renderer_options, RendererOptions }
     value_builder! { orchestrator, orchestrator, OrchestratorFn }
-
 }
 
 #[derive(Debug)]
@@ -113,6 +128,8 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
+        puffin::GlobalProfiler::lock().new_frame();
+
         if !app.orchestrator.context.window.is_minimized() {
             
             if dirty_swapchain {
@@ -156,6 +173,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 pub struct Application {
     pub context : Arc<Context>,
     pub orchestrator : RendererOrchestrator,
+    window : Arc<Window>,
 }
 
 impl Application {
@@ -170,26 +188,30 @@ impl Application {
     }
 
     pub fn new(options : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
-        let window = Window::new(&options, event_loop);
+        let mut window = Window::new(&options, event_loop);
 
         let context = Arc::new(unsafe {
-            let mut all_extensions = options.renderer_options.instance_extensions.clone();
+            let mut all_extensions = options.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
             all_extensions.push(ash::ext::debug_utils::NAME.into());
             all_extensions.dedup();
 
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         });
+        window.create_surface(&context);
 
-        let orchestrator = (options.orchestrator)(&context).build(options.renderer_options, window);
+        let window = Arc::new(window);
+
+        let orchestrator = (options.orchestrator)(&context).build(options.renderer_options, &window, options.device_extensions);
 
         Self {
             context : context.clone(),
-            orchestrator
+            orchestrator,
+            window
         }
     }
 
     pub fn recreate_swapchain(&mut self) {
-
+        self.orchestrator.recreate_swapchain();
     }
 }

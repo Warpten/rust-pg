@@ -3,9 +3,11 @@ use std::{hash::Hash, sync::Arc};
 use ash::vk;
 use bitmask_enum::bitmask;
 
+use crate::window::Window;
 use crate::{make_handle, traits};
 use crate::traits::handle::Handle;
-use crate::vk::surface::Surface;
+
+use super::physical_device::PhysicalDevice;
 
 /// A logical queue associated with a logical device.
 pub struct Queue {
@@ -28,8 +30,8 @@ impl Queue {
         family : &QueueFamily,
         index : u32,
         device : &ash::Device,
-        surface : &Arc<Surface>,
-        physical_device : vk::PhysicalDevice
+        window : &Arc<Window>,
+        physical_device : &PhysicalDevice
     ) -> Self {
         Self {
             index,
@@ -37,7 +39,7 @@ impl Queue {
             handle : unsafe {
                 device.get_device_queue(family.index, index)
             },
-            can_present : family.can_present(surface, physical_device)
+            can_present : family.can_present(window, physical_device)
         }
     }
 
@@ -130,14 +132,8 @@ impl QueueFamily {
     ///
     /// * Panics if [`vkGetPhysicalDeviceSurfaceSupportKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceSupportKHR.html) fails.
     /// * Panics if the provided [`Surface`] has been dropped before this call happens.
-    pub(in crate) fn can_present(&self, surface : &Arc<Surface>, device : vk::PhysicalDevice) -> bool {
-        unsafe {
-            surface.loader.get_physical_device_surface_support(
-                device,
-                self.index,
-                surface.handle()
-            ).expect("Failed to get physical device surface support")
-        }
+    pub(in crate) fn can_present(&self, window : &Arc<Window>, device : &PhysicalDevice) -> bool {
+        window.get_surface_support(&device, &self)
     }
 }
 

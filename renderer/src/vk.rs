@@ -13,7 +13,6 @@ pub mod pipeline;
 pub mod queue;
 pub mod renderer;
 pub mod render_pass;
-pub mod surface;
 pub mod sampler;
 pub mod semaphore_pool;
 pub mod swapchain;

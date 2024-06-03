@@ -9,6 +9,7 @@ edition = "2021"
 egui = { workspace = true }
 egui-winit = { workspace = true }
 anyhow = { workspace = true }
+puffin = { workspace = true }
 # gpu-allocator = { version = "0.27.0", default-features = false, features = ["vulkan"] }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan"] }
 ash = { workspace = true }

@@ -150,13 +150,20 @@ impl LogicalDevice {
     }
 
     /// Creates a new fence.
-    pub fn create_fence(&self, flags : vk::FenceCreateFlags) -> vk::Fence {
+    pub fn create_fence(&self, flags : vk::FenceCreateFlags, name : Option<String>) -> vk::Fence
+    {
         let create_info = vk::FenceCreateInfo::default()
             .flags(flags);
 
         unsafe {
-            self.handle.create_fence(&create_info, None)
-                .expect("Failed to create fence")
+            let handle = self.handle.create_fence(&create_info, None)
+                .expect("Failed to create fence");
+
+            if let Some(name) = name {
+                self.set_handle_name(handle, &name);
+            }
+
+            handle
         }
     }
     
@@ -206,11 +213,6 @@ impl Drop for LogicalDevice {
             self.handle.destroy_device(None);
         }
     }
-}
-
-pub struct Queues {
-    queues : Vec<Queue>,
-    presentation_queue : usize,
 }
 
 pub struct IndexingFeatures {

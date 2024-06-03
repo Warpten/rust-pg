@@ -34,7 +34,7 @@ impl Vertex for TerrainVertex {
 }
 
 impl Renderer for GeometryRenderer {
-    fn create_framebuffers(&mut self, swapchain : &Arc<Swapchain>) -> Vec<Framebuffer> {
+    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
         let mut framebuffers = vec![];
         for image in &swapchain.images {
             framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
@@ -42,22 +42,22 @@ impl Renderer for GeometryRenderer {
         framebuffers
     }
 
-    fn record_commands(&mut self, framebuffer : &Framebuffer, frame : &FrameData) {
+    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
         let viewport = vk::Viewport::default()
             .x(0.0f32)
             .y(0.0f32)
             .min_depth(0.0f32)
             .max_depth(1.0f32)
-            .width(self.swapchain.extent.width as _)
-            .height(self.swapchain.extent.height as _);
+            .width(swapchain.extent.width as _)
+            .height(swapchain.extent.height as _);
 
         let scissors = vk::Rect2D::default()
             .offset(vk::Offset2D { x: 0, y: 0 })
-            .extent(self.swapchain.extent);
+            .extent(swapchain.extent);
 
         frame.cmd.begin_render_pass(&self.render_pass, framebuffer, vk::Rect2D {
             offset : vk::Offset2D { x: 0, y : 0 },
-            extent : self.swapchain.extent
+            extent : swapchain.extent
         }, &[
             vk::ClearValue {
                 color : vk::ClearColorValue {
@@ -89,13 +89,12 @@ pub struct GeometryRenderer {
     // descriptor_set_layout : DescriptorSetLayout,
     pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
-    swapchain : Arc<Swapchain>,
     render_pass : RenderPass,
 }
 
 impl GeometryRenderer {
-    pub fn supplier(context : &Arc<RenderingContext>, is_presenting : bool) -> Self {
-        let render_pass = context.swapchain.create_render_pass(is_presenting)
+    pub fn supplier(swapchain : &Swapchain, context : &RenderingContext, is_presenting : bool) -> Self {
+        let render_pass = swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
                 0,
@@ -109,10 +108,10 @@ impl GeometryRenderer {
             ], None)
             .build(&context.device);
 
-        Self::initialize(context, render_pass)
+        Self::initialize(swapchain, context, render_pass)
     }
 
-    pub fn initialize(context : &Arc<RenderingContext>, render_pass : RenderPass) -> Self {
+    pub fn initialize(swapchain : &Swapchain, context : &RenderingContext, render_pass : RenderPass) -> Self {
         let transfer_pool = CommandPool::builder(&context.transfer_queue)
             .build(&context.device);
 
@@ -170,8 +169,7 @@ impl GeometryRenderer {
             // descriptor_set_layout,
             pipeline_layout,
             pipeline,
-            render_pass,
-            swapchain : context.swapchain.clone(),
+            render_pass
         }
     }
 }

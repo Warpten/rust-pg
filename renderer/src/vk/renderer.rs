@@ -1,10 +1,10 @@
-use std::{ffi::CString, path::PathBuf};
+use std::path::PathBuf;
 
 use ash::vk;
 
 use super::{queue::QueueFamily, swapchain::SwapchainOptions};
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Copy, Clone)]
 pub enum DynamicState<T> {
     Fixed(T),
     #[default]
@@ -17,12 +17,10 @@ impl From<f32> for DynamicState<f32> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct RendererOptions {
     pub(in crate) line_width : DynamicState<f32>,
-    pub(in crate) device_extensions : Vec<CString>,
-    pub(in crate) instance_extensions : Vec<CString>,
-    pub(in crate) resolution :[u32; 2],
+    pub(in crate) resolution : [u32; 2],
     pub(in crate) get_queue_count : fn(&QueueFamily) -> u32,
     pub(in crate) get_pipeline_cache_file : fn() -> PathBuf,
     pub(in crate) depth : bool,
@@ -38,8 +36,6 @@ impl RendererOptions {
         self
     }
     
-    value_builder! { device_extensions, Vec<CString> }
-    value_builder! { instance_extensions, Vec<CString> }
     value_builder! { resolution, [u32; 2] }
 
     #[inline] pub fn queue_count(mut self, getter : fn(&QueueFamily) -> u32) -> Self {
@@ -62,10 +58,6 @@ impl Default for RendererOptions {
     fn default() -> Self {
         Self {
             line_width: DynamicState::Fixed(1.0f32),
-            device_extensions: vec![
-                ash::khr::swapchain::NAME.to_owned(),
-            ],
-            instance_extensions: vec![],
             resolution : [1280, 720],
             get_queue_count : |&_| 1,
             get_pipeline_cache_file : || "pipelines.dat".into(),
