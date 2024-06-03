@@ -35,7 +35,11 @@ impl Vertex for TerrainVertex {
 
 impl Renderer for GeometryRenderer {
     fn create_framebuffers(&mut self, swapchain : &Arc<Swapchain>) -> Vec<Framebuffer> {
-        swapchain.create_framebuffers(&self.render_pass)
+        let mut framebuffers = vec![];
+        for image in &swapchain.images {
+            framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
+        }
+        framebuffers
     }
 
     fn record_commands(&mut self, framebuffer : &Framebuffer, frame : &FrameData) {
@@ -82,7 +86,7 @@ impl Renderer for GeometryRenderer {
 pub struct GeometryRenderer {
     buffer : Buffer,
     transfer_pool : CommandPool,
-    descriptor_set_layout : DescriptorSetLayout,
+    // descriptor_set_layout : DescriptorSetLayout,
     pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     swapchain : Arc<Swapchain>,
@@ -130,11 +134,11 @@ impl GeometryRenderer {
                 }
             ]);
 
-        let descriptor_set_layout = DescriptorSetLayout::builder()
-            .build(&context.device);
+        // let descriptor_set_layout = DescriptorSetLayout::builder()
+        //     .build(&context.device);
 
         let pipeline_layout = PipelineLayoutInfo::default()
-            .layout(&descriptor_set_layout)
+        //     .layout(&descriptor_set_layout)
             .build(&context.device);
 
         let pipeline = PipelineInfo::default()
@@ -154,7 +158,7 @@ impl GeometryRenderer {
         Self {
             buffer,
             transfer_pool,
-            descriptor_set_layout,
+            // descriptor_set_layout,
             pipeline_layout,
             pipeline,
             render_pass,

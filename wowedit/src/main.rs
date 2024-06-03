@@ -28,7 +28,7 @@ fn prepare() -> ApplicationOptions {
         .orchestrator(|context| {
             Orchestrator::new(context)
                 .add_renderer(|c, i| Box::new(GeometryRenderer::supplier(c, i)))
-                // .add_renderer(|c, i| Box::new(Interface::supplier(c, i)))
+                .add_renderer(|c, i| Box::new(Interface::supplier(c, i)))
         })
 }
 

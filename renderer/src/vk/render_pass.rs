@@ -5,14 +5,60 @@ use ash::vk;
 use crate::make_handle;
 use crate::vk::logical_device::LogicalDevice;
 
+use super::framebuffer::Framebuffer;
+use super::swapchain::{Swapchain, SwapchainImage};
+
 pub struct RenderPass {
     handle : vk::RenderPass,
     device : Arc<LogicalDevice>,
+
+    spec : RenderPassAttachmentSpec,
 }
 
 impl RenderPass {
     pub fn builder() -> RenderPassCreateInfo {
         RenderPassCreateInfo::default()
+    }
+
+    /// Returns a framebuffer that is compatible with this render pass and the given swap chain.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `swapchain` - The swapchain for which a framebuffer is created
+    /// * `image` - An image from the swapchain.
+    pub fn create_framebuffer(&self, swapchain : &Arc<Swapchain>, image : &SwapchainImage) -> Framebuffer {
+        let mut attachments = vec![];
+
+        // The attachments on this render pass dictates what we pull from the swapchain image
+        let has_color = !self.spec.color_images.is_empty();
+        let has_depth = !self.spec.depth_images.is_empty();
+        let has_resolve = !self.spec.resolve_images.is_empty();
+
+        let resolve = match &image.resolve {
+            Some(resolve) => resolve.view(),
+            None => vk::ImageView::null(),
+        };
+        let depth = match &image.depth {
+            Some(depth) => depth.view(),
+            None => vk::ImageView::null(),
+        };
+        let color = image.present.view();
+
+        if has_resolve {
+            attachments.push(resolve);
+            if has_depth { attachments.push(depth); }
+            attachments.push(color);
+        } else {
+            attachments.push(color);
+            if has_depth { attachments.push(depth); }
+        }
+        
+        Framebuffer::new(&self.device, vk::FramebufferCreateInfo::default()
+            .width(swapchain.extent.width)
+            .height(swapchain.extent.height)
+            .render_pass(self.handle)
+            .layers(swapchain.layer_count())
+            .attachments(&attachments))
     }
 
     pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
@@ -34,10 +80,11 @@ impl RenderPass {
         None
     }
 
-    pub(in crate) fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass) -> RenderPass {
+    pub(in crate) fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass, spec : RenderPassAttachmentSpec) -> RenderPass {
         Self {
             device : device.clone(),
             handle,
+            spec,
         }
     }
 }
@@ -52,10 +99,14 @@ impl Drop for RenderPass {
     }
 }
 
+pub struct RenderPassAttachmentSpec {
+    pub color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout, vk::ImageLayout)>,
+    pub depth_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp)>,
+    pub resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
+}
+
 pub struct RenderPassCreateInfo {
-    color_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp, vk::ImageLayout, vk::ImageLayout)>,
-    depth_images   : Vec<(vk::Format, vk::SampleCountFlags, vk::AttachmentLoadOp, vk::AttachmentStoreOp)>,
-    resolve_images : Vec<(vk::Format, vk::ImageLayout)>,
+    spec : RenderPassAttachmentSpec,
 
     dependencies : Vec<vk::SubpassDependency>,
     subpasses : Vec<(vk::PipelineBindPoint, Vec<SubpassAttachment>, Option<SubpassAttachment>)>,
@@ -80,7 +131,7 @@ impl RenderPassCreateInfo {
         initial_layout : vk::ImageLayout,
         final_layout : vk::ImageLayout
     ) -> Self {
-        self.color_images.push((format, samples, load, store, initial_layout, final_layout));
+        self.spec.color_images.push((format, samples, load, store, initial_layout, final_layout));
         self
     }
 
@@ -128,7 +179,7 @@ impl RenderPassCreateInfo {
         load : vk::AttachmentLoadOp,
         store : vk::AttachmentStoreOp
     ) -> Self {
-        self.depth_images.push((format, samples, load, store));
+        self.spec.depth_images.push((format, samples, load, store));
         self
     }
 
@@ -143,7 +194,7 @@ impl RenderPassCreateInfo {
         format : vk::Format,
         final_layout : vk::ImageLayout
     ) -> Self {
-        self.resolve_images.push((format, final_layout));
+        self.spec.resolve_images.push((format, final_layout));
         self
     }
 
@@ -199,14 +250,14 @@ impl RenderPassCreateInfo {
 
         let mut attachment_index = 0;
         let mut color_attachment_refs = Vec::<vk::AttachmentReference>::new();
-        for (format, samples, load, store, initial_layout, final_layout) in self.color_images {
+        for (format, samples, load, store, initial_layout, final_layout) in &self.spec.color_images {
             descs.push(Self::make_attachment_description(
-                format,
-                samples,
-                (load, store),
+                *format,
+                *samples,
+                (*load, *store),
                 (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
-                initial_layout,
-                final_layout
+                *initial_layout,
+                *final_layout
             ));
             color_attachment_refs.push(vk::AttachmentReference::default()
                 .attachment(attachment_index)
@@ -217,12 +268,12 @@ impl RenderPassCreateInfo {
         }
 
         let mut depth_attachment_refs = Vec::<vk::AttachmentReference>::new();
-        for (format, samples, load, store) in self.depth_images {
+        for (format, samples, load, store) in &self.spec.depth_images {
             descs.push(Self::make_attachment_description(
-                format,
-                samples,
+                *format,
+                *samples,
                 (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
-                (load, store),
+                (*load, *store),
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
             ));
@@ -236,14 +287,14 @@ impl RenderPassCreateInfo {
         }
     
         let mut resolve_attachment_refs = Vec::<vk::AttachmentReference>::new();
-        for (format, final_layout) in self.resolve_images {
+        for (format, final_layout) in &self.spec.resolve_images {
             descs.push(Self::make_attachment_description(
-                format,
+                *format,
                 vk::SampleCountFlags::TYPE_1,
                 (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::STORE),
                 (vk::AttachmentLoadOp::DONT_CARE, vk::AttachmentStoreOp::DONT_CARE),
                 vk::ImageLayout::UNDEFINED,
-                final_layout
+                *final_layout
             ));
             resolve_attachment_refs.push(vk::AttachmentReference::default()
                 .attachment(attachment_index)
@@ -262,31 +313,13 @@ impl RenderPassCreateInfo {
 
             for attachment in &attachments {
                 match attachment {
-                    SubpassAttachment::Color(use_as, index) => {
-                        let target = match use_as {
-                            SubpassAttachmentUse::Color => &mut colors,
-                            SubpassAttachmentUse::Resolve => &mut resolves,
-                            _ => panic!("Unsupported attachment usage"),
-                        };
-                        
-                        target.push(color_attachment_refs[*index as usize])
+                    SubpassAttachment::Color(index) => {
+                        colors.push(color_attachment_refs[*index as usize])
                     },
-                    SubpassAttachment::Depth(use_as, index) => {
-                        let target = match use_as {
-                            SubpassAttachmentUse::Color => &mut colors,
-                            SubpassAttachmentUse::Resolve => &mut resolves,
-                            _ => panic!("Unsupported attachment usage"),
-                        };
-                        target.push(depth_attachment_refs[*index as usize])
+                    SubpassAttachment::Resolve(index) => {
+                        resolves.push(resolve_attachment_refs[*index as usize])
                     },
-                    SubpassAttachment::Resolve(use_as, index) => {
-                        let target = match use_as {
-                            SubpassAttachmentUse::Color => &mut colors,
-                            SubpassAttachmentUse::Resolve => &mut resolves,
-                            _ => panic!("Unsupported attachment usage"),
-                        };
-                        target.push(resolve_attachment_refs[*index as usize])
-                    },
+                    _ => panic!("Invalid subpass attachment"),
                 };
             }
 
@@ -305,15 +338,10 @@ impl RenderPassCreateInfo {
             
             if let Some(depth) = depth {
                 match depth {
-                    SubpassAttachment::Color(_, index) => {
-                        subpass_description = subpass_description.depth_stencil_attachment(&color_attachment_refs[*index as usize]);
-                    },
-                    SubpassAttachment::Depth(_, index) => {
+                    SubpassAttachment::Depth(index) => {
                         subpass_description = subpass_description.depth_stencil_attachment(&depth_attachment_refs[*index as usize]);
                     },
-                    SubpassAttachment::Resolve(_, index) => {
-                        subpass_description = subpass_description.depth_stencil_attachment(&resolve_attachment_refs[*index as usize]);
-                    },
+                    _ => panic!("Invalid depth attachment"),
                 }
             }
 
@@ -330,7 +358,7 @@ impl RenderPassCreateInfo {
                 .create_render_pass(&create_info, None)
                 .expect("Failed to create a render pass");
             
-            RenderPass::new(device, handle)
+            RenderPass::new(device, handle, self.spec)
         }
     }
 }
@@ -338,9 +366,11 @@ impl RenderPassCreateInfo {
 impl Default for RenderPassCreateInfo {
     fn default() -> Self {
         Self {
-            color_images: Default::default(),
-            depth_images: Default::default(),
-            resolve_images: Default::default(),
+            spec : RenderPassAttachmentSpec {
+                color_images: vec![],
+                depth_images: vec![],
+                resolve_images: vec![],
+            },
             
             dependencies: Default::default(),
             subpasses: Default::default()
@@ -349,29 +379,14 @@ impl Default for RenderPassCreateInfo {
 }
 
 #[derive(Copy, Clone)]
-pub enum SubpassAttachmentUse {
-    Color,
-    Depth,
-    Resolve
-}
-
-#[derive(Copy, Clone)]
 pub enum SubpassAttachment {
-    Color(SubpassAttachmentUse, u32),
-    Depth(SubpassAttachmentUse, u32),
-    Resolve(SubpassAttachmentUse, u32),
+    Color(u32),
+    Depth(u32),
+    Resolve(u32),
 }
 
 impl SubpassAttachment {
-    pub fn color(index : u32) -> Self {
-        Self::Color(SubpassAttachmentUse::Color, index)
-    }
-
-    pub fn depth(index : u32) -> Self {
-        Self::Depth(SubpassAttachmentUse::Depth, index)
-    }
-
-    pub fn resolve(index : u32) -> Self {
-        Self::Resolve(SubpassAttachmentUse::Resolve, index)
-    }
+    pub fn color(index : u32) -> Self { Self::Color(index) }
+    pub fn depth(index : u32) -> Self { Self::Depth(index) }
+    pub fn resolve(index : u32) -> Self { Self::Resolve(index) }
 }

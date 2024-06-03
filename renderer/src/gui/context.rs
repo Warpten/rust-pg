@@ -14,7 +14,7 @@ use crate::vk::command_pool::CommandPool;
 use crate::vk::descriptor::layout::DescriptorSetLayout;
 use crate::vk::descriptor::set::DescriptorSetInfo;
 use crate::vk::frame_data::FrameData;
-use crate::vk::framebuffer::{self, Framebuffer};
+use crate::vk::framebuffer::Framebuffer;
 use crate::vk::helpers::{prepare_buffer_image_copy, with_delta};
 use crate::vk::image::{Image, ImageCreateInfo};
 use crate::vk::pipeline::layout::{PipelineLayout, PipelineLayoutInfo};
@@ -75,7 +75,11 @@ impl Vertex for InterfaceVertex {
 
 impl Renderer for Interface {
     fn create_framebuffers(&mut self, swapchain : &Arc<crate::vk::swapchain::Swapchain>) -> Vec<Framebuffer> {
-        swapchain.create_framebuffers(&self.render_pass)
+        let mut framebuffers = vec![];
+        for image in &swapchain.images {
+            framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
+        }
+        framebuffers
     }
     
     fn record_commands(&mut self, framebuffer : &Framebuffer, frame : &FrameData) {
