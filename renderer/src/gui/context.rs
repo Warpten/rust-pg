@@ -150,7 +150,7 @@ impl Interface {
 
         let render_pass = RenderPass::builder()
             .color_attachment(
-                vk::Format::B8G8R8A8_SNORM, // TODO: retrieve this from the actual image used
+                context.swapchain.color_format(),
                 vk::SampleCountFlags::TYPE_1,
                 vk::AttachmentLoadOp::LOAD,
                 vk::AttachmentStoreOp::STORE,

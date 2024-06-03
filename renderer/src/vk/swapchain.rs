@@ -324,6 +324,8 @@ impl Swapchain {
         }
     }
 
+    pub fn color_format(&self) -> vk::Format { self.images[0].present.format() }
+
     pub fn create_render_pass(&self, is_presenting : bool) -> RenderPassCreateInfo {
         // TODO: Fix this for cases where multisampling is not active
 

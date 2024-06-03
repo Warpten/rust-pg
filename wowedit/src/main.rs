@@ -10,7 +10,7 @@ use winit::event::WindowEvent;
 mod casc;
 mod rendering;
 
-pub struct ApplicationData {
+pub struct ApplicationData { // Get rid of this
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
@@ -18,20 +18,17 @@ fn setup(app : &mut Application) -> ApplicationData {
 }
 
 fn render_interface(context : &Interface) {
-    egui::SidePanel::left("some_panel").show(&context.context, |ui| {
-        ui.heading("Hello");
-        ui.label("Hello egui!");
-    });
+    egui::TopBottomPanel::top("top_bar").show(&context.context, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.visuals_mut().button_frame = false;
+            egui::widgets::global_dark_light_mode_switch(ui);
+            ui.visuals_mut().button_frame = true;
 
-    egui::Window::new("My Window")
-        .resizable(true)
-        .scroll2([true, true])
-        .show(&context.context, |ui| {
-            ui.heading("Hello");
-            ui.label("Hello egui!");
             ui.separator();
-            ui.hyperlink("https://github.com/emilk/egui");
+
+            
         });
+    });
 }
 
 fn prepare() -> ApplicationOptions {
@@ -44,8 +41,8 @@ fn prepare() -> ApplicationOptions {
         )
         .orchestrator(|context| {
             Orchestrator::new(context)
-                .add_renderer(|c, i| Box::new(GeometryRenderer::supplier(c, i)))
-                .add_renderer(|c, i| Box::new(Interface::supplier(c, i, render_interface)))
+                .add_renderer(|ctx| Box::new(GeometryRenderer::supplier(ctx, false)))
+                .add_renderer(|ctx| Box::new(Interface::supplier(ctx, true, render_interface)))
         })
 }
 

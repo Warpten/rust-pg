@@ -55,7 +55,7 @@ pub struct RenderingContext {
     pub options : RendererOptions,
 }
 
-pub type RendererFn = fn(context : &Arc<RenderingContext>, is_presenting : bool) -> Box<dyn Renderer>;
+pub type RendererFn = fn(context : &Arc<RenderingContext>) -> Box<dyn Renderer>;
 
 pub struct Orchestrator {
     context : Arc<Context>,
@@ -142,8 +142,8 @@ impl Orchestrator {
         let mut framebuffers = vec![];
         let mut created_renderers = vec![];
         let renderer_count = self.renderers.len();
-        for (i, renderer) in self.renderers.iter().enumerate() {
-            let mut renderer = renderer(&context, i + 1 == renderer_count);
+        for renderer in &self.renderers {
+            let mut renderer = renderer(&context);
 
             framebuffers.extend(renderer.create_framebuffers(&context.swapchain));
             created_renderers.push(renderer);
