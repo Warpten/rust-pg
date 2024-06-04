@@ -1,5 +1,18 @@
-use std::{fs::File, io::{BufRead, BufReader, Read}, iter::Map, ops::{Deref, Range}, path::Path, slice::Iter};
+use std::{fs::File, io::{BufRead, BufReader, Read}, ops::Deref, path::Path};
 
+/// A PSV file parser implementation.
+/// 
+/// A PSV file is made of multiple lines where values are separated by the pipe character (|), hence their name: "pipe-delimited values",
+/// a direct reference to the CSV file format. Column names are included in the file; they are separated by the same character but also
+/// include more information related to how the values should be treated.
+/// 
+/// The column specification is formatted like `<name>!<type>:<width>`:
+/// * `name` - The name of the column.
+/// * `type` - The type of the value. This can be any string, but it usually is one of `DEC`, `HEX`, or `STRING`.
+/// * `width` - The width of the value. This value is interpreted differently depending on the type of the value.
+///   * For `DEC` values, it represents the amount of bytes used to represent the value.
+///   * For `STRING` values, this value should always be zero and can be ignored.
+///   * For `HEX` values, this value is the amount of bytes used to store the hex string values.
 pub struct PSV {
     columns : Vec<(String, Type)>,
     record_size : usize,
@@ -85,6 +98,14 @@ impl Value {
 
 pub struct OptionalValue<'a>(Option<&'a Value>);
 impl<'a> OptionalValue<'a> {
+    pub fn try_raw(self : OptionalValue<'a>) -> Result<&'a str, Error> {
+        if let Some(this) = self.0 {
+            Ok(this.raw())
+        } else {
+            Err(Error::UnknownColumnName)
+        }
+    }
+
     pub fn try_string(self : OptionalValue<'a>) -> Result<&'a str, Error> {
         if let Some(this) = self.0 {
             this.string()
@@ -136,6 +157,8 @@ impl<'a> Deref for OptionalValue<'a> {
 pub struct Record<'a>(&'a PSV, usize);
 
 impl Record<'_> {
+    pub fn index(&self) -> usize { self.1 }
+
     pub fn read(&self, column : &'static str) -> OptionalValue {
         let column_index = self.0.columns.iter().position(|(column_name, _)| {
             *column_name == column
@@ -227,7 +250,7 @@ impl PSV {
         })
     }
 
-    pub fn for_each_record<F>(&self, callback : F) where F : Fn(Record) {
+    pub fn for_each_record<F>(&self, callback : F) where F : FnMut(Record) {
         (0..self.record_count()).map(|i| Record(&self, i)).for_each(callback)
     }
 

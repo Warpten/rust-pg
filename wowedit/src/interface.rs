@@ -1,6 +1,9 @@
 use std::time::{Duration, Instant, SystemTime};
 
-use egui::{Context, RichText, Ui};
+use egui::{Color32, Context, Margin, Response, RichText, Ui, Widget};
+use egui_extras::{Column, TableBuilder};
+use renderer::gui::context::Interface;
+use tactfs::psv::{Record, PSV};
 
 #[derive(Default)]
 pub struct InterfaceState {
@@ -8,6 +11,9 @@ pub struct InterfaceState {
     pub gui_memory_profiler : bool,
     // Toggles Puffer GUI (CPU profiler)
     pub cpu_profiler : bool,
+
+    installation_path : String,
+    psv_selection : usize, // Row selected in .build.info
 
     active_tab : Tab,
 }
@@ -108,7 +114,81 @@ impl InterfaceState {
     }
 
     fn render_home(&mut self, ctx : &Context, ui : &mut Ui) {
+        ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+            ui.label(RichText::new("Game installation")
+                .size(18.0));
 
+            ui.label("Select the path to your game installation directory");
+            egui::TextEdit::singleline(&mut self.installation_path)
+                .margin(Margin::symmetric(6.0, 8.0))
+                .ui(ui);
+
+            let build_info = PSV::from_file(&self.installation_path);
+            match build_info {
+                Ok(build_info) => {
+                    TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(false)
+                        .sense(egui::Sense::click())
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .column(Column::auto()) // Product
+                        .column(Column::auto()) // Branch
+                        .column(Column::auto()) // Version
+                        .column(Column::remainder()) // Build Key
+                        .column(Column::remainder()) // CDN Key
+                        .column(Column::remainder()) // Install Key
+                        .min_scrolled_height(0.0)
+                        .header(20.0, |mut header| {
+                            header.col(|ui| { ui.strong("Version"); });
+                            header.col(|ui| { ui.strong("Branch"); });
+                            header.col(|ui| { ui.strong("Build Key"); });
+                            header.col(|ui| { ui.strong("CDN Key"); });
+                            header.col(|ui| { ui.strong("Install Key"); });
+                            header.col(|ui| { ui.strong("Product"); });
+                        })
+                        .body(|mut body| {
+                            build_info.for_each_record(move |record| {
+                                body.row(18.0, |mut row | {
+                                    row.set_selected(self.psv_selection == record.index());
+
+                                    let version = record.read("Version").try_raw().unwrap_or("??");
+                                    let branch = record.read("Branch").try_raw().unwrap_or("??");
+                                    let build_key = record.read("Build Key").try_raw().unwrap_or("??");
+                                    let cdn_key = record.read("CDN Key").try_raw().unwrap_or("??");
+                                    let install_key = record.read("Install Key").try_raw().unwrap_or("??");
+                                    let product = record.read("Product").try_raw().unwrap_or("??");
+
+                                    row.col(|ui| {
+                                        ui.label(version);
+                                    });
+                                    row.col(|ui| {
+                                        ui.label(branch);
+                                    });
+                                    row.col(|ui| {
+                                        ui.label(build_key);
+                                    });
+                                    row.col(|ui| {
+                                        ui.label(cdn_key);
+                                    });
+                                    row.col(|ui| {
+                                        ui.label(install_key);
+                                    });
+                                    row.col(|ui| {
+                                        ui.label(product);
+                                    });
+                                    
+                                    self.toggle_installation_selection(&row.response(), &record);
+                                });
+                            });
+                        })
+                        ;
+                    
+                },
+                Err(_) => {
+                    ui.label(RichText::new("Could not find .build.info.").color(Color32::from_rgb(200, 0, 0)));
+                },
+            }
+        });
     }
 
     fn render_database(&mut self, ctx : &Context, ui : &mut Ui) {
@@ -132,14 +212,22 @@ impl InterfaceState {
     }
 
     fn render_about(&mut self, ctx : &Context, ui : &mut Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
-                    egui::CollapsingHeader::new("Open-source licenses").show(ui, |ui| {
-                        ui.label("I'll add these soon enough.");
-                    });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                egui::CollapsingHeader::new("Open-source licenses").show(ui, |ui| {
+                    ui.label("I'll add these soon enough.");
                 });
             });
         });
+    }
+}
+
+impl InterfaceState {
+    fn toggle_installation_selection(&mut self, response : &Response, record : &Record) {
+        if response.clicked() {
+            self.psv_selection = record.index();
+        } else {
+            self.psv_selection = usize::MAX;
+        }
     }
 }
