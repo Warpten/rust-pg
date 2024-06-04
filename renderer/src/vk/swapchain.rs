@@ -3,35 +3,39 @@ use std::{borrow::Borrow, ops::Range, sync::Arc};
 use ash::vk;
 use ash::prelude::VkResult;
 
-use crate::make_handle;
+use crate::{make_handle, window::Window};
 use crate::traits::handle::Handle;
 use crate::vk::context::Context;
-use crate::vk::framebuffer::Framebuffer;
 use crate::vk::image::Image;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
-use crate::vk::surface::Surface;
 
-use super::{image::ImageCreateInfo, render_pass::{RenderPassCreateInfo, SubpassAttachment}};
+use super::{image::ImageCreateInfo, render_pass::RenderPassCreateInfo};
+
+pub struct SwapchainImage {
+    pub present : Image,
+    pub depth : Option<Image>,
+    pub resolve : Option<Image>,
+}
 
 pub struct Swapchain {
-    device : Arc<LogicalDevice>,
-    pub surface : Arc<Surface>,
-
+    // Surface
     handle : vk::SwapchainKHR,
     pub loader : ash::khr::swapchain::Device,
-    
-    pub extent : vk::Extent2D,
-    pub present_images : Vec<Image>,
-    pub depth_images   : Vec<Image>,
-    pub resolve_images : Vec<Image>,
-    pub sample_count   : vk::SampleCountFlags,
+    pub surface_format : vk::SurfaceFormatKHR,
 
-    pub queue_families : Vec<QueueFamily>,
+    // Device
+    device : Arc<LogicalDevice>,
+    
+    // Images
+    pub extent : vk::Extent2D,
+    pub images : Vec<SwapchainImage>,
+    pub sample_count : vk::SampleCountFlags,
     layer_count : u32,
 
-    pub surface_format : vk::SurfaceFormatKHR,
+    // Queues
+    pub queue_families : Vec<QueueFamily>,
 }
 
 /// Options that are used when creating a [`Swapchain`].
@@ -90,6 +94,7 @@ pub trait SwapchainOptions {
 impl Drop for Swapchain {
     fn drop(&mut self) {
         unsafe {
+            self.images.clear();
             self.loader.destroy_swapchain(self.handle, None);
         }
     }
@@ -97,6 +102,16 @@ impl Drop for Swapchain {
 
 impl Swapchain {
     #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
+
+    fn select_format<T : SwapchainOptions>(options : &T, formats : Vec<vk::SurfaceFormatKHR>) -> vk::SurfaceFormatKHR {
+        for format in &formats {
+            if options.select_surface_format(format) {
+                return *format;
+            }
+        }
+
+        formats[0]
+    }
 
     /// Creates a new swapchain.
     /// 
@@ -117,29 +132,15 @@ impl Swapchain {
     pub fn new<T : SwapchainOptions>(
         instance : &Arc<Context>,
         device : &Arc<LogicalDevice>,
-        surface : &Arc<Surface>,
+        window : &Arc<Window>,
         options : &T,
         queue_families : Vec<QueueFamily>,
-    ) -> Arc<Self> {
-        let surface_format = {
-            let surface_formats = unsafe {
-                surface.loader
-                    .get_physical_device_surface_formats(device.physical_device.handle(), surface.handle())
-                    .expect("Failed to get physical device surface formats")
-            };
+    ) -> Self {
+        let surface_format = Self::select_format(options, window.get_surface_formats(&device.physical_device));
 
-            surface_formats.iter()
-                .find(|&v| options.select_surface_format(v))
-                .unwrap_or(&surface_formats[0])
-                .clone()
-        };
+        let surface_capabilities = window.get_surface_capabilities(&device.physical_device);
 
-        let surface_capabilities = unsafe {
-            surface.loader
-                .get_physical_device_surface_capabilities(device.physical_device.handle(), surface.handle())
-                .expect("Failed to get physical device surface capabilities")
-        };
-        let surface_extent = if surface_capabilities.current_extent.width != u32::MAX {
+        let extent = if surface_capabilities.current_extent.width != u32::MAX {
             surface_capabilities.current_extent
         } else {
             vk::Extent2D {
@@ -157,30 +158,28 @@ impl Swapchain {
             image_count
         };
 
-        let present_modes = unsafe {
-            surface.loader.get_physical_device_surface_present_modes(device.physical_device.handle(), surface.handle())
-                .expect("Failed to get physical device surface present modes")
-        };
+        let present_modes = window.get_present_modes(&device.physical_device);
 
-        let queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
+        let mut queue_family_indices = queue_families.iter().map(QueueFamily::index).collect::<Vec<_>>();
+        queue_family_indices.dedup();
 
-        let image_sharing_mode = if queue_family_indices.len() == 1 {
+        let sharing_mode = if queue_family_indices.len() == 1 {
             vk::SharingMode::EXCLUSIVE
         } else {
             vk::SharingMode::CONCURRENT
         };
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
-            .surface(surface.handle())
+            .surface(window.surface())
             .min_image_count(image_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)
-            .image_extent(surface_extent)
+            .image_extent(extent)
             // Number of views in a multiview/stereo surface. For non-stereoscopic-3D applications, this value is 1.
             .image_array_layers(1)
             // A bitmask of VkImageUsageFlagBits describing the intended usage of the (acquired) swapchain images.
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-            .image_sharing_mode(image_sharing_mode)
+            .image_sharing_mode(sharing_mode)
             .queue_family_indices(&queue_family_indices)
             .pre_transform(if surface_capabilities.supported_transforms.contains(vk::SurfaceTransformFlagsKHR::IDENTITY) {
                 vk::SurfaceTransformFlagsKHR::IDENTITY
@@ -208,150 +207,145 @@ impl Swapchain {
                 .get_swapchain_images(handle)
                 .expect("Failed to get swapchain images");
 
-            Image::from_swapchain(&surface_extent, &device, surface_format.format, swapchain_images)
+            Image::from_swapchain(&extent, &device, surface_format.format, swapchain_images)
         };
 
-        let depth_images = if options.depth() {
-            let mut depth_images = vec![];
+        let mut images = vec![];
+        for (i, present) in present_images.into_iter().enumerate() {
+            let depth = Self::make_depth_image(device,
+                format!("Swapchain/Depth[{}]", i), options, sharing_mode, extent);
+            let resolve = Self::make_resolve_image(device,
+                format!("Swapchain/Resolve[{}]", i), options, surface_format, sharing_mode, extent);
 
-            let depth_format = RenderPass::find_supported_format(device,
-                &[
-                    vk::Format::D32_SFLOAT,         // This has no stencil component soooo.. ???
-                    vk::Format::D32_SFLOAT_S8_UINT,
-                    vk::Format::D24_UNORM_S8_UINT,
-                    // vk::Format::D16_UNORM_S8_UINT, // Not supported on my hardware
-                    // vk::Format::S8_UINT is exclusively stencil
-                ],
-                vk::ImageTiling::OPTIMAL,
-                vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
-            ).expect("Failed to find an usable depth format");
+            images.push(SwapchainImage {
+                present,
+                depth,
+                resolve
+            })
+        }
 
-            let mut depth_aspect_flags = vk::ImageAspectFlags::DEPTH;
-            if depth_format == vk::Format::D32_SFLOAT_S8_UINT || depth_format == vk::Format::D24_UNORM_S8_UINT {
-                depth_aspect_flags |= vk::ImageAspectFlags::STENCIL;
-            }
-
-            for i in 0..present_images.len() {
-                depth_images.push(ImageCreateInfo::default()
-                    .aspect(depth_aspect_flags)
-                    .name(format!("Swapchain/DepthStencil #{}", i))
-                    .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
-                    .format(depth_format)
-                    .levels(0, 1)
-                    .layers(0, 1)
-                    .samples(options.multisampling())
-                    .tiling(vk::ImageTiling::OPTIMAL)
-                    .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
-                    .sharing_mode(image_sharing_mode)
-                    .extent(vk::Extent3D::default()
-                        .width(surface_extent.width)
-                        .height(surface_extent.height)
-                        .depth(1)
-                    )
-                    .build(device));
-            }
-            depth_images
-        } else { vec![] };
-
-        let resolve_images = {
-            let mut resolve_images = Vec::<Image>::new();
-            if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
-                for i in 0..present_images.len() {
-                    resolve_images.push(ImageCreateInfo::default()
-                        .aspect(vk::ImageAspectFlags::COLOR)
-                        .name(format!("Swapchain/Resolve #{}", i))
-                        .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
-                        .format(surface_format.format)
-                        .levels(0, 1)
-                        .layers(0, 1)
-                        .samples(options.multisampling())
-                        .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                        .sharing_mode(image_sharing_mode)
-                        .extent(vk::Extent3D::default()
-                            .width(surface_extent.width)
-                            .height(surface_extent.height)
-                            .depth(1)
-                        )
-                        .build(device));
-                }
-            }
-            resolve_images
-        };
-
-        Arc::new(Self {
+        Self {
             device : device.clone(),
-            extent : surface_extent,
+            extent,
             handle,
-            surface : surface.clone(),
             layer_count : options.layers().len() as _,
             loader : swapchain_loader,
-            present_images,
-            depth_images,
-            resolve_images,
+            images,
             queue_families,
             sample_count : options.multisampling(),
 
             surface_format
-        })
+        }
     }
 
-    pub fn create_render_pass(&self) -> RenderPass {
-        let color_format = self.present_images.get(0).map(Image::format).expect("Unable to find the format of the presentation image");
-        let depth_format = self.depth_images.get(0).map(Image::format).expect("Unable to find the format of the depth image");
-        let resolve_format = self.resolve_images.get(0).map(Image::format).expect("Unable to find the format of the resolve image");
+    fn make_depth_image<T : SwapchainOptions>(
+        device : &Arc<LogicalDevice>,
+        name : String,
+        options : &T,
+        image_sharing_mode : vk::SharingMode,
+        extent : vk::Extent2D
+    ) -> Option<Image> {
+        let depth_format = RenderPass::find_supported_format(device,
+            &[
+                vk::Format::D32_SFLOAT,
+                vk::Format::D32_SFLOAT_S8_UINT,
+                vk::Format::D24_UNORM_S8_UINT,
+            ],
+            vk::ImageTiling::OPTIMAL,
+            vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT
+        ).expect("Failed to find an usable depth format");
 
-        RenderPassCreateInfo::default()
-            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-            .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
-            .resolve_attachment(resolve_format, vk::ImageLayout::PRESENT_SRC_KHR)
-            .dependency(
-                vk::SUBPASS_EXTERNAL,
-                0,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags::empty(),
-                vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            )
-            .subpass(
-                vk::PipelineBindPoint::GRAPHICS,
-                &[
-                    SubpassAttachment::color(0),
-                    SubpassAttachment::resolve(0)
-                ],
-                SubpassAttachment::None
-            )
-            .build(&self.device)
-    }
-
-    pub fn create_framebuffers(&self, render_pass : &RenderPass) -> Vec<Framebuffer> {
-        let mut framebuffers = Vec::<Framebuffer>::with_capacity(self.present_images.len());
-        for i in 0..self.present_images.len() {
-            let mut attachment = Vec::<vk::ImageView>::new();
-            if self.resolve_images.is_empty() {
-                attachment.push(self.present_images[i].view());
-                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
-                    attachment.push(depth_image);
-                }
-            } else {
-                attachment.push(self.resolve_images[i].view());
-                if let Some(depth_image) = self.depth_images.get(i).map(Image::view) {
-                    attachment.push(depth_image);
-                }
-                attachment.push(self.present_images[i].view());
-            }
-
-            let create_info = vk::FramebufferCreateInfo::default()
-                .render_pass(render_pass.handle())
-                .attachments(&attachment)
-                .width(self.extent.width)
-                .height(self.extent.height)
-                .layers(self.layer_count);
-
-            framebuffers.push(Framebuffer::new(&self.device, create_info));
+        if !options.depth() {
+            return None;
         }
 
-        framebuffers
+        let mut depth_aspect_flags = vk::ImageAspectFlags::DEPTH;
+        if depth_format == vk::Format::D32_SFLOAT_S8_UINT || depth_format == vk::Format::D24_UNORM_S8_UINT {
+            depth_aspect_flags |= vk::ImageAspectFlags::STENCIL;
+        }
+
+        ImageCreateInfo::default()
+            .aspect(depth_aspect_flags)
+            .name(name)
+            .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
+            .format(depth_format)
+            .levels(0, 1)
+            .layers(0, 1)
+            .samples(options.multisampling())
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+            .sharing_mode(image_sharing_mode)
+            .extent(vk::Extent3D {
+                width : extent.width,
+                height : extent.height,
+                depth : 1
+            })
+            .build(device)
+            .into()
+    }
+
+    pub fn make_resolve_image<T : SwapchainOptions>(
+        device : &Arc<LogicalDevice>,
+        name : String,
+        options : &T,
+        surface_format : vk::SurfaceFormatKHR,
+        sharing_mode : vk::SharingMode,
+        extent : vk::Extent2D
+    ) -> Option<Image> {
+        if options.multisampling() > vk::SampleCountFlags::TYPE_1 {
+            ImageCreateInfo::default()
+                .aspect(vk::ImageAspectFlags::COLOR)
+                .name(name)
+                .image_type(vk::ImageType::TYPE_2D, vk::ImageViewType::TYPE_2D)
+                .format(surface_format.format)
+                .levels(0, 1)
+                .layers(0, 1)
+                .samples(options.multisampling())
+                .tiling(vk::ImageTiling::OPTIMAL)
+                .usage(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT | vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                .sharing_mode(sharing_mode)
+                .extent(vk::Extent3D {
+                    width : extent.width,
+                    height : extent.height,
+                    depth : 1
+                })
+                .build(device)
+                .into()
+        } else {
+            None
+        }
+    }
+
+    pub fn color_format(&self) -> vk::Format { self.images[0].present.format() }
+
+    pub fn create_render_pass(&self, is_presenting : bool) -> RenderPassCreateInfo {
+        // TODO: Fix this for cases where multisampling is not active
+
+        // Rely on the first image to deduce image formats for the render pass attachments.
+        // What we do here doesn't really matter, we just need a way to get attachments and all
+        // images should be in the same state at the point this function is called.
+        let first_image = unsafe { self.images.get(0).unwrap_unchecked() };
+
+        let color_format   = first_image.present.format();
+        let depth_format   = match &first_image.depth {
+            Some(depth) => depth.format(),
+            None => unreachable!()
+        };
+        let resolve_format = match &first_image.resolve {
+            Some(resolve) => resolve.format(),
+            None => unreachable!()
+        };
+
+        let final_format = if is_presenting {
+            vk::ImageLayout::PRESENT_SRC_KHR
+        } else {
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        };
+
+        RenderPassCreateInfo::default()
+            .color_attachment(color_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE, vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .depth_attachment(depth_format, self.sample_count, vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE)
+            .resolve_attachment(resolve_format, final_format)
     }
 
     /// Acquires the next image. Returns the image index, and wether the swapchain is suboptimal for the surface.
@@ -364,7 +358,7 @@ impl Swapchain {
     pub fn format(&self) -> vk::Format { self.surface_format.format }
     pub fn color_space(&self) -> vk::ColorSpaceKHR { self.surface_format.color_space}
     pub fn layer_count(&self) -> u32 { self.layer_count }
-    pub fn image_count(&self) -> usize { self.present_images.len() }
+    pub fn image_count(&self) -> usize { self.images.len() }
 }
 
 make_handle! { Swapchain, vk::SwapchainKHR }

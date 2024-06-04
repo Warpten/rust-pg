@@ -30,11 +30,13 @@ pub struct PipelineInfo {
 
     layout : vk::PipelineLayout,
     render_pass : vk::RenderPass,
+    subpass : u32,
     shaders : Vec<(PathBuf, vk::ShaderStageFlags)>,
     depth : DepthOptions,
     cull_mode : vk::CullModeFlags,
     front_face : vk::FrontFace,
     topology : vk::PrimitiveTopology,
+    color_blend_attachments : Vec<vk::PipelineColorBlendAttachmentState>,
 
     specialization_data: Vec<u8>,
     specialization_entries: Vec<vk::SpecializationMapEntry>,
@@ -56,9 +58,19 @@ impl PipelineInfo {
         self
     }
 
+    #[inline] pub fn render_pass(mut self, render_pass : vk::RenderPass, subpass : u32) -> Self {
+        self.render_pass = render_pass;
+        self.subpass = subpass;
+        self
+    }
+
+    #[inline] pub fn color_blend_attachment(mut self, attachment : vk::PipelineColorBlendAttachmentState) -> Self {
+        self.color_blend_attachments.push(attachment);
+        self
+    }
+
     value_builder! { depth, depth, DepthOptions }
     value_builder! { layout, layout, vk::PipelineLayout }
-    value_builder! { render_pass, render_pass, vk::RenderPass }
     value_builder! { cull_mode, mode, cull_mode, vk::CullModeFlags }
     value_builder! { samples, samples, vk::SampleCountFlags }
     value_builder! { front_face, front, front_face, vk::FrontFace }
@@ -100,7 +112,6 @@ impl Default for PipelineInfo {
             name : Some("Default Pipeline"),
 
             layout: vk::PipelineLayout::default(),
-            render_pass: vk::RenderPass::null(),
             shaders: vec![],
             depth : DepthOptions {
                 test : true,
@@ -109,6 +120,7 @@ impl Default for PipelineInfo {
             },
             cull_mode: vk::CullModeFlags::BACK,
             front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            color_blend_attachments : vec![],
 
             specialization_data : vec![],
             specialization_entries : vec![],
@@ -120,6 +132,9 @@ impl Default for PipelineInfo {
             vertex_format_offset : vec![],
 
             pool : None,
+
+            render_pass : vk::RenderPass::null(),
+            subpass : 0,
         }
     }
 }
@@ -174,11 +189,10 @@ pub struct Pipeline {
     device : Arc<LogicalDevice>,
     info : PipelineInfo,
     handle : vk::Pipeline,
-    layout : vk::PipelineLayout,
 }
 
 impl Pipeline {
-    #[inline] pub fn layout(&self) -> vk::PipelineLayout { &self.layout }
+    #[inline] pub fn layout(&self) -> vk::PipelineLayout { self.info.layout }
 
     pub(in self) fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
@@ -231,6 +245,9 @@ impl Pipeline {
         // TODO: Allow for depth bias configuration
         let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
             .cull_mode(info.cull_mode)
+            // .depth_clamp_enable(false)
+            // .rasterizer_discard_enable(false)
+            // .depth_bias_enable(false)
             .line_width(1.0f32) // Any value larger than 1 requires a GPU feature
             .polygon_mode(vk::PolygonMode::FILL)
             .front_face(info.front_face);
@@ -245,22 +262,11 @@ impl Pipeline {
         let depth_stencil_state = info.depth.build();
 
         // TODO: This array needs to be synced with render_pass.subpasses[all].colorAttachmentCount
-        let color_blend_attachment_states = [
-            vk::PipelineColorBlendAttachmentState::default()
-                .blend_enable(false)
-                .src_color_blend_factor(vk::BlendFactor::SRC_COLOR)
-                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_DST_COLOR)
-                .color_blend_op(vk::BlendOp::ADD)
-                .src_alpha_blend_factor(vk::BlendFactor::ZERO)
-                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-                .alpha_blend_op(vk::BlendOp::ADD)
-                .color_write_mask(vk::ColorComponentFlags::RGBA)
-        ];
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
             .logic_op_enable(false)
             .logic_op(vk::LogicOp::COPY)
             .blend_constants([0.0f32; 4])
-            .attachments(&color_blend_attachment_states);
+            .attachments(&info.color_blend_attachments);
 
         let create_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&shader_stage_create_infos[..])
@@ -273,6 +279,7 @@ impl Pipeline {
             .depth_stencil_state(&depth_stencil_state)
             .color_blend_state(&color_blend_state)
             .render_pass(info.render_pass)
+            .subpass(info.subpass)
             .layout(info.layout);
 
         let pipelines = unsafe {
@@ -293,7 +300,6 @@ impl Pipeline {
             device : device.clone(),
             handle : pipelines[0],
             info,
-            layout,
         }
     }
 }

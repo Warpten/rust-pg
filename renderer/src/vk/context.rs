@@ -1,4 +1,5 @@
 use std::backtrace::Backtrace;
+use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ptr::null;
 use std::{hint, slice};
@@ -6,14 +7,144 @@ use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
 use ash::vk;
 
+use crate::traits::handle::Handle;
 use crate::vk::physical_device::PhysicalDevice;
+use crate::window::Window;
+
+use super::logical_device::LogicalDevice;
+use super::queue::QueueFamily;
+use super::renderer::RendererOptions;
+use super::swapchain::Swapchain;
 
 pub struct Context {
-    entry : Arc<ash::Entry>,
-    handle : ash::Instance,
+    pub(in crate) entry : Arc<ash::Entry>,
+    pub(in crate) instance : ash::Instance,
     debug_utils : ash::ext::debug_utils::Instance,
     debug_messenger : vk::DebugUtilsMessengerEXT,
     
+}
+
+impl Context {
+    pub fn create_swapchain(
+        self : &Arc<Context>,
+        device : &Arc<LogicalDevice>,
+        window : &Arc<Window>,
+        settings : &RendererOptions,
+        queue_families : Vec<QueueFamily>,
+    ) -> Swapchain {
+        Swapchain::new(&self, device, window, settings, queue_families)
+    }
+
+    /// Selects a [`PhysicalDevice`] and its associated graphics and presentation [`queue families`](QueueFamily).
+    ///
+    /// Device selection is done according to its classification, with the following order:
+    ///
+    /// 1. [`vk::PhysicalDeviceType::DISCRETE_GPU`]
+    /// 2. [`vk::PhysicalDeviceType::INTEGRATED_GPU`]
+    /// 3. [`vk::PhysicalDeviceType::VIRTUAL_GPU`]
+    /// 4. [`vk::PhysicalDeviceType::CPU`]
+    /// 5. [`vk::PhysicalDeviceType::OTHER`]
+    ///
+    /// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
+    pub fn select_physical_device(self : &Arc<Context>, window : &Arc<Window>, settings : &RendererOptions, device_extensions : &[CString]) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
+        self.get_physical_devices(|left, right| {
+            // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
+            match (right.properties().device_type, left.properties().device_type) {
+                // Base equality case
+                (a, b) if a == b => Ordering::Equal,
+
+                // DISCRETE_GPU > ALL
+                (vk::PhysicalDeviceType::DISCRETE_GPU, _) => Ordering::Greater,
+
+                // DISCRETE > INTEGRATED > ALL
+                (vk::PhysicalDeviceType::INTEGRATED_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::INTEGRATED_GPU, _) => Ordering::Greater,
+
+                // DISCRETE, INTEGRATED > VIRTUAL > ALL
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::VIRTUAL_GPU, _) => Ordering::Greater,
+
+                // DISCRETE, INTEGRATED, VIRTUAL > CPU > ALL
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::DISCRETE_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::INTEGRATED_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, vk::PhysicalDeviceType::VIRTUAL_GPU) => Ordering::Less,
+                (vk::PhysicalDeviceType::CPU, _) => Ordering::Greater,
+
+                // ALL > OTHER
+                (vk::PhysicalDeviceType::OTHER, _) => Ordering::Less,
+
+                // Default case for branch solver
+                (_, _) => unsafe { hint::unreachable_unchecked() },
+            }
+        })
+        .into_iter()
+        .filter(|device| -> bool {
+            // 1. First, check for device extensions.
+            // We start by collecting a device's extensions and then remove them from the extensions
+            // we asked for. If no extension subside, we're good.
+            let extensions_supported = {
+                let device_extensions_names = device.get_extensions().into_iter()
+                    .map(|device_extension| {
+                        unsafe {
+                            CStr::from_ptr(device_extension.extension_name.as_ptr()).to_owned()
+                        }
+                    }).collect::<Vec<_>>();
+
+                let mut required_extensions = device_extensions.iter().collect::<HashSet<_>>();
+                for extension_name in device_extensions_names {
+                    required_extensions.remove(&extension_name);
+                }
+
+                required_extensions.is_empty()
+            };
+
+            // 2. Finally, check for swapchain support.
+            let supports_present = {
+                let surface_formats = window.get_surface_formats(device);
+                let surface_present_modes = window.get_present_modes(device);
+
+                !surface_formats.is_empty() && !surface_present_modes.is_empty()
+            };
+
+            return extensions_supported && supports_present
+        }).find_map(|device| {
+            // At this point, the current device is eligible and we just need to check for a present queue and a graphics queue.
+            // To do that, we will grab the queue's families.
+
+            let mut graphics_queue = None;
+            let mut present_queue = None;
+            let mut transfer_queue = None;
+
+            for family in &device.queue_families[..] {
+                if family.is_graphics() {
+                    graphics_queue = Some(family.clone());
+
+                    // If this family can present as well just use it as a graphics+present queue
+                    if family.can_present(&window, &device) {
+                        present_queue = Some(family.clone());
+                    }
+                }
+
+                // Default to the first available present queue
+                if family.can_present(&window, &device) && present_queue.is_none() {
+                    present_queue = Some(family.clone());
+                }
+
+                // If this family can transfer and no transfer queue is found,
+                // If this family can transfer and is only a transfer queue
+                if family.is_transfer() && ((!family.is_graphics() && !family.is_compute()) || transfer_queue.is_none()) {
+                    transfer_queue = Some(family.clone());
+                }
+            }
+
+            match (graphics_queue, present_queue, transfer_queue) {
+                (Some(g), Some(p), Some(t)) => Some((device, g, p, t)),
+                _ => None
+            }
+        }).expect("Failed to select a physical device and an associated queue family")
+    }
+
 }
 
 impl Context {
@@ -97,7 +228,7 @@ impl Context {
 
     pub fn entry(&self) -> &Arc<ash::Entry> { &self.entry }
 
-    pub fn handle(&self) -> &ash::Instance { &self.handle }
+    pub fn handle(&self) -> &ash::Instance { &self.instance }
 
     /// Returns all physical devices of this Vulkan instance. The returned [`Vec`] is sorted according to the provided comparator.
     /// # Arguments
@@ -111,7 +242,7 @@ impl Context {
         where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
     {
         let physical_devices = unsafe {
-            self.handle.enumerate_physical_devices()
+            self.instance.enumerate_physical_devices()
                 .expect("Failed to enumerate physical devices")
         };
 
@@ -187,7 +318,7 @@ impl Context {
 
         Self {
             entry,
-            handle : instance,
+            instance,
             debug_utils : debug_utils_loader,
             debug_messenger
         }
@@ -198,7 +329,7 @@ impl Drop for Context {
     fn drop(&mut self) {
         unsafe {
             self.debug_utils.destroy_debug_utils_messenger(self.debug_messenger, None);
-            self.handle.destroy_instance(None);
+            self.instance.destroy_instance(None);
         }
     }
 }

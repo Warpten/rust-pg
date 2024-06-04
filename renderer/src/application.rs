@@ -2,21 +2,30 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::vk::context::Context;
-use crate::vk::renderer::{Renderer, RendererOptions};
+use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
+use crate::vk::{context::Context, renderer::RendererOptions};
 use crate::window::Window;
 
-#[derive(Debug)]
+type OrchestratorFn = fn(&Arc<Context>) -> Orchestrator;
+
 pub struct ApplicationOptions {
-    pub(crate) title : String,
-    pub(crate) renderer : RendererOptions,
+    pub title : String,
+    pub renderer_options : RendererOptions,
+    pub device_extensions : Vec<CString>,
+    pub instance_extensions : Vec<CString>,
+    pub orchestrator : OrchestratorFn,
 }
 
 impl Default for ApplicationOptions {
     fn default() -> Self {
         Self {
-            renderer: Default::default(),
             title: "WorldEdit".to_owned(),
+
+            orchestrator : Orchestrator::new,
+
+            renderer_options: Default::default(),
+            device_extensions : vec![],
+            instance_extensions : vec![],
         }
     }
 }
@@ -27,19 +36,31 @@ impl ApplicationOptions {
         self
     }
 
-    value_builder! { renderer, renderer, RendererOptions }
+    #[inline] pub fn instance_extension(mut self, value : CString) -> Self {
+        self.instance_extensions.push(value);
+        self
+    }
+
+    #[inline] pub fn device_extension(mut self, value : CString) -> Self {
+        self.device_extensions.push(value);
+        self
+    }
+
+    value_builder! { renderer, renderer_options, RendererOptions }
+    value_builder! { orchestrator, orchestrator, OrchestratorFn }
 }
 
 #[derive(Debug)]
-pub enum ApplicationRenderError {
+pub enum RendererError {
     InvalidSwapchain,
 }
 
 pub type PrepareFn = fn() -> ApplicationOptions;
 pub type SetupFn<T> = fn(&mut Application) -> T;
 pub type UpdateFn<T> = fn(&mut Application, &mut T);
-pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), ApplicationRenderError>;
-pub type WindowEventFn<T> = fn(&mut Application, &mut T, event: &WindowEvent);
+pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), RendererError>;
+pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
+pub type InterfaceFn<T> = fn(&mut T, ctx : &mut egui::Context);
 
 pub struct ApplicationBuilder<State : 'static> {
     pub prepare : Option<PrepareFn>,
@@ -77,7 +98,7 @@ impl<T> ApplicationBuilder<T> {
     pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
         if let Some(render_fn) = self.render {
             match render_fn(application, data) {
-                Err(ApplicationRenderError::InvalidSwapchain) => true,
+                Err(RendererError::InvalidSwapchain) => true,
                 _ => false,
             }
         } else {
@@ -89,13 +110,14 @@ impl<T> ApplicationBuilder<T> {
 #[allow(dead_code, unused)]
 fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     let event_loop = EventLoop::new().unwrap();
-    let settings = {
+    let mut settings = {
         if let Some(prepare) = builder.prepare {
             prepare()
         } else {
             ApplicationOptions::default()
         }
     };
+
     let mut app = Application::new(settings, &event_loop);
     let mut app_data = (builder.setup)(&mut app);
     let mut dirty_swapchain = false;
@@ -106,7 +128,9 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
-        if !app.window.is_minimized() {
+        puffin::GlobalProfiler::lock().new_frame();
+
+        if !app.orchestrator.context.window.is_minimized() {
             
             if dirty_swapchain {
                 app.recreate_swapchain();
@@ -138,7 +162,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => app.renderer.device.wait_idle(),
+                Event::LoopExiting => app.orchestrator.context.device.wait_idle(),
                 _ => { }
             }
         }
@@ -148,41 +172,46 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 pub struct Application {
     pub context : Arc<Context>,
-    pub renderer : Renderer,
-    pub window : Window,
+    pub orchestrator : RendererOrchestrator,
+    window : Arc<Window>,
 }
 
 impl Application {
     pub fn build<T>(setup: SetupFn<T>) -> ApplicationBuilder<T> {
         ApplicationBuilder {
-            prepare: None,
             setup,
-            update: None,
-            event: None,
-            render: None,
+            prepare : None,
+            update : None,
+            event : None,
+            render : None,
         }
     }
 
-    pub fn new(settings : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
-        let window = Window::new(&settings, event_loop);
+    pub fn new(options : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
+        let mut window = Window::new(&options, event_loop);
 
         let context = Arc::new(unsafe {
-            let mut all_extensions = settings.renderer.instance_extensions.clone();
+            let mut all_extensions = options.instance_extensions.clone();
             all_extensions.extend(window.surface_extensions().iter().map(|&extension| CStr::from_ptr(extension).to_owned()));
             all_extensions.push(ash::ext::debug_utils::NAME.into());
             all_extensions.dedup();
 
             Context::new(CString::new("send-help").unwrap_unchecked(), all_extensions)
         });
+        window.create_surface(&context);
+
+        let window = Arc::new(window);
+
+        let orchestrator = (options.orchestrator)(&context).build(options.renderer_options, &window, options.device_extensions);
 
         Self {
             context : context.clone(),
-            renderer : Renderer::new(settings.renderer, &context, &window),
-            window,
+            orchestrator,
+            window
         }
     }
 
     pub fn recreate_swapchain(&mut self) {
-
+        self.orchestrator.recreate_swapchain();
     }
 }

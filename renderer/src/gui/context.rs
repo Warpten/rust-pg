@@ -1,53 +1,48 @@
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
+use std::slice;
 use std::sync::Arc;
 use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
-use nohash_hasher::IntMap;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use egui_winit::winit::event::WindowEvent;
+use egui_winit::EventResponse;
+use puffin::profile_scope;
+use crate::orchestration::rendering::{Renderer, SynchronizedRenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
-use crate::vk::descriptor::layout::{BindingDescriptorCount, DescriptorSetLayout, DescriptorSetLayoutBuilder, PoolDescriptorCount};
+use crate::vk::command_pool::CommandPool;
+use crate::vk::descriptor::layout::DescriptorSetLayout;
 use crate::vk::descriptor::set::DescriptorSetInfo;
+use crate::vk::frame_data::FrameData;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::helpers::{prepare_buffer_image_copy, with_delta};
 use crate::vk::image::{Image, ImageCreateInfo};
-use crate::vk::logical_device::LogicalDevice;
-use crate::vk::pipeline::layout::PipelineLayoutInfo;
+use crate::vk::pipeline::layout::{PipelineLayout, PipelineLayoutInfo};
 use crate::vk::pipeline::{DepthOptions, Pipeline, PipelineInfo, Vertex};
 use crate::vk::queue::{Queue, QueueAffinity};
 use crate::vk::render_pass::{RenderPass, SubpassAttachment};
-use crate::vk::renderer::Renderer;
 use crate::vk::sampler::Sampler;
+use crate::vk::swapchain::Swapchain;
 use crate::window::Window;
 
 // A GUI texture.
 struct Texture {
     image : Image,
-    descriptor_set : DescriptorSetInfo
 }
 
-pub struct Interface {
-    context : Context,
-    egui : egui_winit::State,
-
-    device : Arc<LogicalDevice>,
-    render_pass : RenderPass,
-    pipeline : Pipeline,
-    framebuffers : Vec<Framebuffer>,
-    descriptor_set_layout : DescriptorSetLayout,
-
-    extent : vk::Extent2D,
-    pixel_per_point : f32,
-
-    vertex_buffers : Vec<Buffer>,
-    index_buffers : Vec<Buffer>,
-    sampler : Sampler,
-
-    textures : HashMap<TextureId, Texture>
+impl Texture {
+    pub fn descriptor_set(&self, sampler : &Sampler) -> DescriptorSetInfo {
+        DescriptorSetInfo::default()
+            .images(0, vec![
+                vk::DescriptorImageInfo::default()
+                    .image_layout(self.image.layout())
+                    .sampler(sampler.handle())
+                    .image_view(self.image.view())
+            ])
+    }
 }
 
 struct InterfaceVertex;
@@ -82,97 +77,159 @@ impl Vertex for InterfaceVertex {
     }
 }
 
-pub struct InterfaceCreateInfo<'a> {
-    fonts : FontDefinitions,
-    style : Style,
-    pixel_per_point : f32,
-
-    renderer : &'a Renderer,
-}
-
-impl InterfaceCreateInfo<'_> {
-    pub fn new(renderer : &Renderer, pixel_per_point : f32) -> Self {
-        InterfaceCreateInfo {
-            fonts : FontDefinitions::empty(),
-            style : todo!(),
-            pixel_per_point,
-
-            renderer,
+impl<T : Default> Renderer for Interface<T> {
+    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
+        let mut framebuffers = vec![];
+        for image in &swapchain.images {
+            framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
         }
+        framebuffers
     }
 
-    pub fn build<H : HasDisplayHandle>(self, window : &H) -> Interface {
-        Interface::new(self, window)
+    fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
+        self.egui.on_window_event(self.rendering_context.window.handle(), event)
     }
+    
+    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
+        let window = &self.rendering_context.window;
+
+        let raw_input = self.egui.take_egui_input(window.handle());
+        self.context.begin_frame(raw_input);
+
+        // egui calls here...
+        // ...
+
+        (self.delegate)(&self.context, &mut self.state);
+
+        let output = self.context.end_frame();
+        self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
+
+        let clipped_meshes = self.context.tessellate(output.shapes, self.scale_factor as _);
+        self.paint(&frame.cmd, swapchain, framebuffer, frame.index, clipped_meshes, output.textures_delta);
+    }
+
+    fn marker_label(&self) -> String { "Draw GUI".to_owned() }
+
+    fn marker_color(&self) -> [f32; 4] { [0.0; 4] }
 }
 
-impl Interface {
-    pub(in crate) fn new<H>(
-        info : InterfaceCreateInfo,
-        target : &H
-    ) -> Self
-        where H : HasDisplayHandle
-    {
-        let context = Context::default();
-        context.set_fonts(info.fonts);
-        context.set_style(info.style);
+// --
 
-        let mut egui = egui_winit::State::new(context.clone(),
-            ViewportId::ROOT,
-            target,
-            Some(info.pixel_per_point),
-            Some(info.renderer.device.physical_device.properties.limits.max_image_dimension2_d as usize));
+pub struct InterfaceFrameData {
+    vertex_buffer : Buffer,
+    index_buffer : Buffer,
+    descriptor_set_layout : DescriptorSetLayout,
+}
 
-        // Create a render pass.
+type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
+
+pub struct Interface<T : Default> {
+    // Rendering data structures
+    pub context : Context,
+    egui : egui_winit::State,
+    rendering_context : SynchronizedRenderingContext,
+    pipeline_layout : PipelineLayout,
+    pipeline : Pipeline,
+    command_pool : CommandPool,
+    frame_data : Vec<InterfaceFrameData>,
+    render_pass : RenderPass,
+    pub scale_factor : f64,
+    sampler : Sampler,
+    textures : HashMap<TextureId, Texture>,
+    delegate : InterfaceRenderDelegate<T>,
+
+    // User data structures
+    pub state : T,
+}
+
+impl<T : Default> Interface<T> {
+    pub fn supplier(swapchain : &Swapchain, context : &SynchronizedRenderingContext, is_presenting : bool, delegate : InterfaceRenderDelegate<T>) -> Interface<T> {
+        let final_format = if is_presenting {
+            vk::ImageLayout::PRESENT_SRC_KHR
+        } else {
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        };
+        
         let render_pass = RenderPass::builder()
             .color_attachment(
-                info.renderer.swapchain.surface_format.format,
+                swapchain.color_format(),
                 vk::SampleCountFlags::TYPE_1,
                 vk::AttachmentLoadOp::LOAD,
                 vk::AttachmentStoreOp::STORE,
-                vk::ImageLayout::PRESENT_SRC_KHR
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_format
             )
+            .subpass(vk::PipelineBindPoint::GRAPHICS, &[
+                SubpassAttachment::color(0)
+            ], None)
             .dependency(
-                vk::SUBPASS_EXTERNAL,
-                0,
+                vk::SUBPASS_EXTERNAL, 0,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            )
-            .subpass(vk::PipelineBindPoint::GRAPHICS, &[
-                SubpassAttachment::color(0)
-            ], SubpassAttachment::None)
-            .build(&info.renderer.device);
+            ).build(&context.device);
+
+        Self::new(FontDefinitions::default(), Style::default(), swapchain, &context, render_pass, delegate)
+    }
+
+    pub fn new(
+        fonts : FontDefinitions,
+        style : Style,
+        swapchain : &Swapchain,
+        context : &SynchronizedRenderingContext,
+        render_pass : RenderPass,
+        delegate : InterfaceRenderDelegate<T>
+    ) -> Interface<T> {
+        let egui_context = Context::default();
+        // TODO: Make these configurable
+        egui_context.set_fonts(fonts);
+        egui_context.set_style(style);
+        egui_context.set_visuals(egui::Visuals::light());
+
+        let egui = egui_winit::State::new(egui_context.clone(),
+            ViewportId::ROOT,
+            context.window.handle(),
+            Some(context.window.handle().scale_factor() as f32),
+            Some(context.device.physical_device.properties.limits.max_image_dimension2_d as usize));
 
         // Create a descriptor pool.
-        let descriptor_set_layout = DescriptorSetLayoutBuilder::default()
-            .sets(1024)
-            .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, PoolDescriptorCount(1024), BindingDescriptorCount(1))
-            .build(&info.renderer);
+        let descriptor_set_layouts = (0..swapchain.image_count()).map(|_|
+            DescriptorSetLayout::builder()
+                .sets(1024)
+                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
+                .build(&context.device)
+        ).collect::<Vec<_>>();
 
         let pipeline_layout = PipelineLayoutInfo::default()
-            .layout(&descriptor_set_layout)
+            .layouts(&descriptor_set_layouts)
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
                 .size(size_of::<f32>() as u32 * 2) // Screen size
             )
-            .build(&info.renderer);
+            .build(&context.device);
+        context.device.set_handle_name(pipeline_layout.handle(), &"GUI Pipeline layout".to_owned());
 
         let pipeline = PipelineInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
             .layout(pipeline_layout.handle())
             .depth(DepthOptions::disabled())
+            .color_blend_attachment(vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::ONE)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA))
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .render_pass(vk::RenderPass::null())
+            .render_pass(render_pass.handle(), 0)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .pool(&info.renderer.pipeline_cache)
+            .pool(&context.pipeline_cache)
             .vertex::<InterfaceVertex>()
-            .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::VERTEX)
+            .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
-            .build(&info.renderer.device);
+            .build(&context.device);
+        context.device.set_handle_name(pipeline.handle(), &"GUI Pipeline".to_owned());
 
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
@@ -180,50 +237,58 @@ impl Interface {
             .filter(vk::Filter::LINEAR, vk::Filter::LINEAR)
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .lod(0.0, vk::LOD_CLAMP_NONE)
-            .build(&info.renderer.device);
+            .build(&context.device);
+        context.device.set_handle_name(sampler.handle(), &"GUI Sampler".to_owned());
 
-        let image_views = info.renderer.swapchain.present_images.iter()
-            .map(Image::view)
-            .collect::<Vec<_>>();
-
-        let framebuffers = info.renderer.swapchain.create_framebuffers(&render_pass);
-        let mut vertex_buffers = vec![];
-        let mut index_buffers = vec![];
-        // let mut update_buffers = vec![];
-        for i in 0..framebuffers.len() {
-            vertex_buffers.push(StaticBufferBuilder::fixed_size()
+        let mut frame_data = vec![];
+        for descriptor_set_layout in descriptor_set_layouts.into_iter() {
+            let vertex_buffer = StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                .index(vk::IndexType::UINT16)
-                .build(&info.renderer, 1024 * 1024 * 4)
-            );
+                .build(&context.device, 1024 * 1024 * 4);
+            context.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
 
-            index_buffers.push(StaticBufferBuilder::fixed_size()
+            let index_buffer = StaticBufferBuilder::fixed_size()
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .build(&info.renderer, 1024 * 1024 * 2)
-            );
+                .index(vk::IndexType::UINT32)
+                .build(&context.device, 1024 * 1024 * 4);
+            context.device.set_handle_name(index_buffer.handle(), &"GUI Index buffer".to_owned());
+
+            frame_data.push(InterfaceFrameData {
+                vertex_buffer,
+                index_buffer,
+                descriptor_set_layout,
+            });
         }
 
+        let graphics_queue = context.device.get_queue(QueueAffinity::Graphics, 0).unwrap();
+        let command_pool = CommandPool::builder(graphics_queue.family())
+            .reset()
+            .build(&context.device);
+
         Self {
-            context,
+            context: egui_context,
             egui,
-            render_pass,
-            descriptor_set_layout,
+            
+            rendering_context : context.clone(),
+            pipeline_layout,
             pipeline,
-            framebuffers,
-            vertex_buffers,
-            index_buffers,
+
+            frame_data,
             sampler,
+            command_pool,
 
-            pixel_per_point : info.pixel_per_point,
-
-            extent : info.renderer.swapchain.extent,
-            device : info.renderer.device.clone(),
+            scale_factor : context.window.handle().scale_factor(),
 
             textures : HashMap::default(),
+            render_pass,
+
+            delegate,
+
+            state : T::default(),
         }
     }
 
@@ -241,40 +306,42 @@ impl Interface {
 
     pub fn paint(&mut self,
         cmd : &CommandBuffer,
-        renderer : &Renderer,
+        swapchain : &Swapchain,
+        framebuffer : &Framebuffer,
         swapchain_image_index : usize,
         clipped_meshes : Vec<egui::ClippedPrimitive>,
         texture_delta : TexturesDelta
     ) {
+        profile_scope!("GUI Paint event");
+
         for (id, image_delta) in texture_delta.set {
-            self.update_texture(renderer, id, image_delta);
+            self.update_texture(id, image_delta);
         }
 
-        let mut vertex_buffer = self.vertex_buffers[swapchain_image_index].map();
-        let mut index_buffer = self.index_buffers[swapchain_image_index].map();
+        let frame_data = &mut self.frame_data[swapchain_image_index];
 
-        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[swapchain_image_index], 
-            vk::Rect2D::default()
-                .offset(vk::Offset2D::default().x(0).y(0))
-                .extent(self.extent),
-            &[],
-            vk::SubpassContents::INLINE
-        );
+        let mut vertex_buffer = frame_data.vertex_buffer.map();
+        let mut index_buffer = frame_data.index_buffer.map();
+
+        cmd.begin_render_pass(&self.render_pass, framebuffer, vk::Rect2D {
+            extent : swapchain.extent,
+            offset : vk::Offset2D { x : 0, y : 0 }
+        }, &[], vk::SubpassContents::INLINE);
         cmd.bind_pipeline(vk::PipelineBindPoint::GRAPHICS, &self.pipeline);
-        cmd.bind_vertex_buffers(0, &[(&self.vertex_buffers[swapchain_image_index], 0)]);
-        cmd.bind_index_buffer(&self.index_buffers[swapchain_image_index], 0);
+        cmd.bind_vertex_buffers(0, &[(&frame_data.vertex_buffer, 0)]);
+        cmd.bind_index_buffer(&frame_data.index_buffer, 0);
         cmd.set_viewport(0, &[
             vk::Viewport::default()
                 .x(0.0)
                 .y(0.0)
                 .min_depth(0.0)
                 .max_depth(1.0)
-                .width(self.extent.width as f32)
-                .height(self.extent.height as f32)
+                .width(swapchain.extent.width as f32)
+                .height(swapchain.extent.height as f32)
         ]);
 
-        let width_points = self.extent.width as f32 / self.pixel_per_point as f32;
-        let height_points = self.extent.height as f32 / self.pixel_per_point as f32;
+        let width_points = swapchain.extent.width as f32 / self.scale_factor as f32;
+        let height_points = swapchain.extent.height as f32 / self.scale_factor as f32;
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
 
@@ -292,9 +359,9 @@ impl Interface {
             }
 
             let texture_info = self.textures.get(&mesh.texture_id);
-            if let Some(desc) = texture_info.map(|t| t.descriptor_set) {
+            if let Some(texture_info) = texture_info {
                 cmd.bind_descriptor_sets(vk::PipelineBindPoint::GRAPHICS, &self.pipeline, 0,
-                    &[desc],
+                    &[frame_data.descriptor_set_layout.request(texture_info.descriptor_set(&self.sampler))],
                     &[]
                 );
             }
@@ -314,6 +381,15 @@ impl Interface {
                 index_buffer = index_buffer.add(i_copy_size);
             }
 
+            let min = egui::Pos2 {
+                x : f32::clamp(clip_rect.min.x * self.scale_factor as f32, 0.0, swapchain.extent.width as f32),
+                y : f32::clamp(clip_rect.min.y * self.scale_factor as f32, 0.0, swapchain.extent.height as f32)
+            };
+            let max = egui::Pos2 {
+                x : f32::clamp(clip_rect.max.x * self.scale_factor as f32, min.x, swapchain.extent.width as f32),
+                y : f32::clamp(clip_rect.max.y * self.scale_factor as f32, min.y, swapchain.extent.height as f32),
+            };
+
             // Record draw commands
             cmd.set_scissors(0, &[
                 vk::Rect2D::default()
@@ -322,30 +398,36 @@ impl Interface {
                         .y(min.y.round() as i32)
                     )
                     .extent(vk::Extent2D::default()
-                        .width((max.x - min.x).round() as i32)
-                        .height((max.y - min.y).round() as i32)
+                        .width((max.x - min.x).round() as u32)
+                        .height((max.y - min.y).round() as u32)
                     )
             ]);
-            cmd.draw_indexed(mesh.indices.len(), 1, index_base, vertex_base);
+            cmd.draw_indexed(mesh.indices.len() as _, 1, index_base as _, vertex_base as _, 0);
+            
+            vertex_base += mesh.vertices.len();
+            index_base += mesh.indices.len();
         }
+        cmd.end_render_pass();
     }
     
-    fn update_texture(&mut self, renderer : &Renderer, tex_id : TextureId, delta : ImageDelta) {
+    fn update_texture(&mut self, tex_id : TextureId, delta : ImageDelta) {
         let data = match &delta.image {
             egui::ImageData::Color(color) => color.pixels.iter().flat_map(Color32::to_array).collect::<Vec<_>>(),
             egui::ImageData::Font(font) => font.srgba_pixels(None).flat_map(|c| c.to_array()).collect(),
         };
 
         // Create a fence
-        let fence = self.device.create_fence(vk::FenceCreateFlags::empty());
-        let transfer_queue : &Queue = self.device.get_queues(QueueAffinity::Transfer).get(0).expect("Could not find transfer queue");
+        let fence = self.rendering_context.device.create_fence(vk::FenceCreateFlags::empty(), "GUI Texture update fence".to_owned().into());
+
+        let graphics_queue : &Queue = self.rendering_context.device.get_queues(QueueAffinity::Graphics)
+            .get(0).expect("Could not find graphics queue");
 
         // Allocate a buffer for the data.
         let transfer_src = DynamicBufferBuilder::dynamic()
             .cpu_to_gpu()
             .linear(true)
             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
-            .build(&renderer, &data);
+            .build(&self.rendering_context.device, &self.command_pool, &data);
 
         let mut image = ImageCreateInfo::default()
             .color()
@@ -357,15 +439,21 @@ impl Interface {
             .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::TRANSFER_SRC)
             .initial_layout(vk::ImageLayout::UNDEFINED)
             .name("GUI staging texture".to_owned())
+            .extent(vk::Extent3D {
+                width : delta.image.width() as u32,
+                height : delta.image.height() as u32,
+                depth : 1,
+            })
             .format(vk::Format::R8G8B8A8_UNORM)
-            .build(&renderer.device);
+            .build(&self.rendering_context.device);
 
         let cmd = CommandBuffer::builder()
             .level(vk::CommandBufferLevel::PRIMARY)
-            .pool(&renderer.transfer_pool)
-            .build_one(&renderer.device);
+            .pool(&self.command_pool)
+            .build_one(&self.rendering_context.device);
 
         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        cmd.begin_label("GUI texture upload".to_owned(), [0.0; 4]);
         // Transition the new image to transfer dest
         cmd.image_memory_barrier(&mut image,
             BarrierPhase::ignore_queue(vk::AccessFlags::NONE_KHR,       vk::PipelineStageFlags::HOST),
@@ -385,18 +473,20 @@ impl Interface {
             vk::DependencyFlags::BY_REGION,
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
         );
+        cmd.end_label();
         cmd.end();
 
-        renderer.device.submit(transfer_queue, &[&cmd], &[], &[], fence);
-        renderer.device.wait_for_fence(fence);
+        self.rendering_context.device.submit(graphics_queue, &[&cmd], &[], &[], fence);
+        self.rendering_context.device.wait_for_fence(fence);
 
         // The texture now lives in GPU memory, so we should decide if it has to be registered as a new texture, or update an existing one
         if let Some(pos) = delta.pos {
             // Blit texture data to the existing texture if delta pos exists (which can happen if a font changes)
             let existing_texture = self.textures.get_mut(&tex_id);
             if let Some(existing_texture) = existing_texture {
-                renderer.reset_fence(fence);
+                self.rendering_context.device.reset_fences(slice::from_ref(&fence));
 
+                cmd.begin_label("GUI texture blit".to_owned(), [0.0; 4]);
                 cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT); // Reuse this command buffer
 
                 // Transition the existing image to transfer dst
@@ -413,12 +503,12 @@ impl Interface {
                     vk::DependencyFlags::BY_REGION,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL
                 );
-                let dst_subresource = existing_texture.image.make_subresource_layer(0);
+                let dst_subresource = existing_texture.image.make_subresource_layer(0, None, None);
                 cmd.blit_image(&image,
                     &mut existing_texture.image,
                     &[
                         vk::ImageBlit::default()
-                            .src_subresource(image.make_subresource_layer(0))
+                            .src_subresource(image.make_subresource_layer(0, None, None))
                             .src_offsets([
                                 vk::Offset3D { x: 0, y: 0, z: 0 },
                                 vk::Offset3D {
@@ -448,18 +538,18 @@ impl Interface {
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
                 );
                 cmd.end();
+                cmd.end_label();
 
-                renderer.device.submit(transfer_queue, &[&cmd], &[], &[], fence);
-                renderer.device.wait_for_fence(fence);
+                self.rendering_context.device.submit(graphics_queue, &[&cmd], &[], &[], fence);
+                self.rendering_context.device.wait_for_fence(fence);
 
                 // The new image gets dropped here.
             } else {
                 // ??? What's going on ???
             }
         } else {
-            self.user_textures.insert(tex_id, Texture {
-                image,
-                descriptor_set : todo!("Descriptor set")
+            self.textures.insert(tex_id, Texture {
+                image
             });
         }
     }

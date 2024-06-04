@@ -40,6 +40,28 @@ impl CommandBuffer {
         }
     }
 
+    pub fn begin_label(&self, label : String, color : [f32; 4]) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                let name = CString::new(label).unwrap();
+
+                let info = vk::DebugUtilsLabelEXT::default()
+                    .label_name(name.as_c_str())
+                    .color(color);
+
+                debug_utils.cmd_begin_debug_utils_label(self.handle, &info);
+            }
+        }
+    }
+
+    pub fn end_label(&self) {
+        unsafe {
+            if let Some(debug_utils) = &self.device.debug_utils {
+                debug_utils.cmd_end_debug_utils_label(self.handle);
+            }
+        }
+    }
+
     pub fn label(&self, label : String, color : [f32; 4], cb : impl Fn()) {
         unsafe {
             if let Some(debug_utils) = &self.device.debug_utils {
@@ -177,13 +199,20 @@ impl CommandBuffer {
         }
     }
 
+    pub fn draw_indexed(&self, index_count : u32, instance_count : u32, first_index : u32, vertex_offset : i32, first_instance : u32) {
+        unsafe {
+            self.device.handle()
+                .cmd_draw_indexed(self.handle, index_count, instance_count, first_index, vertex_offset, first_instance)
+        }
+    }
+
     /// Binds vertex buffers to this command buffer.
     pub fn bind_vertex_buffers(&self, first_binding : u32, buffers : &[(&Buffer, vk::DeviceSize)]) {
         let mut handles = Vec::<vk::Buffer>::with_capacity(buffers.len());
         let mut offsets = Vec::<vk::DeviceSize>::with_capacity(buffers.len());
         for (buffer, offset) in buffers {
             handles.push(buffer.handle());
-            offsets.push(offset);
+            offsets.push(*offset);
         }
 
         unsafe {
@@ -237,7 +266,7 @@ impl CommandBuffer {
     pub fn bind_descriptor_sets(&self, point : vk::PipelineBindPoint, pipeline : &Pipeline, first_set : u32, descriptor_sets : &[vk::DescriptorSet], dynamic_offsets : &[u32]) {
         unsafe {
             self.device.handle()
-                .cmd_bind_descriptor_sets(self.handle, point, pipeline.layout(), first_set, descriptor_sets, dynamic_sets)
+                .cmd_bind_descriptor_sets(self.handle, point, pipeline.layout(), first_set, descriptor_sets, dynamic_offsets)
         }
     }
 

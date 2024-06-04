@@ -6,7 +6,7 @@ edition = "2021"
 # TODO: Clarify the whole dependency hell I have going on here.
 [dependencies]
 puffin_egui = "0.27.0"
-puffin = { version = "0.19", default-features = false }
+puffin = { workspace = true }
 bytes = "1.6.0"
 anyhow = "1.0.82"
 thiserror = "1.0.59"
@@ -15,3 +15,5 @@ enumflags2 = "0.7.9"
 renderer = { path = "../renderer" }
 winit = "^0.29.4" # Synchronize this with whatever egui-winit depends on
 ash = { workspace = true }
+egui = { workspace = true }
+egui-winit = { workspace = true }

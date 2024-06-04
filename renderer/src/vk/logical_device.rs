@@ -1,4 +1,4 @@
-use std::{ffi::CString, mem::ManuallyDrop, sync::{Arc, Mutex}};
+use std::{ffi::CString, mem::ManuallyDrop, slice, sync::{Arc, Mutex}};
 
 use ash::{ext::debug_utils, vk};
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
@@ -122,9 +122,10 @@ impl LogicalDevice {
     /// # Arguments
     /// 
     /// * `queue` - The queue on which to submit.
-    /// * `submit_infos` - A slice of submission descriptors, all specifying a command buffer submission batch.
-    /// * `fence` - An optional fence that will be signalled when all submitted command buffers will have
-    ///             completed execution.
+    /// * `command_buffers`   - An array of command buffers to submit.
+    /// * `wait_info`         - An array of semaphores to wait on before executing the command buffers.
+    /// * `signal_semaphores` - An array of semaphores that will be signalled when all command buffers have completed execution.
+    /// * `fence`             - A fence that will be signalled when all command buffers have completed execution.
     pub fn submit(&self,
         queue : &impl Handle<vk::Queue>,
         command_buffers : &[&CommandBuffer],
@@ -138,24 +139,31 @@ impl LogicalDevice {
             let wait_stages = wait_info.iter().map(|t| t.1).collect::<Vec<_>>();
 
             let submit_info = vk::SubmitInfo::default()
-                .wait_dst_stage_mask(&wait_stages)
-                .wait_semaphores(&wait_semaphores)
                 .signal_semaphores(signal_semaphores)
-                .command_buffers(&command_buffers);
+                .command_buffers(&command_buffers)
+                .wait_semaphores(&wait_semaphores)
+                .wait_dst_stage_mask(&wait_stages);
 
-            self.handle.queue_submit(queue.handle(), &[submit_info], fence)
+            self.handle.queue_submit(queue.handle(), slice::from_ref(&submit_info), fence)
                 .expect("Submission failed")
         }
     }
 
     /// Creates a new fence.
-    pub fn create_fence(&self, flags : vk::FenceCreateFlags) -> vk::Fence {
+    pub fn create_fence(&self, flags : vk::FenceCreateFlags, name : Option<String>) -> vk::Fence
+    {
         let create_info = vk::FenceCreateInfo::default()
             .flags(flags);
 
         unsafe {
-            self.handle.create_fence(&create_info, None)
-                .expect("Failed to create fence")
+            let handle = self.handle.create_fence(&create_info, None)
+                .expect("Failed to create fence");
+
+            if let Some(name) = name {
+                self.set_handle_name(handle, &name);
+            }
+
+            handle
         }
     }
     
@@ -163,6 +171,23 @@ impl LogicalDevice {
         unsafe {
             self.handle.wait_for_fences(&[fence], true, u64::MAX)
                 .expect("Waiting for the fence failed");
+        }
+    }
+    
+    pub fn reset_fences(&self, fences : &[vk::Fence]) {
+        unsafe {
+            self.handle.reset_fences(fences)
+                .expect("Failed to reset fences");
+        }
+    }
+
+    pub fn create_semaphore(&self) -> vk::Semaphore {
+        unsafe {
+            let create_info = vk::SemaphoreCreateInfo::default()
+                .flags(vk::SemaphoreCreateFlags::empty());
+
+            self.handle.create_semaphore(&create_info, None)
+                .expect("Failed to create a semaphore")
         }
     }
 }
@@ -188,11 +213,6 @@ impl Drop for LogicalDevice {
             self.handle.destroy_device(None);
         }
     }
-}
-
-pub struct Queues {
-    queues : Vec<Queue>,
-    presentation_queue : usize,
 }
 
 pub struct IndexingFeatures {

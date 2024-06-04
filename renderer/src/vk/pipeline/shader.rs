@@ -41,7 +41,7 @@ impl Shader {
         options.set_target_spirv(shaderc::SpirvVersion::V1_6);
         options.set_target_env(shaderc::TargetEnv::Vulkan, EnvVersion::Vulkan1_3 as u32);
         options.set_include_callback(
-            move |requested_source, include_type, origin_source, recursion_depth| {
+            move |_requested_source, _include_type, _origin_source, _recursion_depth| {
                 Err("Includes are not supported yet".to_owned())
             }
         );

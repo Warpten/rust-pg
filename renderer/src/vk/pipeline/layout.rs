@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use ash::vk;
 use crate::make_handle;
-use crate::traits::handle::Handle;
+use crate::traits::handle::{Handle, Handles};
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::renderer::Renderer;
 
 #[derive(Default)]
 pub struct PipelineLayoutInfo {
@@ -20,8 +19,10 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn layouts(mut self, layouts : &[vk::DescriptorSetLayout]) -> Self {
-        self.descriptor_sets.extend_from_slice(layouts);
+    pub fn layouts<L>(mut self, layout : &[L]) -> Self
+        where L : Handle<vk::DescriptorSetLayout>
+    {
+        self.descriptor_sets.extend(layout.handles());
         self
     }
 
@@ -35,18 +36,18 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn build(self, renderer : &Renderer) -> PipelineLayout {
+    pub fn build(self, device : &Arc<LogicalDevice>) -> PipelineLayout {
         let create_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&self.descriptor_sets)
             .push_constant_ranges(&self.push_constants);
 
         unsafe {
-            let layout = renderer.device.handle()
+            let layout = device.handle()
                 .create_pipeline_layout(&create_info, None)
                 .expect("Pipeline layout creation failed");
 
             PipelineLayout {
-                device : renderer.device.clone(),
+                device : device.clone(),
                 layout,
                 info : self
             }

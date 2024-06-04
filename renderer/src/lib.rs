@@ -5,6 +5,7 @@ mod macros;
 pub mod application;
 pub mod graph;
 pub mod gui;
+pub mod orchestration;
 pub mod traits;
 pub mod vk;
 pub mod window;

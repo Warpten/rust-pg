@@ -1266,6 +1266,7 @@ dependencies = [
  "egui-winit",
  "gpu-allocator",
  "nohash-hasher",
+ "puffin",
  "raw-window-handle 0.6.1",
  "shaderc",
 ]
@@ -2136,6 +2137,8 @@ dependencies = [
  "anyhow",
  "ash",
  "bytes",
+ "egui",
+ "egui-winit",
  "enumflags2",
  "md5",
  "puffin",
