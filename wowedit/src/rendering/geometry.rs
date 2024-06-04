@@ -2,7 +2,8 @@ use std::{mem::{offset_of, size_of}, sync::Arc};
 
 use ash::vk;
 use egui_winit::EventResponse;
-use renderer::{orchestration::rendering::{Renderer, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, descriptor::layout::DescriptorSetLayout, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use puffin::{profile_function, profile_scope};
+use renderer::{orchestration::rendering::{Renderer, RenderingContext, RenderingContextImpl}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, descriptor::layout::DescriptorSetLayout, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -43,6 +44,8 @@ impl Renderer for GeometryRenderer {
     }
 
     fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
+        profile_scope!("Geometry command recording");
+
         let viewport = vk::Viewport::default()
             .x(0.0f32)
             .y(0.0f32)
@@ -106,19 +109,19 @@ impl GeometryRenderer {
                 SubpassAttachment::color(0),
                 SubpassAttachment::resolve(0)
             ], None)
-            .build(&context.device);
+            .build(context);
 
         Self::initialize(swapchain, context, render_pass)
     }
 
     pub fn initialize(swapchain : &Swapchain, context : &RenderingContext, render_pass : RenderPass) -> Self {
         let transfer_pool = CommandPool::builder(&context.transfer_queue)
-            .build(&context.device);
+            .build(&context);
 
         let buffer = DynamicBufferBuilder::dynamic()
             .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
             .gpu_only()
-            .build(&context.device, &transfer_pool, &[
+            .build(&context, &transfer_pool, &[
                 TerrainVertex {
                     pos : [ 0.0f32, -0.5f32 ],
                     color : [ 1.0f32, 0.0f32, 0.0f32 ]
@@ -138,7 +141,7 @@ impl GeometryRenderer {
 
         let pipeline_layout = PipelineLayoutInfo::default()
         //     .layout(&descriptor_set_layout)
-            .build(&context.device);
+            .build(&context);
 
         let pipeline = PipelineInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -157,11 +160,11 @@ impl GeometryRenderer {
             .front_face(vk::FrontFace::CLOCKWISE)
             .render_pass(render_pass.handle(), 0)
             .samples(context.options.multisampling)
-            .pool(&context.pipeline_cache)
+            .pool()
             .vertex::<TerrainVertex>()
             .add_shader("./assets/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
-            .build(&context.device);
+            .build(&context);
 
         Self {
             buffer,

@@ -1,14 +1,12 @@
 use std::ffi::CString;
 use std::mem::ManuallyDrop;
 use std::slice;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ash::vk::{self};
 use egui::ahash::HashMapExt;
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
-use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
-use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
 use nohash_hasher::IntMap;
 use puffin::profile_scope;
 
@@ -18,7 +16,6 @@ use crate::vk::context::Context;
 use crate::vk::frame_data::FrameData;
 use crate::vk::framebuffer::Framebuffer;
 use crate::vk::logical_device::LogicalDevice;
-use crate::vk::pipeline::pool::PipelinePool;
 use crate::vk::queue::{QueueAffinity, QueueFamily};
 use crate::vk::renderer::RendererOptions;
 use crate::vk::swapchain::Swapchain;
@@ -38,21 +35,20 @@ pub trait Renderer {
     }
 }
 
-pub struct RenderingContext {
-    context : Arc<Context>,
-    pub device : Arc<LogicalDevice>,
+pub struct RenderingContextImpl {
+    pub(in crate) context : Arc<Context>,
+    pub device : LogicalDevice,
+    pub window : Window,
+
     pub graphics_queue : QueueFamily,
     pub presentation_queue : QueueFamily,
     pub transfer_queue : QueueFamily,
-    allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
-    pub pipeline_cache : Arc<PipelinePool>,
-    pub window : Arc<Window>,
 
     pub options : RendererOptions,
 }
-pub type SynchronizedRenderingContext = Arc<RenderingContext>;
+pub type RenderingContext = Arc<RenderingContextImpl>;
 
-pub type RendererFn = fn(context : &SynchronizedRenderingContext, swapchain : &Swapchain) -> Box<dyn Renderer>;
+pub type RendererFn = fn(context : &RenderingContext, swapchain : &Swapchain) -> Box<dyn Renderer>;
 
 pub struct Orchestrator {
     context : Arc<Context>,
@@ -61,9 +57,9 @@ pub struct Orchestrator {
 impl Orchestrator {
     /// Creates a new orchestrator. This object is in charge of preparing Vulkan structures for rendering
     /// as well as the way command buffers will be recorded and executed.
-    pub fn new(context : &Arc<Context>) -> Self {
+    pub fn new(context : Arc<Context>) -> Self {
         Self {
-            context : context.clone(),
+            context,
             renderers : vec![],
         }
     }
@@ -74,44 +70,31 @@ impl Orchestrator {
         self
     }
 
-    pub fn build(self,
-        settings : RendererOptions,
-        window : &Arc<Window>,
+    pub fn build(&self,
+        options : RendererOptions,
+        window : Window,
         device_extensions : Vec<CString>,
     ) -> RendererOrchestrator {
-        let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &settings, device_extensions);
-        let swapchain = self.context.create_swapchain(&device, &window, &settings, vec![graphics_queue, presentation_queue]);
-        
-        let allocator = Allocator::new(&AllocatorCreateDesc {
-            instance: self.context.handle().clone(),
-            device: device.handle().clone(),
-            physical_device: device.physical_device.handle().clone(),
+        let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &options, device_extensions);
 
-            // TODO: All these may need tweaking and fixing
-            debug_settings: AllocatorDebugSettings::default(),
-            allocation_sizes : AllocationSizes::default(),
-            buffer_device_address: false,
-        }).unwrap();
-
-        let pipeline_cache = Arc::new(PipelinePool::new(device.clone(), (settings.get_pipeline_cache_file)()));
-        
-        let context = Arc::new(RenderingContext {
+        let context = Arc::new(RenderingContextImpl {
             context : self.context.clone(),
+            window,
+
             device,
             graphics_queue,
             presentation_queue,
             transfer_queue,
-            allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
-            pipeline_cache,
-            window : window.clone(),
 
-            options : settings,
+            options,
         });
+
+        let swapchain = Swapchain::new(&context, &options, vec![graphics_queue, presentation_queue]);
 
         let (renderers, framebuffers, frames) = self.create_frame_data(&swapchain, &context);
         
         RendererOrchestrator {
-            context : context.clone(),
+            context,
             swapchain : ManuallyDrop::new(swapchain),
 
             renderers,
@@ -122,10 +105,10 @@ impl Orchestrator {
         }
     }
 
-    fn create_device(&self, window : &Arc<Window>, settings : &RendererOptions, device_extensions : Vec<CString>)
-        -> (Arc<LogicalDevice>, QueueFamily, QueueFamily, QueueFamily)
+    fn create_device(&self, window : &Window, settings : &RendererOptions, device_extensions : Vec<CString>)
+        -> (LogicalDevice, QueueFamily, QueueFamily, QueueFamily)
     {
-        let (physical_device, graphics_queue, presentation_queue, transfer_queue) = self.context.select_physical_device(&window, &settings, &device_extensions);
+        let (physical_device, graphics_queue, presentation_queue, transfer_queue) = self.context.select_physical_device(&window, &device_extensions);
 
         let queue_families = { // Deduplicate the graphics and presentation queues.
             let mut queue_families_map = IntMap::<u32, QueueFamily>::with_capacity(3);
@@ -143,13 +126,14 @@ impl Orchestrator {
                 .collect::<Vec<_>>(),
             |_index, _family| 1.0_f32,
             &device_extensions,
+            (settings.get_pipeline_cache_file)(),
             &window,
         );
 
         (device, graphics_queue, presentation_queue, transfer_queue)
     }
 
-    fn create_frame_data(&self, swapchain : &Swapchain, context : &SynchronizedRenderingContext) -> (Vec<Box<dyn Renderer>>, Vec<Framebuffer>, Vec<FrameData>) {
+    fn create_frame_data(&self, swapchain : &Swapchain, context : &RenderingContext) -> (Vec<Box<dyn Renderer>>, Vec<Framebuffer>, Vec<FrameData>) {
         let mut framebuffers = vec![];
         let mut created_renderers = vec![];
         let renderer_count = self.renderers.len();
@@ -166,7 +150,7 @@ impl Orchestrator {
         let frames = {
             let mut frames = Vec::<FrameData>::with_capacity(swapchain.image_count());
             for i in 0..swapchain.image_count() {
-                frames.push(FrameData::new(i, &context.device));
+                frames.push(FrameData::new(i, &context));
             }
             frames
         };
@@ -176,7 +160,7 @@ impl Orchestrator {
 }
 
 pub struct RendererOrchestrator {
-    pub context : Arc<RenderingContext>,
+    pub context : RenderingContext,
     pub swapchain : ManuallyDrop<Swapchain>,
 
     renderers : Vec<Box<dyn Renderer>>,
@@ -215,6 +199,8 @@ impl RendererOrchestrator {
     }
 
     pub fn handle_event(&mut self, event : &WindowEvent) {
+        profile_scope!("Event handling");
+
         let mut repaint_instructions = Vec::<bool>::with_capacity(self.renderers.len());
         for i in 0..self.renderers.len() {
             let event_response = self.renderers[i].handle_event(event);
@@ -311,7 +297,7 @@ impl RendererOrchestrator {
             ManuallyDrop::drop(&mut self.swapchain);
         }
 
-        self.swapchain = ManuallyDrop::new(self.context.context.create_swapchain(&self.context.device, &self.context.window, &self.context.options, vec![
+        self.swapchain = ManuallyDrop::new(Swapchain::new(&self.context, &self.context.options, vec![
             self.context.graphics_queue,
             self.context.presentation_queue
         ]));
@@ -322,7 +308,7 @@ impl RendererOrchestrator {
 
         self.frames = Vec::<FrameData>::with_capacity(self.swapchain.image_count());
         for i in 0..self.swapchain.image_count() {
-            self.frames.push(FrameData::new(i, &self.context.device));
+            self.frames.push(FrameData::new(i, &self.context));
         }
 
         // I think that's it? Everything should drop.

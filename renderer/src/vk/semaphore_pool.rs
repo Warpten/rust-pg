@@ -1,20 +1,18 @@
-use std::sync::Arc;
-
 use ash::vk;
 
-use crate::vk::logical_device::LogicalDevice;
+use crate::orchestration::rendering::RenderingContext;
 
 /// See <https://github.com/KhronosGroup/Vulkan-Samples/blob/master/framework/semaphore_pool.h>.
 pub struct SemaphorePool {
-    device: Arc<LogicalDevice>,
+    context : RenderingContext,
     handles: Vec<vk::Semaphore>,
     active_count: usize,
 }
 
 impl SemaphorePool {
-    pub fn new(device: &Arc<LogicalDevice>) -> Self {
+    pub fn new(context : &RenderingContext) -> Self {
         SemaphorePool {
-            device : device.clone(),
+            context : context.clone(),
             handles: Vec::new(),
             active_count: 0,
         }
@@ -29,8 +27,7 @@ impl SemaphorePool {
         } else {
             unsafe {
                 let semaphore_create_info = vk::SemaphoreCreateInfo::default();
-                let semaphore = self
-                    .device
+                let semaphore = self.context.device
                     .handle()
                     .create_semaphore(&semaphore_create_info, None)
                     .expect("Failed to allocate a new semaphore");
@@ -57,7 +54,7 @@ impl Drop for SemaphorePool {
         
         unsafe {
             self.handles.iter().for_each(|s| {
-                self.device.handle().destroy_semaphore(*s, None);
+                self.context.device.handle().destroy_semaphore(*s, None);
             });
         }
     }

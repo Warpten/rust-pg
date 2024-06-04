@@ -1,11 +1,9 @@
-use std::{ffi::CString, ops::Range, path::PathBuf, sync::Arc};
+use std::{ffi::CString, ops::Range, path::PathBuf};
 
 use ash::vk;
+use crate::orchestration::rendering::RenderingContext;
 use crate::{make_handle, traits::handle::Handle};
-use crate::vk::logical_device::LogicalDevice;
 use crate::vk::pipeline::shader::Shader;
-
-use self::pool::PipelinePool;
 
 pub mod layout;
 pub mod pipeline;
@@ -44,12 +42,12 @@ pub struct PipelineInfo {
     vertex_format_offset : Vec<vk::VertexInputAttributeDescription>,
     vertex_bindings : Vec<(u32, vk::VertexInputRate)>,
     samples : vk::SampleCountFlags,
-    pool : Option<Arc<PipelinePool>>,
+    pool : bool,
 }
 
 impl PipelineInfo {
-    #[inline] pub fn pool(mut self, pool : &Arc<PipelinePool>) -> Self {
-        self.pool = Some(pool.clone());
+    #[inline] pub fn pool(mut self) -> Self {
+        self.pool = true;
         self
     }
 
@@ -101,8 +99,8 @@ impl PipelineInfo {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> Pipeline {
-        Pipeline::new(device, self)
+    pub fn build(self, context : &RenderingContext) -> Pipeline {
+        Pipeline::new(context, self)
     }
 }
 
@@ -131,7 +129,7 @@ impl Default for PipelineInfo {
             vertex_bindings : vec![],
             vertex_format_offset : vec![],
 
-            pool : None,
+            pool : false,
 
             render_pass : vk::RenderPass::null(),
             subpass : 0,
@@ -186,7 +184,7 @@ impl DepthOptions {
 }
 
 pub struct Pipeline {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     info : PipelineInfo,
     handle : vk::Pipeline,
 }
@@ -194,10 +192,10 @@ pub struct Pipeline {
 impl Pipeline {
     #[inline] pub fn layout(&self) -> vk::PipelineLayout { self.info.layout }
 
-    pub(in self) fn new(device : &Arc<LogicalDevice>, info : PipelineInfo) -> Self {
+    pub(in self) fn new(context : &RenderingContext, info : PipelineInfo) -> Self {
         let shaders = info.shaders.iter()
             .cloned() // TODO: remove this
-            .map(|(path, flags)| Shader::new(device, path, flags))
+            .map(|(path, flags)| Shader::new(context, path, flags))
             .collect::<Vec<_>>();
 
         let shader_names = CString::new("main").unwrap();
@@ -283,21 +281,22 @@ impl Pipeline {
             .layout(info.layout);
 
         let pipelines = unsafe {
-            let pool_handle = match &info.pool {
-                Some(handle) => handle.handle(),
-                None => vk::PipelineCache::null(),
+            let pool_handle = if info.pool {
+                context.device.pipeline_pool.handle()
+            } else {
+                vk::PipelineCache::null()
             };
 
-            device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
+            context.device.handle().create_graphics_pipelines(pool_handle, &[create_info], None)
                 .expect("Creating a graphics pipeline failed")
         };
 
         if let Some(name) = info.name {
-            device.set_handle_name(pipelines[0], &name.to_owned());
+            context.device.set_handle_name(pipelines[0], &name.to_owned());
         }
 
         Self {
-            device : device.clone(),
+            context : context.clone(),
             handle : pipelines[0],
             info,
         }
@@ -307,7 +306,7 @@ impl Pipeline {
 impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_pipeline(self.handle, None);
+            self.context.device.handle().destroy_pipeline(self.handle, None);
         }
     }
 }

@@ -1,11 +1,10 @@
-use std::{hash::Hash, sync::Arc};
+use std::hash::Hash;
 
 use ash::vk;
 use bitmask_enum::bitmask;
 
 use crate::window::Window;
 use crate::{make_handle, traits};
-use crate::traits::handle::Handle;
 
 use super::physical_device::PhysicalDevice;
 
@@ -30,7 +29,7 @@ impl Queue {
         family : &QueueFamily,
         index : u32,
         device : &ash::Device,
-        window : &Arc<Window>,
+        window : &Window,
         physical_device : &PhysicalDevice
     ) -> Self {
         Self {
@@ -132,7 +131,7 @@ impl QueueFamily {
     ///
     /// * Panics if [`vkGetPhysicalDeviceSurfaceSupportKHR`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceSupportKHR.html) fails.
     /// * Panics if the provided [`Surface`] has been dropped before this call happens.
-    pub(in crate) fn can_present(&self, window : &Arc<Window>, device : &PhysicalDevice) -> bool {
+    pub(in crate) fn can_present(&self, window : &Window, device : &PhysicalDevice) -> bool {
         window.get_surface_support(&device, &self)
     }
 }

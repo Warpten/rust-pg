@@ -1,13 +1,12 @@
 use std::{ffi::CStr, fs};
 use std::path::PathBuf;
-use std::sync::Arc;
 use ash::vk;
 use shaderc::{CompileOptions, Compiler, EnvVersion, ShaderKind};
 use crate::make_handle;
-use crate::vk::logical_device::LogicalDevice;
+use crate::orchestration::rendering::RenderingContext;
 
 pub struct Shader {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     module : vk::ShaderModule,
     flags : vk::ShaderStageFlags,
     path : PathBuf,
@@ -31,9 +30,7 @@ fn translate_shader_kind(stage : vk::ShaderStageFlags) -> ShaderKind {
 }
 
 impl Shader {
-    #[inline] pub fn device(&self) -> &Arc<LogicalDevice> { &self.device }
-
-    pub fn new(device : &Arc<LogicalDevice>, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
+    pub fn new(context : &RenderingContext, path : PathBuf, flags : vk::ShaderStageFlags) -> Self {
         let compiler = Compiler::new().expect("Failed to initialize shader compiler");
         let mut options = CompileOptions::new().unwrap();
         #[cfg(debug_assertions)]
@@ -60,16 +57,16 @@ impl Shader {
             .code(code.as_binary());
 
         let module = unsafe {
-            device.handle().create_shader_module(&shader_info, None)
+            context.device.handle().create_shader_module(&shader_info, None)
                 .unwrap()
         };
 
         if let Some(path) = path.to_str() {
-            device.set_handle_name(module, &path.to_owned());
+            context.device.set_handle_name(module, &path.to_owned());
         }
         
         Self {
-            device : device.clone(),
+            context : context.clone(),
             module,
             flags,
             path
@@ -95,7 +92,7 @@ make_handle! { Shader, vk::ShaderModule, module }
 impl Drop for Shader {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_shader_module(self.module, None);
+            self.context.device.handle().destroy_shader_module(self.module, None);
         }
     }
 }

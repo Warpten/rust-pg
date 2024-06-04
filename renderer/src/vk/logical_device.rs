@@ -1,4 +1,4 @@
-use std::{ffi::CString, mem::ManuallyDrop, slice, sync::{Arc, Mutex}};
+use std::{ffi::CString, mem::ManuallyDrop, path::PathBuf, slice, sync::{Arc, Mutex}};
 
 use ash::{ext::debug_utils, vk};
 use gpu_allocator::{vulkan::{Allocator, AllocatorCreateDesc}, AllocationSizes, AllocatorDebugSettings};
@@ -8,14 +8,14 @@ use crate::vk::context::Context;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::vk::queue::{Queue, QueueAffinity};
 
-use super::command_buffer::CommandBuffer;
+use super::{command_buffer::CommandBuffer, pipeline::pool::PipelinePool};
 
 /// A logical Vulkan device.
 pub struct LogicalDevice {
     handle : ash::Device,
-    pub context : Arc<Context>,
     pub physical_device : PhysicalDevice,
     allocator : ManuallyDrop<Arc<Mutex<Allocator>>>,
+    pub pipeline_pool : PipelinePool,
 
     // Device-level debug utilities
     pub(in crate) debug_utils : Option<debug_utils::Device>,
@@ -32,12 +32,13 @@ impl LogicalDevice {
 
     pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { &self.allocator }
 
-    pub fn new(context : &Arc<Context>,
+    pub fn new(context : &Context,
         device : ash::Device,
         physical_device : PhysicalDevice,
         queues : Vec<Queue>,
         features : vk::PhysicalDeviceFeatures,
         indexing_features : IndexingFeatures,
+        cache_file : PathBuf,
     )  -> Self {
         let allocator = Allocator::new(&AllocatorCreateDesc{
             instance: context.handle().clone(),
@@ -50,10 +51,12 @@ impl LogicalDevice {
             buffer_device_address: false,
         }).expect("Error creating an allocator");
 
+        let pipeline_pool = PipelinePool::new(device.clone(), cache_file);
+
         Self {
             handle : device.clone(),
-            context : context.clone(),
             allocator : ManuallyDrop::new(Arc::new(Mutex::new(allocator))),
+            pipeline_pool,
             queues,
             physical_device,
             features,
@@ -208,6 +211,8 @@ impl LogicalDevice {
 impl Drop for LogicalDevice {
     fn drop(&mut self) {
         unsafe {
+            self.handle.destroy_pipeline_cache(self.pipeline_pool.handle(), None);
+
             ManuallyDrop::drop(&mut self.allocator);
 
             self.handle.destroy_device(None);

@@ -6,7 +6,7 @@ use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
 use crate::vk::{context::Context, renderer::RendererOptions};
 use crate::window::Window;
 
-type OrchestratorFn = fn(&Arc<Context>) -> Orchestrator;
+type OrchestratorFn = fn(Arc<Context>) -> Orchestrator;
 
 pub struct ApplicationOptions {
     pub title : String,
@@ -171,9 +171,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 
 pub struct Application {
-    pub context : Arc<Context>,
     pub orchestrator : RendererOrchestrator,
-    window : Arc<Window>,
 }
 
 impl Application {
@@ -200,14 +198,10 @@ impl Application {
         });
         window.create_surface(&context);
 
-        let window = Arc::new(window);
-
-        let orchestrator = (options.orchestrator)(&context).build(options.renderer_options, &window, options.device_extensions);
+        let orchestrator = (options.orchestrator)(context).build(options.renderer_options, window, options.device_extensions);
 
         Self {
-            context : context.clone(),
             orchestrator,
-            window
         }
     }
 

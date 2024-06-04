@@ -1,13 +1,12 @@
-use std::sync::Arc;
-
 use ash::vk;
 use crate::make_handle;
+use crate::orchestration::rendering::RenderingContext;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
 
 pub struct CommandPool {
+    context : RenderingContext,
     handle : vk::CommandPool,
-    device : Arc<LogicalDevice>,
     family : u32,
 }
 
@@ -18,7 +17,7 @@ impl CommandPool {
 
     pub fn family(&self) -> u32 { self.family }
 
-    pub fn device(&self) -> &LogicalDevice { &self.device }
+    pub fn device(&self) -> &LogicalDevice { &self.context.device }
 
     /// Resets this command pool.
     /// 
@@ -36,7 +35,7 @@ impl CommandPool {
     /// state and has a secondary command buffer allocated from commandPool recorded into it, becomes invalid.
     pub fn reset(&self, flags : vk::CommandPoolResetFlags) {
         unsafe {
-            let _ = self.device.handle().reset_command_pool(self.handle, flags);
+            let _ = self.context.device.handle().reset_command_pool(self.handle, flags);
         }
     }
 
@@ -52,7 +51,7 @@ impl CommandPool {
     /// given command buffers, recorded into it, becomes invalid.
     pub fn free_command_buffers(&self, command_buffers : Vec<vk::CommandBuffer>) {
         unsafe {
-            self.device.handle().free_command_buffers(self.handle, &command_buffers);
+            self.context.device.handle().free_command_buffers(self.handle, &command_buffers);
         }
     }
 
@@ -66,7 +65,7 @@ impl CommandPool {
     /// * `flags` - Reserved for future uses.
     pub fn trim(&self, flags : vk::CommandPoolTrimFlags) {
         unsafe {
-            self.device.handle().trim_command_pool(self.handle, flags);
+            self.context.device.handle().trim_command_pool(self.handle, flags);
         }
     }
 }
@@ -99,19 +98,19 @@ impl CommandPoolBuilder {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> CommandPool {
+    pub fn build(self, context : &RenderingContext) -> CommandPool {
         let handle = {
             let command_pool_create_info = vk::CommandPoolCreateInfo::default()
                 .flags(self.flags)
                 .queue_family_index(self.family_index);
 
             unsafe {
-                device.handle().create_command_pool(&command_pool_create_info, None)
+                context.device.handle().create_command_pool(&command_pool_create_info, None)
                     .expect("Failed to create command pool")
             }
         };
 
-        CommandPool { handle, device : device.clone(), family : self.family_index }
+        CommandPool { handle, context : context.clone(), family : self.family_index }
     }
 }
 
@@ -120,7 +119,7 @@ make_handle! { CommandPool, vk::CommandPool }
 impl Drop for CommandPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_command_pool(self.handle, None)
+            self.context.device.handle().destroy_command_pool(self.handle, None)
         };
     }
 }

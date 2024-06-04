@@ -2,6 +2,7 @@
 name = "wowedit"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 # TODO: Clarify the whole dependency hell I have going on here.
 [dependencies]
@@ -17,3 +18,7 @@ winit = "^0.29.4" # Synchronize this with whatever egui-winit depends on
 ash = { workspace = true }
 egui = { workspace = true }
 egui-winit = { workspace = true }
+
+[build-dependencies]
+vergen = { version = "8.3.1", features = [ "build", "git", "gitcl" ] }
+anyhow = { workspace = true }

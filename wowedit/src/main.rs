@@ -3,16 +3,18 @@
 use egui::Context;
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
-use renderer::gui::context::Interface;
+use renderer::gui::context::{Interface, InterfaceOptions};
 use renderer::orchestration::rendering::Orchestrator;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
 use rendering::geometry::GeometryRenderer;
+use theming::aesthetix::Aesthetix;
 use winit::event::WindowEvent;
 
 mod casc;
 mod interface;
+mod theming;
 mod rendering;
 
 pub struct ApplicationData { // Get rid of this
@@ -34,7 +36,17 @@ fn prepare() -> ApplicationOptions {
         .orchestrator(|context| {
             Orchestrator::new(context)
                 .add_renderer(|ctx, swapchain| Box::new(GeometryRenderer::supplier(swapchain, ctx, false)))
-                .add_renderer(|ctx, swapchain| Box::new(Interface::supplier(swapchain, ctx, true, render_interface)))
+                .add_renderer(|ctx, swapchain| {
+                    let theme = theming::themes::StandardDark{};
+                    let style = theme.custom_style();
+
+                    let options = InterfaceOptions {
+                        style,
+                        ..Default::default()
+                    };
+
+                    Box::new(Interface::supplier(swapchain, ctx, true, render_interface, options))
+                })
         })
 }
 

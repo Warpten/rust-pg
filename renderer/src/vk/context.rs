@@ -11,10 +11,7 @@ use crate::traits::handle::Handle;
 use crate::vk::physical_device::PhysicalDevice;
 use crate::window::Window;
 
-use super::logical_device::LogicalDevice;
 use super::queue::QueueFamily;
-use super::renderer::RendererOptions;
-use super::swapchain::Swapchain;
 
 pub struct Context {
     pub(in crate) entry : Arc<ash::Entry>,
@@ -25,14 +22,11 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn create_swapchain(
-        self : &Arc<Context>,
-        device : &Arc<LogicalDevice>,
-        window : &Arc<Window>,
-        settings : &RendererOptions,
-        queue_families : Vec<QueueFamily>,
-    ) -> Swapchain {
-        Swapchain::new(&self, device, window, settings, queue_families)
+    pub fn get_device_extensions(&self, device : &PhysicalDevice) -> Vec<vk::ExtensionProperties> {
+        unsafe {
+            self.instance.enumerate_device_extension_properties(device.handle())
+                .expect("Failed to enumerate device extensions")
+        }
     }
 
     /// Selects a [`PhysicalDevice`] and its associated graphics and presentation [`queue families`](QueueFamily).
@@ -46,7 +40,7 @@ impl Context {
     /// 5. [`vk::PhysicalDeviceType::OTHER`]
     ///
     /// If possible, the graphics and presentation queue families will be the same to reduce internal synchronization.
-    pub fn select_physical_device(self : &Arc<Context>, window : &Arc<Window>, settings : &RendererOptions, device_extensions : &[CString]) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
+    pub fn select_physical_device(&self, window : &Window, device_extensions : &[CString]) -> (PhysicalDevice, QueueFamily, QueueFamily, QueueFamily) {
         self.get_physical_devices(|left, right| {
             // DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU > OTHER
             match (right.properties().device_type, left.properties().device_type) {
@@ -84,7 +78,7 @@ impl Context {
             // We start by collecting a device's extensions and then remove them from the extensions
             // we asked for. If no extension subside, we're good.
             let extensions_supported = {
-                let device_extensions_names = device.get_extensions().into_iter()
+                let device_extensions_names = self.get_device_extensions(device).into_iter()
                     .map(|device_extension| {
                         unsafe {
                             CStr::from_ptr(device_extension.extension_name.as_ptr()).to_owned()
@@ -238,7 +232,7 @@ impl Context {
     /// # Panics
     ///
     /// Panics if [`vkEnumeratePhysicalDevices`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumeratePhysicalDevices.html) fails.
-    pub fn get_physical_devices<F>(self : &Arc<Context>, cmp : F) -> Vec<PhysicalDevice>
+    pub fn get_physical_devices<F>(&self, cmp : F) -> Vec<PhysicalDevice>
         where F : FnMut(&PhysicalDevice, &PhysicalDevice) -> Ordering
     {
         let physical_devices = unsafe {

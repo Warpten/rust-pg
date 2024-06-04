@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 use std::slice;
-use std::sync::Arc;
 use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
@@ -9,7 +8,7 @@ use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, V
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
 use puffin::profile_scope;
-use crate::orchestration::rendering::{Renderer, SynchronizedRenderingContext};
+use crate::orchestration::rendering::{Renderer, RenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
@@ -91,6 +90,8 @@ impl<T : Default> Renderer for Interface<T> {
     }
     
     fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
+        profile_scope!("GUI command recording");
+        
         let window = &self.rendering_context.window;
 
         let raw_input = self.egui.take_egui_input(window.handle());
@@ -123,27 +124,41 @@ pub struct InterfaceFrameData {
 
 type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
 
-pub struct Interface<T : Default> {
+pub struct Interface<State : Default> {
+    egui : egui_winit::State,
+
     // Rendering data structures
     pub context : Context,
-    egui : egui_winit::State,
-    rendering_context : SynchronizedRenderingContext,
+    rendering_context : RenderingContext,
     pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     command_pool : CommandPool,
     frame_data : Vec<InterfaceFrameData>,
     render_pass : RenderPass,
     pub scale_factor : f64,
+    // The sampler used when updating textures used by the GUI.
     sampler : Sampler,
     textures : HashMap<TextureId, Texture>,
-    delegate : InterfaceRenderDelegate<T>,
+    delegate : InterfaceRenderDelegate<State>,
 
     // User data structures
-    pub state : T,
+    pub state : State,
 }
 
-impl<T : Default> Interface<T> {
-    pub fn supplier(swapchain : &Swapchain, context : &SynchronizedRenderingContext, is_presenting : bool, delegate : InterfaceRenderDelegate<T>) -> Interface<T> {
+#[derive(Default)]
+pub struct InterfaceOptions {
+    pub fonts : FontDefinitions,
+    pub style : Style,
+}
+
+impl<State : Default> Interface<State> {
+    pub fn supplier(
+        swapchain : &Swapchain,
+        context : &RenderingContext,
+        is_presenting : bool,
+        delegate : InterfaceRenderDelegate<State>,
+        options : InterfaceOptions
+    ) -> Interface<State> {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
         } else {
@@ -168,24 +183,21 @@ impl<T : Default> Interface<T> {
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            ).build(&context.device);
+            ).build(context);
 
-        Self::new(FontDefinitions::default(), Style::default(), swapchain, &context, render_pass, delegate)
+        Self::new(options, swapchain, context, render_pass, delegate)
     }
 
     pub fn new(
-        fonts : FontDefinitions,
-        style : Style,
+        options : InterfaceOptions,
         swapchain : &Swapchain,
-        context : &SynchronizedRenderingContext,
+        context : &RenderingContext,
         render_pass : RenderPass,
-        delegate : InterfaceRenderDelegate<T>
-    ) -> Interface<T> {
+        delegate : InterfaceRenderDelegate<State>
+    ) -> Interface<State> {
         let egui_context = Context::default();
-        // TODO: Make these configurable
-        egui_context.set_fonts(fonts);
-        egui_context.set_style(style);
-        egui_context.set_visuals(egui::Visuals::light());
+        egui_context.set_fonts(options.fonts);
+        egui_context.set_style(options.style);
 
         let egui = egui_winit::State::new(egui_context.clone(),
             ViewportId::ROOT,
@@ -198,7 +210,7 @@ impl<T : Default> Interface<T> {
             DescriptorSetLayout::builder()
                 .sets(1024)
                 .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
-                .build(&context.device)
+                .build(&context)
         ).collect::<Vec<_>>();
 
         let pipeline_layout = PipelineLayoutInfo::default()
@@ -208,7 +220,7 @@ impl<T : Default> Interface<T> {
                 .offset(0)
                 .size(size_of::<f32>() as u32 * 2) // Screen size
             )
-            .build(&context.device);
+            .build(&context);
         context.device.set_handle_name(pipeline_layout.handle(), &"GUI Pipeline layout".to_owned());
 
         let pipeline = PipelineInfo::default()
@@ -224,11 +236,11 @@ impl<T : Default> Interface<T> {
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
             .render_pass(render_pass.handle(), 0)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .pool(&context.pipeline_cache)
+            .pool()
             .vertex::<InterfaceVertex>()
             .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
-            .build(&context.device);
+            .build(&context);
         context.device.set_handle_name(pipeline.handle(), &"GUI Pipeline".to_owned());
 
         let sampler = Sampler::builder()
@@ -237,7 +249,7 @@ impl<T : Default> Interface<T> {
             .filter(vk::Filter::LINEAR, vk::Filter::LINEAR)
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .lod(0.0, vk::LOD_CLAMP_NONE)
-            .build(&context.device);
+            .build(&context);
         context.device.set_handle_name(sampler.handle(), &"GUI Sampler".to_owned());
 
         let mut frame_data = vec![];
@@ -246,7 +258,7 @@ impl<T : Default> Interface<T> {
                 .cpu_to_gpu()
                 .linear(true)
                 .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                .build(&context.device, 1024 * 1024 * 4);
+                .build(&context, 1024 * 1024 * 4);
             context.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
 
             let index_buffer = StaticBufferBuilder::fixed_size()
@@ -254,7 +266,7 @@ impl<T : Default> Interface<T> {
                 .linear(true)
                 .usage(vk::BufferUsageFlags::INDEX_BUFFER)
                 .index(vk::IndexType::UINT32)
-                .build(&context.device, 1024 * 1024 * 4);
+                .build(&context, 1024 * 1024 * 4);
             context.device.set_handle_name(index_buffer.handle(), &"GUI Index buffer".to_owned());
 
             frame_data.push(InterfaceFrameData {
@@ -267,7 +279,7 @@ impl<T : Default> Interface<T> {
         let graphics_queue = context.device.get_queue(QueueAffinity::Graphics, 0).unwrap();
         let command_pool = CommandPool::builder(graphics_queue.family())
             .reset()
-            .build(&context.device);
+            .build(&context);
 
         Self {
             context: egui_context,
@@ -288,7 +300,7 @@ impl<T : Default> Interface<T> {
 
             delegate,
 
-            state : T::default(),
+            state : State::default(),
         }
     }
 
@@ -312,7 +324,7 @@ impl<T : Default> Interface<T> {
         clipped_meshes : Vec<egui::ClippedPrimitive>,
         texture_delta : TexturesDelta
     ) {
-        profile_scope!("GUI Paint event");
+        profile_scope!("GUI Paint");
 
         for (id, image_delta) in texture_delta.set {
             self.update_texture(id, image_delta);
@@ -427,7 +439,7 @@ impl<T : Default> Interface<T> {
             .cpu_to_gpu()
             .linear(true)
             .usage(vk::BufferUsageFlags::TRANSFER_SRC)
-            .build(&self.rendering_context.device, &self.command_pool, &data);
+            .build(&self.rendering_context, &self.command_pool, &data);
 
         let mut image = ImageCreateInfo::default()
             .color()
@@ -445,12 +457,12 @@ impl<T : Default> Interface<T> {
                 depth : 1,
             })
             .format(vk::Format::R8G8B8A8_UNORM)
-            .build(&self.rendering_context.device);
+            .build(&self.rendering_context);
 
         let cmd = CommandBuffer::builder()
             .level(vk::CommandBufferLevel::PRIMARY)
             .pool(&self.command_pool)
-            .build_one(&self.rendering_context.device);
+            .build_one(&self.rendering_context);
 
         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         cmd.begin_label("GUI texture upload".to_owned(), [0.0; 4]);
@@ -486,8 +498,8 @@ impl<T : Default> Interface<T> {
             if let Some(existing_texture) = existing_texture {
                 self.rendering_context.device.reset_fences(slice::from_ref(&fence));
 
-                cmd.begin_label("GUI texture blit".to_owned(), [0.0; 4]);
                 cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT); // Reuse this command buffer
+                cmd.begin_label("GUI texture blit".to_owned(), [0.0; 4]);
 
                 // Transition the existing image to transfer dst
                 cmd.image_memory_barrier(&mut existing_texture.image,
@@ -537,8 +549,8 @@ impl<T : Default> Interface<T> {
                     vk::DependencyFlags::BY_REGION,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
                 );
-                cmd.end();
                 cmd.end_label();
+                cmd.end();
 
                 self.rendering_context.device.submit(graphics_queue, &[&cmd], &[], &[], fence);
                 self.rendering_context.device.wait_for_fence(fence);

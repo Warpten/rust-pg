@@ -1,5 +1,3 @@
-use std::{mem::{self, MaybeUninit}, slice::Iter};
-
 use ash::vk;
 
 pub trait Handle<T : vk::Handle> {

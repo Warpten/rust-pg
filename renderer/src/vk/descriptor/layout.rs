@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::slice;
-use std::sync::Arc;
 use ash::vk;
 use nohash_hasher::IntMap;
 
 use crate::make_handle;
+use crate::orchestration::rendering::RenderingContext;
 use crate::vk::descriptor::set::DescriptorSetInfo;
-use crate::vk::logical_device::LogicalDevice;
 
 /// Facililates creating instances of [`DescriptorSetLayout`].
 pub struct DescriptorSetLayoutBuilder {
@@ -28,8 +27,8 @@ impl DescriptorSetLayoutBuilder {
     value_builder! { sets, count, sets, u32 }
     value_builder! { flags, vk::DescriptorSetLayoutCreateFlags }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> DescriptorSetLayout {
-        DescriptorSetLayout::new(device, self)
+    pub fn build(self, context : &RenderingContext) -> DescriptorSetLayout {
+        DescriptorSetLayout::new(context, self)
     }
 }
 
@@ -38,7 +37,7 @@ impl DescriptorSetLayoutBuilder {
 /// 
 /// To instanciate this class, see [`DescriptorSetLayoutBuilder`]
 pub struct DescriptorSetLayout {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     layout : vk::DescriptorSetLayout,
     pool : vk::DescriptorPool,
 
@@ -59,7 +58,7 @@ impl DescriptorSetLayout {
         }
     }
 
-    pub(in self) fn new(device : &Arc<LogicalDevice>, info : DescriptorSetLayoutBuilder) -> Self {
+    pub(in self) fn new(context : &RenderingContext, info : DescriptorSetLayoutBuilder) -> Self {
         let binding_count = info.bindings.len();
         let mut bindings = Vec::<vk::DescriptorSetLayoutBinding>::with_capacity(binding_count);
         let mut pool_sizes = Vec::<vk::DescriptorPoolSize>::with_capacity(binding_count);
@@ -83,7 +82,7 @@ impl DescriptorSetLayout {
                 .flags(info.flags)
                 .bindings(&bindings);
 
-            let layout = device.handle()
+            let layout = context.device.handle()
                 .create_descriptor_set_layout(&create_info, None)
                 .expect("Descriptor set layout creation failed");
 
@@ -92,12 +91,12 @@ impl DescriptorSetLayout {
                 .pool_sizes(&pool_sizes)
                 .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
 
-            let pool = device.handle()
+            let pool = context.device.handle()
                 .create_descriptor_pool(&pool_create_info, None)
                 .expect("Descriptor pool creation failed");
 
             Self {
-                device : device.clone(),
+                context : context.clone(),
                 layout,
                 pool,
                 info,
@@ -114,7 +113,7 @@ impl DescriptorSetLayout {
             match value {
                 Some(value) => *value,
                 None => {
-                    let handle = self.device.handle()
+                    let handle = self.context.device.handle()
                         .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo::default()
                             .descriptor_pool(self.pool)
                             .set_layouts(&[self.layout])
@@ -154,16 +153,16 @@ impl DescriptorSetLayout {
         }
 
         unsafe {
-            self.device.handle()
+            self.context.device.handle()
                 .update_descriptor_sets(&write_sets, &[]);
         }
     }
 
     pub fn forget(&mut self, set : vk::DescriptorSet) {
-        self.device.wait_idle();
+        self.context.device.wait_idle();
 
         unsafe {
-            self.device.handle()
+            self.context.device.handle()
                 .free_descriptor_sets(self.pool, slice::from_ref(&set))
                 .expect("Failed to free a descriptor set");
         }
@@ -171,7 +170,7 @@ impl DescriptorSetLayout {
 
     pub fn reset_pool(&self) {
         unsafe {
-            self.device.handle()
+            self.context.device.handle()
                 .reset_descriptor_pool(self.pool, vk::DescriptorPoolResetFlags::default())
                 .expect("Failed to reset descriptor pool.");
         }
@@ -189,9 +188,9 @@ impl DescriptorSetLayout {
 impl Drop for DescriptorSetLayout {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle()
+            self.context.device.handle()
                 .destroy_descriptor_set_layout(self.layout, None);
-            self.device.handle()
+            self.context.device.handle()
                 .destroy_descriptor_pool(self.pool, None);
         }
     }

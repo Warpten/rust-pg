@@ -1,8 +1,7 @@
-use std::sync::Arc;
 use ash::vk;
 use crate::make_handle;
+use crate::orchestration::rendering::RenderingContext;
 use crate::traits::handle::{Handle, Handles};
-use crate::vk::logical_device::LogicalDevice;
 
 #[derive(Default)]
 pub struct PipelineLayoutInfo {
@@ -36,18 +35,18 @@ impl PipelineLayoutInfo {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> PipelineLayout {
+    pub fn build(self, context : &RenderingContext) -> PipelineLayout {
         let create_info = vk::PipelineLayoutCreateInfo::default()
             .set_layouts(&self.descriptor_sets)
             .push_constant_ranges(&self.push_constants);
 
         unsafe {
-            let layout = device.handle()
+            let layout = context.device.handle()
                 .create_pipeline_layout(&create_info, None)
                 .expect("Pipeline layout creation failed");
 
             PipelineLayout {
-                device : device.clone(),
+                context : context.clone(),
                 layout,
                 info : self
             }
@@ -56,7 +55,7 @@ impl PipelineLayoutInfo {
 }
 
 pub struct PipelineLayout {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     layout : vk::PipelineLayout,
     info : PipelineLayoutInfo
 }
@@ -66,7 +65,7 @@ make_handle! { PipelineLayout, vk::PipelineLayout, layout }
 impl Drop for PipelineLayout {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_pipeline_layout(self.layout, None);
+            self.context.device.handle().destroy_pipeline_layout(self.layout, None);
         }
     }
 }

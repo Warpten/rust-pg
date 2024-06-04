@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::mem::align_of;
 use std::mem::replace;
 use std::mem::size_of_val;
-use std::sync::Arc;
 use ash::util::Align;
 use ash::vk;
 use gpu_allocator::vulkan::Allocation;
@@ -11,9 +10,9 @@ use gpu_allocator::vulkan::AllocationCreateDesc;
 use gpu_allocator::vulkan::AllocationScheme;
 use gpu_allocator::MemoryLocation;
 use crate::make_handle;
+use crate::orchestration::rendering::RenderingContext;
 use crate::traits::handle::Handle;
 use crate::vk::command_buffer::CommandBuffer;
-use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueAffinity;
 
 use super::command_pool::CommandPool;
@@ -22,11 +21,11 @@ pub struct StaticInitializerTag;
 pub struct DynamicInitializerTag;
 
 pub trait StaticInitializer {
-    fn build(self, device : &Arc<LogicalDevice>, size : u64) -> Buffer;
+    fn build(self, context : &RenderingContext, size : u64) -> Buffer;
 }
 
 pub trait DynamicInitializer {
-    fn build<T : Sized + Copy>(self, device : &Arc<LogicalDevice>, pool : &CommandPool, data : &[T]) -> Buffer;
+    fn build<T : Sized + Copy>(self, context : &RenderingContext, pool : &CommandPool, data : &[T]) -> Buffer;
 }
 
 pub struct BufferBuilder<Tag> {
@@ -72,34 +71,34 @@ impl<T> BufferBuilder<T> {
 }
 
 impl StaticInitializer for BufferBuilder<StaticInitializerTag> {
-    fn build(self, device : &Arc<LogicalDevice>, size : u64) -> Buffer {
-        self.build_impl(device, size)
+    fn build(self, context : &RenderingContext, size : u64) -> Buffer {
+        self.build_impl(context, size)
     }
 }
 
 impl DynamicInitializer for BufferBuilder<DynamicInitializerTag> {
-    fn build<T : Sized + Copy>(self, device : &Arc<LogicalDevice>, pool : &CommandPool, data : &[T]) -> Buffer {
+    fn build<T : Sized + Copy>(self, context : &RenderingContext, pool : &CommandPool, data : &[T]) -> Buffer {
         let size = size_of_val(data) as u64;
-        let mut this = self.build_impl(device, size);
+        let mut this = self.build_impl(context, size);
         match &self.memory_location {
             MemoryLocation::GpuOnly => {
                 let mut staging_buffer = StaticBufferBuilder::fixed_size()
                     .name("Staging buffer")
                     .cpu_to_gpu()
                     .usage(vk::BufferUsageFlags::TRANSFER_SRC)
-                    .build(device, size);
+                    .build(context, size);
         
                 staging_buffer.update(data);
         
                 // Get the transfer queue.
-                let transfer_queue = device.get_queue(QueueAffinity::Transfer, pool.family())
+                let transfer_queue = context.device.get_queue(QueueAffinity::Transfer, pool.family())
                     .expect("Failed to recover the transfer queue");
         
                 // Begin a command buffer.
                 let cmd = CommandBuffer::builder()
                     .pool(pool)
                     .level(vk::CommandBufferLevel::PRIMARY)
-                    .build_one(device);
+                    .build_one(context);
         
                 cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
                 cmd.label("Data upload to the GPU".to_owned(), [0.0; 4], || {
@@ -109,9 +108,9 @@ impl DynamicInitializer for BufferBuilder<DynamicInitializerTag> {
                 });
                 cmd.end();
         
-                device.submit(transfer_queue, &[&cmd], &[], &[], vk::Fence::null());
+                context.device.submit(transfer_queue, &[&cmd], &[], &[], vk::Fence::null());
                 unsafe {
-                    device.handle().queue_wait_idle(transfer_queue.handle())
+                    context.device.handle().queue_wait_idle(transfer_queue.handle())
                         .expect("Waiting for queue idle failed");
                 }
         
@@ -142,7 +141,7 @@ impl<T> BufferBuilder<T> {
     valueless_builder! { cpu_to_gpu, MemoryLocation::CpuToGpu }
     valueless_builder! { gpu_to_cpu, MemoryLocation::GpuToCpu }
 
-    pub(in self) fn build_impl(&self, device : &Arc<LogicalDevice>, size : u64) -> Buffer {
+    pub(in self) fn build_impl(&self, context : &RenderingContext, size : u64) -> Buffer {
         unsafe {
             assert!(size != 0, "A buffer with no capacity is probably not what you want.");
             
@@ -157,16 +156,16 @@ impl<T> BufferBuilder<T> {
                 .sharing_mode(self.sharing_mode)
                 .size(size);
 
-            let buffer = device.handle().create_buffer(&create_info, None)
+            let buffer = context.device.handle().create_buffer(&create_info, None)
                 .expect("Buffer creation failed");
             
             if !self.name.is_empty() {
-                device.set_handle_name(buffer, &self.name.to_owned());
+                context.device.set_handle_name(buffer, &self.name.to_owned());
             }
 
-            let requirements = device.handle().get_buffer_memory_requirements(buffer);
+            let requirements = context.device.handle().get_buffer_memory_requirements(buffer);
             
-            let allocation = device.allocator()
+            let allocation = context.device.allocator()
                 .lock()
                 .unwrap()
                 .allocate(&AllocationCreateDesc {
@@ -178,11 +177,11 @@ impl<T> BufferBuilder<T> {
                 })
                 .expect("Buffer memory allocation failed");
 
-            device.handle().bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
+            context.device.handle().bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
                 .expect("Binding buffer memory failed");
 
             Buffer {
-                device : device.clone(),
+                context : context.clone(),
                 handle : buffer,
                 allocation,
                 index_type : self.index_type,
@@ -193,7 +192,7 @@ impl<T> BufferBuilder<T> {
 }
 
 pub struct Buffer {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     handle : vk::Buffer,
     allocation : Allocation,
     index_type : vk::IndexType,
@@ -234,7 +233,7 @@ impl Buffer {
 
     pub fn get_device_address(&self) -> u64 {
         unsafe {
-            self.device.handle().get_buffer_device_address(&vk::BufferDeviceAddressInfo::default()
+            self.context.device.handle().get_buffer_device_address(&vk::BufferDeviceAddressInfo::default()
                 .buffer(self.handle))
         }
     }
@@ -245,10 +244,10 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_buffer(self.handle, None);
+            self.context.device.handle().destroy_buffer(self.handle, None);
 
             let memory = replace(&mut self.allocation, Allocation::default()); 
-            _ = self.device.allocator().lock().unwrap().free(memory);
+            _ = self.context.device.allocator().lock().unwrap().free(memory);
         }
 
     }

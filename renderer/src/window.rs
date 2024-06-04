@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ash::vk;
 use egui_winit::winit::{self, event_loop::EventLoop, window::WindowBuilder};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle};
@@ -33,7 +31,7 @@ impl Window {
         }
     }
 
-    pub(in crate) fn create_surface(&mut self, context : &Arc<Context>) {
+    pub(in crate) fn create_surface(&mut self, context : &Context) {
         unsafe {
             let surface_loader = ash::khr::surface::Instance::new(&context.entry, &context.instance);
             self.surface = match (self.handle.display_handle(), self.handle.window_handle()) {

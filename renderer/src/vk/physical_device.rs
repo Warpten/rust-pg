@@ -1,4 +1,5 @@
-use std::{cmp::min, ffi::CString, ops::Range, sync::{Arc, Weak}};
+use std::path::PathBuf;
+use std::{cmp::min, ffi::CString, ops::Range};
 
 use ash::vk;
 
@@ -10,31 +11,14 @@ use crate::vk::queue::{Queue, QueueFamily};
 #[derive(Clone)]
 pub struct PhysicalDevice {
     handle : vk::PhysicalDevice,
-    context : Weak<Context>,
     memory_properties : vk::PhysicalDeviceMemoryProperties,
     pub properties : vk::PhysicalDeviceProperties,
     pub queue_families : Vec<QueueFamily>,
 }
 
 impl PhysicalDevice {
-    #[inline] pub fn context(&self) -> &Weak<Context> { &self.context }
     #[inline] pub fn memory_properties(&self) -> &vk::PhysicalDeviceMemoryProperties { &self.memory_properties }
     #[inline] pub fn properties(&self) -> &vk::PhysicalDeviceProperties { &self.properties }
-
-    /// Returns the extensions available on this [`PhysicalDevice`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if [`vkEnumerateDeviceExtensionProperties`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkEnumerateDeviceExtensionProperties.html) fails.
-    pub fn get_extensions(&self) -> Vec<vk::ExtensionProperties> {
-        unsafe {
-            self.context.upgrade()
-                .expect("Instance released too early")
-                .handle()
-                .enumerate_device_extension_properties(self.handle)
-                .expect("Failed to enumerate device extensions")
-        }
-    }
 
     /// Creates a new physical device.
     /// 
@@ -51,12 +35,13 @@ impl PhysicalDevice {
     /// * Panics if [`vkCreateDevice`](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/vkCreateDevice.html) fails.
     pub fn create_logical_device<F>(
         &self,
-        instance : &Arc<Context>,
+        instance : &Context,
         queue_families : Vec<(u32, &QueueFamily)>,
         get_queue_priority : F,
         extensions : &Vec<CString>,
-        window : &Arc<Window>,
-    ) -> Arc<LogicalDevice>
+        cache_file : PathBuf,
+        window : &Window,
+    ) -> LogicalDevice
         where F : Fn(u32, &QueueFamily) -> f32
     {
         // Store queue priorities in a flattened buffer; each queue family will index into
@@ -115,13 +100,14 @@ impl PhysicalDevice {
             (0..*count).map(|index| Queue::new(family, index, &device, window, &self))
         }).collect::<Vec<_>>();
 
-        Arc::new(LogicalDevice::new(instance,
+        LogicalDevice::new(instance,
             device,
             self.clone(),
             queues_objs,
             physical_device_features2.features,
             IndexingFeatures::new(physical_device_descriptor_indexing_features),
-        ))
+            cache_file,
+        )
     }
 
     /// Creates a new [`PhysicalDevice`].
@@ -130,10 +116,7 @@ impl PhysicalDevice {
     /// 
     /// * `device` - The physical device backing this logical device.
     /// * `instance` - The global Vulkan instance.
-    pub fn new(
-        device : vk::PhysicalDevice,
-        instance : &Arc<Context>
-    ) -> Self {
+    pub fn new(device : vk::PhysicalDevice, instance : &Context) -> Self {
         let physical_device_memory_properties = unsafe {
             instance.handle().get_physical_device_memory_properties(device)
         };
@@ -148,22 +131,16 @@ impl PhysicalDevice {
 
         Self {
             handle : device,
-            context : Arc::downgrade(&instance),
             memory_properties : physical_device_memory_properties,
             properties : physical_device_properties,
             queue_families
         }
     }
 
-    pub fn get_format_properties(&self, format : vk::Format) -> Option<vk::FormatProperties> {
+    pub fn get_format_properties(&self, context : &Context, format : vk::Format) -> Option<vk::FormatProperties> {
         unsafe {
-            let context = self.context.upgrade();
-            if let Some(context) = context {
-                return context.handle().get_physical_device_format_properties(self.handle, format).into();
-            }
+            context.handle().get_physical_device_format_properties(self.handle, format).into()
         }
-        
-        None
     }
 }
 

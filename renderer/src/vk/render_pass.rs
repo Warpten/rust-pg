@@ -1,16 +1,14 @@
-use std::sync::Arc;
-
 use ash::vk;
 
 use crate::make_handle;
-use crate::vk::logical_device::LogicalDevice;
+use crate::orchestration::rendering::RenderingContext;
 
 use super::framebuffer::Framebuffer;
 use super::swapchain::{Swapchain, SwapchainImage};
 
 pub struct RenderPass {
     handle : vk::RenderPass,
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
 
     spec : RenderPassAttachmentSpec,
 }
@@ -53,7 +51,7 @@ impl RenderPass {
             if has_depth { attachments.push(depth); }
         }
         
-        Framebuffer::new(&self.device, vk::FramebufferCreateInfo::default()
+        Framebuffer::new(&self.context, vk::FramebufferCreateInfo::default()
             .width(swapchain.extent.width)
             .height(swapchain.extent.height)
             .render_pass(self.handle)
@@ -61,9 +59,9 @@ impl RenderPass {
             .attachments(&attachments))
     }
 
-    pub fn find_supported_format(device : &Arc<LogicalDevice>, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
+    pub fn find_supported_format(context : &RenderingContext, formats : &[vk::Format], tiling : vk::ImageTiling, flags : vk::FormatFeatureFlags) -> Option<vk::Format> {
         for &format in formats {
-            let properties = device.physical_device.get_format_properties(format);
+            let properties = context.device.physical_device.get_format_properties(&context.context, format);
             if let Some(properties) = properties {
                 let supported = match tiling {
                     vk::ImageTiling::LINEAR => properties.linear_tiling_features.contains(flags),
@@ -80,9 +78,9 @@ impl RenderPass {
         None
     }
 
-    pub(in crate) fn new(device : &Arc<LogicalDevice>, handle : vk::RenderPass, spec : RenderPassAttachmentSpec) -> RenderPass {
+    pub(in crate) fn new(context : RenderingContext, handle : vk::RenderPass, spec : RenderPassAttachmentSpec) -> RenderPass {
         Self {
-            device : device.clone(),
+            context : context.clone(),
             handle,
             spec,
         }
@@ -94,7 +92,7 @@ make_handle! { RenderPass, vk::RenderPass }
 impl Drop for RenderPass {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_render_pass(self.handle, None);
+            self.context.device.handle().destroy_render_pass(self.handle, None);
         }
     }
 }
@@ -245,7 +243,7 @@ impl RenderPassCreateInfo {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> RenderPass {
+    pub fn build(self, context : &RenderingContext) -> RenderPass {
         let mut descs = Vec::<vk::AttachmentDescription>::new();
 
         let mut attachment_index = 0;
@@ -354,11 +352,11 @@ impl RenderPassCreateInfo {
             .dependencies(&self.dependencies);
 
         unsafe {
-            let handle = device.handle()
+            let handle = context.device.handle()
                 .create_render_pass(&create_info, None)
                 .expect("Failed to create a render pass");
             
-            RenderPass::new(device, handle, self.spec)
+            RenderPass::new(context.clone(), handle, self.spec)
         }
     }
 }

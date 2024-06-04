@@ -1,10 +1,6 @@
-use std::sync::Arc;
-
 use ash::vk;
 
-use crate::make_handle;
-
-use super::logical_device::LogicalDevice;
+use crate::{make_handle, orchestration::rendering::RenderingContext};
 
 #[derive(Default)]
 pub struct SamplerCreateInfo {
@@ -35,7 +31,7 @@ impl SamplerCreateInfo {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> Sampler {
+    pub fn build(self, context : &RenderingContext) -> Sampler {
         unsafe {
             let create_info = vk::SamplerCreateInfo::default()
                 .address_mode_u(self.address_mode[0])
@@ -46,17 +42,17 @@ impl SamplerCreateInfo {
                 .min_filter(self.filter[0])
                 .mipmap_mode(self.mipmap_mode);
 
-            let handle = device.handle()
+            let handle = context.device.handle()
                 .create_sampler(&create_info, None)
                 .expect("Failed to create a sampler");
 
-            Sampler { device : device.clone(), handle }
+            Sampler { context : context.clone(), handle }
         }
     }
 }
 
 pub struct Sampler {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     handle : vk::Sampler,
 }
 
@@ -69,7 +65,7 @@ impl Sampler {
 impl Drop for Sampler {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_sampler(self.handle, None);
+            self.context.device.handle().destroy_sampler(self.handle, None);
         }
     }
 }

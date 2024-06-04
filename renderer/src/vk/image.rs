@@ -1,15 +1,15 @@
-use std::{ops::Range, sync::{Arc, Mutex}};
+use std::ops::Range;
 
 use ash::vk;
-use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc};
 
-use crate::vk::logical_device::LogicalDevice;
+use crate::orchestration::rendering::RenderingContext;
 use crate::make_handle;
 
 use super::command_buffer::CommandBuffer;
 
 pub struct Image {
-    device : Arc<LogicalDevice>,
+    context : RenderingContext,
     handle : vk::Image,
     allocation : Option<Allocation>,
     view : vk::ImageView,
@@ -101,7 +101,7 @@ impl ImageCreateInfo {
         self
     }
 
-    pub fn build(self, device : &Arc<LogicalDevice>) -> Image {
+    pub fn build(self, context : &RenderingContext) -> Image {
         unsafe {
             let image = vk::ImageCreateInfo::default()
                 .image_type(self.image_type)
@@ -114,14 +114,14 @@ impl ImageCreateInfo {
                 .usage(self.usage)
                 .sharing_mode(self.sharing_mode);
 
-            let image = device.handle()
+            let image = context.device.handle()
                 .create_image(&image, None)
                 .expect("Image creation failed");
 
-            let requirements = device.handle()
+            let requirements = context.device.handle()
                 .get_image_memory_requirements(image);
 
-            let allocation = device.allocator()
+            let allocation = context.device.allocator()
                 .lock()
                 .expect("Failed to obtain allocator")
                 .allocate(&AllocationCreateDesc {
@@ -134,7 +134,7 @@ impl ImageCreateInfo {
                 })
                 .expect("Memory allocation failed");
 
-            device.handle()
+            context.device.handle()
                 .bind_image_memory(image, allocation.memory(), allocation.offset())
                 .expect("Memory binding failed");
 
@@ -150,22 +150,22 @@ impl ImageCreateInfo {
                     .layer_count(self.layers[1])
                 );
 
-            let image_view = device.handle()
+            let image_view = context.device.handle()
                 .create_image_view(&image_view, None)
                 .expect("Image view creation failed");
-            device.set_handle_name(image_view, &format!("View/{}", self.name));
+            context.device.set_handle_name(image_view, &format!("View/{}", self.name));
             
             Image {
-                device: device.clone(),
-                handle: image,
+                context : context.clone(),
+                handle : image,
                 allocation : Some(allocation),
-                view: image_view,
-                levels: Range { start : self.levels[0], end : self.levels[0] + self.levels[1] },
-                layers: Range { start : self.layers[0], end : self.layers[0] + self.layers[1] },
-                layout: self.initial_layout,
-                format: self.format,
-                extent: self.extent,
-                aspect: self.aspect,
+                view : image_view,
+                levels : Range { start : self.levels[0], end : self.levels[0] + self.levels[1] },
+                layers : Range { start : self.layers[0], end : self.layers[0] + self.layers[1] },
+                layout : self.initial_layout,
+                format : self.format,
+                extent : self.extent,
+                aspect : self.aspect,
                 sample_count : self.samples,
             }
         }
@@ -173,10 +173,10 @@ impl ImageCreateInfo {
 }
 
 impl Image { // Construction
-    pub fn from_swapchain(extent: &vk::Extent2D, device: &Arc<LogicalDevice>, format: vk::Format, images: Vec<vk::Image>) -> Vec<Image> {
+    pub fn from_swapchain(extent: &vk::Extent2D, context: &RenderingContext, format: vk::Format, images: Vec<vk::Image>) -> Vec<Image> {
         let mut index = 0;
         images.iter().map(|&image| {
-            device.set_handle_name(image, &format!("Swapchain/Image #{}", index));
+            context.device.set_handle_name(image, &format!("Swapchain/Image #{}", index));
 
             unsafe {
                 let image_view_info = vk::ImageViewCreateInfo::default()
@@ -197,17 +197,17 @@ impl Image { // Construction
                     })
                     .image(image);
 
-                let image_view = device
+                let image_view = context.device
                     .handle()
                     .create_image_view(&image_view_info, None)
                     .expect("Failed to create an image view on the swapchain image");
 
-                device.set_handle_name(image_view, &format!("Swapchain/ImageView #{}", index));
+                context.device.set_handle_name(image_view, &format!("Swapchain/ImageView #{}", index));
 
                 index += 1;
 
                 Self {
-                    device: device.clone(),
+                    context : context.clone(),
                     handle: image,
                     extent: vk::Extent3D {
                         width: extent.width,
@@ -230,9 +230,6 @@ impl Image { // Construction
 }
 
 impl Image { // Getters
-    #[inline] pub fn logical_device(&self) -> &Arc<LogicalDevice> { &self.device }
-    #[inline] pub fn allocator(&self) -> &Arc<Mutex<Allocator>> { self.logical_device().allocator() }
-
     #[inline] pub fn layout(&self) -> vk::ImageLayout { self.layout }
     #[inline] pub fn extent(&self) -> &vk::Extent3D { &self.extent }
     #[inline] pub fn view(&self) -> vk::ImageView { self.view }
@@ -365,11 +362,11 @@ make_handle! { Image, vk::Image }
 impl Drop for Image {
     fn drop(&mut self) {
         unsafe {
-            self.device.handle().destroy_image_view(self.view, None);
+            self.context.device.handle().destroy_image_view(self.view, None);
             if self.allocation.is_some() {
-                self.device.handle().destroy_image(self.handle, None);
+                self.context.device.handle().destroy_image(self.handle, None);
 
-                self.device.allocator()
+                self.context.device.allocator()
                     .lock()
                     .unwrap()
                     .free(self.allocation.take().unwrap_unchecked())
