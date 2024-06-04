@@ -1467,6 +1467,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tactfs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "enumflags2",
+ "md5",
+ "thiserror",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"

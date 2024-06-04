@@ -12,7 +12,6 @@ use rendering::geometry::GeometryRenderer;
 use theming::aesthetix::Aesthetix;
 use winit::event::WindowEvent;
 
-mod casc;
 mod interface;
 mod theming;
 mod rendering;

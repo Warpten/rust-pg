@@ -93,7 +93,7 @@ impl InterfaceState {
         egui::CentralPanel::default()
             .frame(egui::Frame::none()
                 .inner_margin(12.0)
-                .fill(egui::Color32::from_rgb(30, 30, 30)))
+                .fill(egui::Color32::from_rgba_premultiplied(30, 30, 30, 127)))
             .show(ctx, |ui| {
                 match self.active_tab {
                     Tab::Home => self.render_home(ctx, ui),
