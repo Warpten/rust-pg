@@ -5,6 +5,10 @@
 - Index buffers
 - egui integration
 
+## Status 
+
+![](https://i.imgur.com/oLZvHFk.gif)
+
 ## What doesn't work
 
 - Everything else
