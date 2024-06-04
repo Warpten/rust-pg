@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant, SystemTime};
 
-use egui::Context;
+use egui::{Context, RichText, Ui};
 
 #[derive(Default)]
 pub struct InterfaceState {
@@ -95,7 +95,51 @@ impl InterfaceState {
                 .inner_margin(12.0)
                 .fill(egui::Color32::from_rgb(30, 30, 30)))
             .show(ctx, |ui| {
-
+                match self.active_tab {
+                    Tab::Home => self.render_home(ctx, ui),
+                    Tab::Database => self.render_database(ctx, ui),
+                    Tab::World => self.render_world(ctx, ui),
+                    Tab::Model => self.render_model(ctx, ui),
+                    Tab::Explorer => self.render_explorer(ctx, ui),
+                    Tab::Settings => self.render_settings(ctx, ui),
+                    Tab::About => self.render_about(ctx, ui),
+                }
             });
+    }
+
+    fn render_home(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_database(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_world(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_model(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_explorer(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_settings(&mut self, ctx : &Context, ui : &mut Ui) {
+
+    }
+
+    fn render_about(&mut self, ctx : &Context, ui : &mut Ui) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    egui::CollapsingHeader::new("Open-source licenses").show(ui, |ui| {
+                        ui.label("I'll add these soon enough.");
+                    });
+                });
+            });
+        });
     }
 }
