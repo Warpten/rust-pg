@@ -1,6 +1,6 @@
-use std::time::{Duration, Instant, SystemTime};
+use std::{path::{Path, PathBuf}, time::{Duration, Instant, SystemTime}};
 
-use egui::{Color32, Context, Margin, Response, RichText, Ui, Widget};
+use egui::{collapsing_header::CollapsingState, Color32, Context, Hyperlink, Label, Margin, Response, RichText, TextEdit, TextStyle, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
 use renderer::gui::context::Interface;
 use tactfs::psv::{Record, PSV};
@@ -28,6 +28,42 @@ enum Tab {
     Explorer,
     Settings,
     About,
+}
+
+macro_rules! include_license {
+    ($name:expr, $url:expr, $rem:expr, $license_type:expr, $ui:expr) => {
+        CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
+            .show_header($ui, |ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
+                        .size(18.0), $url)
+                        .selectable(false)
+                        .ui(ui);
+
+                        ui.label($rem);
+                });
+            }).body(|ui| {
+                TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
+                    .font(TextStyle::Monospace)
+                    .interactive(false)
+                    .desired_width(f32::INFINITY)
+                    .ui(ui);
+            });
+    };
+    ($name:expr, $url:expr,  $license_type:expr, $ui:expr) => {
+        CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
+            .show_header($ui, |ui| {
+                Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
+                    .size(18.0), $url)
+                    .ui(ui);
+            }).body(|ui| {
+                TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
+                    .font(TextStyle::Monospace)
+                    .interactive(false)
+                    .desired_width(f32::INFINITY)
+                    .ui(ui);
+            });
+    };
 }
 
 impl InterfaceState {
@@ -123,7 +159,7 @@ impl InterfaceState {
                 .margin(Margin::symmetric(6.0, 8.0))
                 .ui(ui);
 
-            let build_info = PSV::from_file(&self.installation_path);
+            let build_info = PSV::from_file(&Path::new(&self.installation_path).join(".build.info"));
             match build_info {
                 Ok(build_info) => {
                     TableBuilder::new(ui)
@@ -159,22 +195,22 @@ impl InterfaceState {
                                     let product = record.read("Product").try_raw().unwrap_or("??");
 
                                     row.col(|ui| {
-                                        ui.label(version);
+                                        Label::new(version).selectable(false).ui(ui);
                                     });
                                     row.col(|ui| {
-                                        ui.label(branch);
+                                        Label::new(branch).selectable(false).ui(ui);
                                     });
                                     row.col(|ui| {
-                                        ui.label(build_key);
+                                        Label::new(build_key).selectable(false).ui(ui);
                                     });
                                     row.col(|ui| {
-                                        ui.label(cdn_key);
+                                        Label::new(cdn_key).selectable(false).ui(ui);
                                     });
                                     row.col(|ui| {
-                                        ui.label(install_key);
+                                        Label::new(install_key).selectable(false).ui(ui);
                                     });
                                     row.col(|ui| {
-                                        ui.label(product);
+                                        Label::new(product).selectable(false).ui(ui);
                                     });
                                     
                                     self.toggle_installation_selection(&row.response(), &record);
@@ -214,8 +250,16 @@ impl InterfaceState {
     fn render_about(&mut self, ctx : &Context, ui : &mut Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
-                egui::CollapsingHeader::new("Open-source licenses").show(ui, |ui| {
-                    ui.label("I'll add these soon enough.");
+                ui.collapsing("Open-source licenses", |ui| {
+                    include_license!("egui", "https://github.com/emilk/egui/tree/master", "APACHE", ui);
+
+                    include_license!("egui-winit-ash-integration", "https://github.com/MatchaChoco010/egui-winit-ash-integration",
+                        "Code from this project is not directly used here but it was referred to so much during development that I felt including it.",
+                        "APACHE", ui);
+
+                    include_license!("Aesthetix", "https://github.com/thebashpotato/egui-aesthetix",
+                        "Partially used for theming",
+                        "MIT-AESTHETIX", ui);
                 });
             });
         });
