@@ -37,7 +37,6 @@ macro_rules! include_license {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
                         .size(18.0), $url)
-                        .selectable(false)
                         .ui(ui);
 
                         ui.label($rem);
