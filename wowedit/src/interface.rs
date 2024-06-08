@@ -67,13 +67,13 @@ macro_rules! include_license {
 
 impl InterfaceState {
     pub fn render(&mut self, ctx : &Context) {
-        egui::Window::new("GUI statistics")
-            .open(&mut self.gui_memory_profiler)
-            .resizable(true)
-            .show(ctx, |ui| {
-                puffin::set_scopes_on(true);
-                puffin_egui::profiler_ui(ui);
-            });
+        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                if (ui.button("Profiler").clicked()) {
+                    self.gui_memory_profiler = true;
+                }
+            })
+        });
 
         egui::SidePanel::left("main_side_panel")
             .resizable(false)
@@ -145,6 +145,14 @@ impl InterfaceState {
                     Tab::Settings => self.render_settings(ctx, ui),
                     Tab::About => self.render_about(ctx, ui),
                 }
+            });
+
+        egui::Window::new("Profiler")
+            .open(&mut self.gui_memory_profiler)
+            .resizable(true)
+            .show(ctx, |ui| {
+                puffin::set_scopes_on(true);
+                puffin_egui::profiler_ui(ui);
             });
     }
 

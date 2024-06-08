@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 use ash::vk::{self, ClearValue};
 
@@ -41,7 +41,7 @@ impl CommandBuffer {
         }
     }
 
-    pub fn begin_label(&self, label : String, color : [f32; 4]) {
+    pub fn begin_label(&self, label : &str, color : [f32; 4]) {
         unsafe {
             if let Some(debug_utils) = &self.context.device.debug_utils {
                 let name = CString::new(label).unwrap();

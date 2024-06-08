@@ -24,11 +24,23 @@ use crate::window::Window;
 /// A renderer is effectively a type that declares the need to work with its own render pass.
 pub trait Renderer {
     /// Returns a recorded command buffer that contains all the commands needed to render the contents of this renderer.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `swapchain` - The swapchain currently in use.
+    /// * `framebuffer` - The framebuffer in use for the current frame.
+    /// * `frame_data` - A frame-specific data structure.
     fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame_data : &FrameData);
+    
+    /// Returns an array of compatible framebuffers for this renderer.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `swapchain` - The swapchain currently in use.
     fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer>;
 
-    fn marker_label(&self) -> String;
-    fn marker_color(&self) -> [f32; 4];
+    /// Returns a debug marker used with [`ash::vk::DebugUtilsLabelEXT`].
+    fn marker_data<'a>(&self) -> (&'a str, [f32; 4]);
 
     fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
         EventResponse { repaint : false, consumed : false }
@@ -186,7 +198,8 @@ impl RendererOrchestrator {
             let renderer = &mut self.renderers[i];
             let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
 
-            frame.cmd.begin_label(renderer.marker_label(), renderer.marker_color());
+            let marker_data = renderer.marker_data();
+            frame.cmd.begin_label(marker_data.0, marker_data.1);
             renderer.record_commands(&self.swapchain, framebuffer, frame);
             frame.cmd.end_label();
         }

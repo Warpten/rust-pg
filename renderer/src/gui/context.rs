@@ -97,9 +97,6 @@ impl<T : Default> Renderer for Interface<T> {
         let raw_input = self.egui.take_egui_input(window.handle());
         self.context.begin_frame(raw_input);
 
-        // egui calls here...
-        // ...
-
         (self.delegate)(&self.context, &mut self.state);
 
         let output = self.context.end_frame();
@@ -109,9 +106,9 @@ impl<T : Default> Renderer for Interface<T> {
         self.paint(&frame.cmd, swapchain, framebuffer, frame.index, clipped_meshes, output.textures_delta);
     }
 
-    fn marker_label(&self) -> String { "Draw GUI".to_owned() }
-
-    fn marker_color(&self) -> [f32; 4] { [0.0; 4] }
+    fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
+        ("Draw GUI", [0.0; 4] )
+    }
 }
 
 // --
@@ -465,7 +462,7 @@ impl<State : Default> Interface<State> {
             .build_one(&self.rendering_context);
 
         cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        cmd.begin_label("GUI texture upload".to_owned(), [0.0; 4]);
+        cmd.begin_label("GUI texture upload", [0.0; 4]);
         // Transition the new image to transfer dest
         cmd.image_memory_barrier(&mut image,
             BarrierPhase::ignore_queue(vk::AccessFlags::NONE_KHR,       vk::PipelineStageFlags::HOST),
@@ -499,7 +496,7 @@ impl<State : Default> Interface<State> {
                 self.rendering_context.device.reset_fences(slice::from_ref(&fence));
 
                 cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT); // Reuse this command buffer
-                cmd.begin_label("GUI texture blit".to_owned(), [0.0; 4]);
+                cmd.begin_label("GUI texture blit", [0.0; 4]);
 
                 // Transition the existing image to transfer dst
                 cmd.image_memory_barrier(&mut existing_texture.image,

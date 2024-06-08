@@ -1,9 +1,8 @@
-use std::{mem::{offset_of, size_of}, sync::Arc};
+use std::mem::{offset_of, size_of};
 
 use ash::vk;
-use egui_winit::EventResponse;
-use puffin::{profile_function, profile_scope};
-use renderer::{orchestration::rendering::{Renderer, RenderingContext, RenderingContextImpl}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, descriptor::layout::DescriptorSetLayout, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use puffin::profile_scope;
+use renderer::{orchestration::rendering::{Renderer, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -82,8 +81,9 @@ impl Renderer for GeometryRenderer {
         frame.cmd.end_render_pass();
     }
 
-    fn marker_label(&self) -> String { "Geometry renderer".to_owned() }
-    fn marker_color(&self) -> [f32; 4] { [0.0; 4] }
+    fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
+        ("Geometry renderer", [0.0; 4])
+    }
 }
 
 pub struct GeometryRenderer {

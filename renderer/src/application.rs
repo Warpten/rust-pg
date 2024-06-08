@@ -1,6 +1,7 @@
 use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
+use puffin::profile_scope;
 
 use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
 use crate::vk::{context::Context, renderer::RendererOptions};
@@ -70,6 +71,14 @@ pub struct ApplicationBuilder<State : 'static> {
     pub render : Option<RenderFn<State>>,
 }
 
+pub struct ApplicationCallbacks<State : 'static> {
+    pub prepare : PrepareFn,
+    pub setup : SetupFn<State>,
+    pub update : UpdateFn<State>,
+    pub event : WindowEventFn<State>,
+    pub render : RenderFn<State>,
+}
+
 impl<T> ApplicationBuilder<T> {
     pub fn prepare(mut self, prepare: PrepareFn) -> Self {
         self.prepare = Some(prepare);
@@ -94,29 +103,21 @@ impl<T> ApplicationBuilder<T> {
     pub fn run(self) {
         main_loop(self);
     }
-
-    pub(crate) fn run_render(&self, application : &mut Application, data : &mut T) -> bool {
-        if let Some(render_fn) = self.render {
-            match render_fn(application, data) {
-                Err(RendererError::InvalidSwapchain) => true,
-                _ => false,
-            }
-        } else {
-            false
-        }
-    }
 }
 
 #[allow(dead_code, unused)]
 fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     let event_loop = EventLoop::new().unwrap();
-    let mut settings = {
-        if let Some(prepare) = builder.prepare {
-            prepare()
-        } else {
-            ApplicationOptions::default()
-        }
+
+    let builder = ApplicationCallbacks {
+        prepare: builder.prepare.unwrap_or(ApplicationOptions::default),
+        setup: builder.setup,
+        update: builder.update.unwrap_or(|_, _| { }),
+        event: builder.event.unwrap_or(|_, _, _| { }),
+        render: builder.render.unwrap_or(|_, _| Ok(())),
     };
+
+    let mut settings = (builder.prepare)();
 
     let mut app = Application::new(settings, &event_loop);
     let mut app_data = (builder.setup)(&mut app);
@@ -131,7 +132,6 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
         puffin::GlobalProfiler::lock().new_frame();
 
         if !app.orchestrator.context.window.is_minimized() {
-            
             if dirty_swapchain {
                 app.recreate_swapchain();
                 dirty_swapchain = false;
@@ -139,26 +139,23 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
             match event {
                 Event::WindowEvent { event, .. } => {
+
                     match event {
                         WindowEvent::CloseRequested => target.exit(),
                         WindowEvent::ModifiersChanged(m) => modifiers = m.state(),
                         _ => (),
                     }
-                    if let Some(event_fn) = builder.event {
-                        event_fn(&mut app, &mut app_data, &event);
-                    }
+                    (builder.event)(&mut app, &mut app_data, &event);
                 }
                 Event::AboutToWait => {
                     let now = now.elapsed().unwrap();
 
-                    match builder.update {
-                        Some(update_fn) => {
-                            update_fn(&mut app, &mut app_data);
-                        }
-                        None => {}
-                    }
+                    (builder.update)(&mut app, &mut app_data);
 
-                    dirty_swapchain = builder.run_render(&mut app, &mut app_data);
+                    dirty_swapchain = match (builder.render)(&mut app, &mut app_data) {
+                        Ok(_) => false,
+                        Err(RendererError::InvalidSwapchain) => true,
+                    };
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
