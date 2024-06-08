@@ -11,7 +11,7 @@ egui-winit = { workspace = true }
 anyhow = { workspace = true }
 puffin = { workspace = true }
 # gpu-allocator = { version = "0.27.0", default-features = false, features = ["vulkan"] }
-gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan"] }
+gpu-allocator = { workspace = true }
 ash = { workspace = true }
 ash-window = "0.13.0"
 raw-window-handle = "0.6.1"

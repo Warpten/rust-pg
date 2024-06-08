@@ -18,3 +18,4 @@ bitmask-enum = "2.2.3"
 shaderc = "0.8.3"
 nohash-hasher = "0.2.0"
 puffin = { version = "0.19", default-features = false }
+gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan", "visualizer"] }

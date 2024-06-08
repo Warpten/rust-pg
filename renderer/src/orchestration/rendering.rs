@@ -45,6 +45,8 @@ pub trait Renderer {
     fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
         EventResponse { repaint : false, consumed : false }
     }
+
+    fn update(&mut self) { }
 }
 
 pub struct RenderingContextImpl {
@@ -65,6 +67,8 @@ pub type RendererFn = fn(context : &RenderingContext, swapchain : &Swapchain) ->
 pub struct Orchestrator {
     context : Arc<Context>,
     renderers : Vec<RendererFn>,
+    update_order : Vec<usize>,
+    render_order : Vec<usize>,
 }
 impl Orchestrator {
     /// Creates a new orchestrator. This object is in charge of preparing Vulkan structures for rendering
@@ -73,12 +77,26 @@ impl Orchestrator {
         Self {
             context,
             renderers : vec![],
+            update_order : vec![],
+            render_order : vec![]
         }
     }
 
+    pub fn update_order(mut self, order : &[usize]) -> Self {
+        self.update_order = order.to_vec();
+        self
+    }
+
+    pub fn render_order(mut self, order : &[usize]) -> Self {
+        self.render_order = order.to_vec();
+        self
+    }
+
     /// Adds a renderable to this orchestrator. See the documentation on [`Renderer`] for more informations.
-    pub fn add_renderer(mut self, renderer : RendererFn) -> Self {
+    pub fn add_renderer(mut self, renderer : RendererFn, update_order : Option<usize>, render_order : Option<usize>) -> Self {
         self.renderers.push(renderer);
+        self.render_order.push(render_order.unwrap_or(self.render_order.len()));
+        self.update_order.push(update_order.unwrap_or(self.update_order.len()));
         self
     }
 
@@ -87,6 +105,9 @@ impl Orchestrator {
         window : Window,
         device_extensions : Vec<CString>,
     ) -> RendererOrchestrator {
+        assert_eq!(self.renderers.len(), self.render_order.len());
+        assert_eq!(self.renderers.len(), self.update_order.len());
+
         let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &options, device_extensions);
 
         let context = Arc::new(RenderingContextImpl {
@@ -110,6 +131,9 @@ impl Orchestrator {
             swapchain : ManuallyDrop::new(swapchain),
 
             renderers,
+            render_order : self.render_order.clone(),
+            update_order : self.update_order.clone(),
+
             framebuffers,
             frames,
             frame_index : 0,
@@ -150,7 +174,7 @@ impl Orchestrator {
         let mut created_renderers = vec![];
         let renderer_count = self.renderers.len();
         for renderer in &self.renderers {
-            let mut renderer = renderer(context, swapchain);
+            let renderer = renderer(context, swapchain);
 
             framebuffers.extend(renderer.create_framebuffers(&swapchain));
             created_renderers.push(renderer);
@@ -176,6 +200,8 @@ pub struct RendererOrchestrator {
     pub swapchain : ManuallyDrop<Swapchain>,
 
     renderers : Vec<Box<dyn Renderer>>,
+    render_order : Vec<usize>,
+    update_order : Vec<usize>,
     // This should be a bidimensional array but for the sake of memory layout, we use a single dimensional array.
     // The layout is effectively [renderer 1's framebuffers], [renderer 2's framebuffers], ...
     framebuffers : Vec<Framebuffer>,
@@ -185,6 +211,12 @@ pub struct RendererOrchestrator {
     frame_index : usize,
 }
 impl RendererOrchestrator {
+    pub fn update(&mut self) {
+        for i in &self.update_order {
+            self.renderers[*i].update();
+        }
+    }
+
     pub fn draw_frame(&mut self) -> Result<(), RendererError> {
         profile_scope!("Application rendering");
 
@@ -192,10 +224,10 @@ impl RendererOrchestrator {
         let frame = &self.frames[self.frame_index];
 
         frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        for i in 0..self.renderers.len() {
-            profile_scope!("Render pass", i.to_string());
+        for i in &self.render_order {
+            let renderer = &mut self.renderers[*i];
+            profile_scope!("Renderer ", renderer.marker_data().0);
 
-            let renderer = &mut self.renderers[i];
             let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
 
             let marker_data = renderer.marker_data();

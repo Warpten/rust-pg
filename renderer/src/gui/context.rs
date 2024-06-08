@@ -1,12 +1,14 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 use std::slice;
 use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
-use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
+use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, Ui, ViewportId};
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
+use gpu_allocator::vulkan::AllocatorVisualizer;
 use puffin::profile_scope;
 use crate::orchestration::rendering::{Renderer, RenderingContext};
 use crate::traits::handle::Handle;
@@ -88,7 +90,7 @@ impl<T : Default> Renderer for Interface<T> {
     fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
         self.egui.on_window_event(self.rendering_context.window.handle(), event)
     }
-    
+
     fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
         profile_scope!("GUI command recording");
         
@@ -137,6 +139,8 @@ pub struct Interface<State : Default> {
     sampler : Sampler,
     textures : HashMap<TextureId, Texture>,
     delegate : InterfaceRenderDelegate<State>,
+
+    pub(in crate) visualizer : AllocatorVisualizer,
 
     // User data structures
     pub state : State,
@@ -298,6 +302,7 @@ impl<State : Default> Interface<State> {
             delegate,
 
             state : State::default(),
+            visualizer : AllocatorVisualizer::new(),
         }
     }
 
@@ -561,5 +566,10 @@ impl<State : Default> Interface<State> {
                 image
             });
         }
+    }
+
+    pub fn render_visualizer(&self, ui : &mut Ui) {
+        // Broken with version mismatch required by the visualizer feature
+        // self.visualizer.render_breakdown_ui(ui, self.rendering_context.device.allocator().lock().unwrap().borrow())
     }
 }

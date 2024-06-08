@@ -20,6 +20,7 @@ ash = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
 egui-winit = { workspace = true }
+gpu-allocator = { workspace = true }
 
 [build-dependencies]
 vergen = { version = "8.3.1", features = [ "build", "git", "gitcl" ] }

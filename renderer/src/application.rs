@@ -1,7 +1,6 @@
 use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
-use puffin::profile_scope;
 
 use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
 use crate::vk::{context::Context, renderer::RendererOptions};
@@ -129,8 +128,6 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
-        puffin::GlobalProfiler::lock().new_frame();
-
         if !app.orchestrator.context.window.is_minimized() {
             if dirty_swapchain {
                 app.recreate_swapchain();
@@ -139,7 +136,6 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
             match event {
                 Event::WindowEvent { event, .. } => {
-
                     match event {
                         WindowEvent::CloseRequested => target.exit(),
                         WindowEvent::ModifiersChanged(m) => modifiers = m.state(),
@@ -148,6 +144,8 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                     (builder.event)(&mut app, &mut app_data, &event);
                 }
                 Event::AboutToWait => {
+                    puffin::GlobalProfiler::lock().new_frame();
+            
                     let now = now.elapsed().unwrap();
 
                     (builder.update)(&mut app, &mut app_data);
