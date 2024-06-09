@@ -1,8 +1,8 @@
-use std::{fs::FileType, path::{Path, PathBuf}};
+use std::path::{Path, PathBuf};
 
-use egui::{collapsing_header::CollapsingState, Color32, Context, FontFamily, FontId, Label, Margin, RichText, TextEdit, Ui, Widget};
+use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
-use tactfs::psv::{Record, PSV};
+use tactfs::psv::PSV;
 
 #[derive(Default)]
 pub struct InterfaceState {    
@@ -10,7 +10,7 @@ pub struct InterfaceState {
     pub allocation_breakdown : bool, // Toggles displaying GPU allocation breakdown
 
     installation_path : String,
-    psv_selection : Option<(String, String, String, String, String)>, // Row selected in .build.info
+    psv_selection : Option<(String, String, String, String, String, PathBuf)>, // Row selected in .build.info
 
     active_tab : Tab,
 }
@@ -100,7 +100,18 @@ impl InterfaceState {
                 ui.with_layout(
                     egui::Layout::top_down_justified(egui::Align::Min),
                     |ui| {
-                        ui.selectable_value(&mut self.active_tab, Tab::Home, "🏠 Home");
+                        let mut label_job = LayoutJob::default();
+                        RichText::new("💾")
+                            .family(FontFamily::Name("Roboto-Regular".into()))
+                            .append_to(&mut label_job, &Style::default(), FontSelection::FontId(FontId {
+                                family : FontFamily::Proportional,
+                                size : 12.0
+                            }), egui::Align::Min);
+                        RichText::new("Home")
+                            .family(FontFamily::Name("Roboto-Light".into()))
+                            .append_to(&mut label_job, &Style::default(), FontSelection::Default, egui::Align::Min);
+
+                        ui.selectable_value(&mut self.active_tab, Tab::Home, label_job);
                         ui.selectable_value(&mut self.active_tab, Tab::Database, "💾 Database");
                         ui.selectable_value(&mut self.active_tab, Tab::World, "🌍 World");
                         ui.selectable_value(&mut self.active_tab, Tab::Model, "🐢 Models");
@@ -189,7 +200,7 @@ impl InterfaceState {
                         .column(Column::remainder()) // Build Key
                         .column(Column::remainder()) // CDN Key
                         .column(Column::remainder()) // Directory
-                        .column(Column::auto()) // Interaction button
+                        .column(Column::exact(100.0)) // Interaction button
                         .min_scrolled_height(0.0)
                         .header(20.0, |mut header| {
                             header.col(|ui| { ui.strong("Version"); });
@@ -218,7 +229,13 @@ impl InterfaceState {
                                         row.col(|ui| { Label::new(path_on_disk.to_str().unwrap()).selectable(false).ui(ui); });
                                         row.col(|ui| {
                                             if ui.button("Open").clicked() {
-                                                self.psv_selection = Some((version.to_string(), branch.to_string(), build_key.to_string(), cdn_key.to_string(), product.to_string()));
+                                                self.psv_selection = Some((version.to_string(),
+                                                    branch.to_string(),
+                                                    build_key.to_string(),
+                                                    cdn_key.to_string(),
+                                                    product.to_string(),
+                                                    path_on_disk
+                                                ));
                                             }
                                         });
                                     });
@@ -283,7 +300,6 @@ fn find_flavor_path(source : &str, product : &str) -> Option<PathBuf> {
             }
 
             let absolute_path = PathBuf::from(source).join(path.file_name());
-            print!("{:?}", absolute_path);
 
             if let Ok(flavor_file) = PSV::from_file(absolute_path.join(".flavor.info")) {
                 if let Some(record) = flavor_file.record(0) {
