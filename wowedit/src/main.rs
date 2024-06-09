@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[allow(dead_code)]
 
 use egui::Context;
-use egui::{FontData, FontDefinitions, FontFamily, FontId};
+use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
 use renderer::gui::context::{Interface, InterfaceOptions};
@@ -13,7 +13,6 @@ use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
 use rendering::geometry::GeometryRenderer;
-use theming::aesthetix::Aesthetix;
 use winit::event::WindowEvent;
 
 mod events;
@@ -124,7 +123,6 @@ fn load_fonts<P>(def : &mut FontDefinitions, mut family : &Option<FontFamily>, d
                         } else {
                             println!("Tried to load font {:?} but this font should be in a subdirectory named 'proportional' or 'monospace'", font_name);
                         }
-
                     } else {
                         if sub_path.file_name() == "proportional" {
                             family = &Some(FontFamily::Proportional);
