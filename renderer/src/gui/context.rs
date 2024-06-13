@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 use std::slice;
@@ -8,7 +7,6 @@ use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, Ui, ViewportId};
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
-use gpu_allocator::vulkan::AllocatorVisualizer;
 use puffin::profile_scope;
 use crate::orchestration::rendering::{Renderer, RenderingContext};
 use crate::traits::handle::Handle;
@@ -97,14 +95,14 @@ impl<T : Default> Renderer for Interface<T> {
         let window = &self.rendering_context.window;
 
         let raw_input = self.egui.take_egui_input(window.handle());
-        self.context.begin_frame(raw_input);
+        self.egui_ctx.begin_frame(raw_input);
 
-        (self.delegate)(&self.context, &mut self.state);
+        (self.delegate)(&self.egui_ctx, &mut self.state);
 
-        let output = self.context.end_frame();
+        let output = self.egui_ctx.end_frame();
         self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
 
-        let clipped_meshes = self.context.tessellate(output.shapes, self.scale_factor as _);
+        let clipped_meshes = self.egui_ctx.tessellate(output.shapes, self.scale_factor as _);
         self.paint(&frame.cmd, swapchain, framebuffer, frame.index, clipped_meshes, output.textures_delta);
     }
 
@@ -124,12 +122,12 @@ pub struct InterfaceFrameData {
 type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
 
 pub struct Interface<State : Default> {
+    egui_ctx : Context,
     egui : egui_winit::State,
 
     // Rendering data structures
-    pub context : Context,
     rendering_context : RenderingContext,
-    pipeline_layout : PipelineLayout,
+    _pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     command_pool : CommandPool,
     frame_data : Vec<InterfaceFrameData>,
@@ -140,33 +138,44 @@ pub struct Interface<State : Default> {
     textures : HashMap<TextureId, Texture>,
     delegate : InterfaceRenderDelegate<State>,
 
-    pub(in crate) visualizer : AllocatorVisualizer,
-
     // User data structures
     pub state : State,
 }
 
-#[derive(Default)]
-pub struct InterfaceOptions {
-    pub fonts : FontDefinitions,
-    pub style : Style,
+pub struct InterfaceOptions<State> {
+    /// The egui context.
+    pub context : Context,
+    /// A delegate that will be called 
+    pub delegate : InterfaceRenderDelegate<State>,
+}
+impl<S> InterfaceOptions<S> {
+    pub fn default(delegate : InterfaceRenderDelegate<S>) -> InterfaceOptions<S> {
+        Self {
+            context : Context::default(),
+            delegate
+        }
+    }
+
+    pub fn fonts(self, fonts : FontDefinitions) -> Self {
+        self.context.set_fonts(fonts);
+        self
+    }
+
+    pub fn style(self, style : Style) -> Self {
+        self.context.set_style(style);
+        self
+    }
 }
 
 impl<State : Default> Interface<State> {
-    pub fn supplier(
-        swapchain : &Swapchain,
-        context : &RenderingContext,
-        is_presenting : bool,
-        delegate : InterfaceRenderDelegate<State>,
-        options : InterfaceOptions
-    ) -> Interface<State> {
+    fn create_render_pass(swapchain : &Swapchain, is_presenting : bool, context : &RenderingContext) -> RenderPass {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
         } else {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
         };
         
-        let render_pass = RenderPass::builder()
+        RenderPass::builder()
             .color_attachment(
                 swapchain.color_format(),
                 vk::SampleCountFlags::TYPE_1,
@@ -184,38 +193,12 @@ impl<State : Default> Interface<State> {
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE
-            ).build(context);
-
-        Self::new(options, swapchain, context, render_pass, delegate)
+            ).build(context)
     }
 
-    pub fn new(
-        options : InterfaceOptions,
-        swapchain : &Swapchain,
-        context : &RenderingContext,
-        render_pass : RenderPass,
-        delegate : InterfaceRenderDelegate<State>
-    ) -> Interface<State> {
-        let egui_context = Context::default();
-        egui_context.set_fonts(options.fonts);
-        egui_context.set_style(options.style);
-
-        let egui = egui_winit::State::new(egui_context.clone(),
-            ViewportId::ROOT,
-            context.window.handle(),
-            Some(context.window.handle().scale_factor() as f32),
-            Some(context.device.physical_device.properties.limits.max_image_dimension2_d as usize));
-
-        // Create a descriptor pool.
-        let descriptor_set_layouts = (0..swapchain.image_count()).map(|_|
-            DescriptorSetLayout::builder()
-                .sets(1024)
-                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
-                .build(&context)
-        ).collect::<Vec<_>>();
-
+    fn create_pipeline(descs : &[DescriptorSetLayout], context : &RenderingContext, render_pass : &RenderPass) -> (PipelineLayout, Pipeline) {
         let pipeline_layout = PipelineLayoutInfo::default()
-            .layouts(&descriptor_set_layouts)
+            .layouts(descs)
             .push_constant(vk::PushConstantRange::default()
                 .stage_flags(vk::ShaderStageFlags::VERTEX)
                 .offset(0)
@@ -244,6 +227,56 @@ impl<State : Default> Interface<State> {
             .build(&context);
         context.device.set_handle_name(pipeline.handle(), &"GUI Pipeline".to_owned());
 
+        (pipeline_layout, pipeline)
+    }
+
+    fn create_frame_data(context : &RenderingContext, descriptor_set_layout : DescriptorSetLayout) -> InterfaceFrameData {
+        let vertex_buffer = StaticBufferBuilder::fixed_size()
+            .cpu_to_gpu()
+            .linear(true)
+            .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+            .build(&context, 1024 * 1024 * 4);
+        context.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
+
+        let index_buffer = StaticBufferBuilder::fixed_size()
+            .cpu_to_gpu()
+            .linear(true)
+            .usage(vk::BufferUsageFlags::INDEX_BUFFER)
+            .index(vk::IndexType::UINT32)
+            .build(&context, 1024 * 1024 * 4);
+        context.device.set_handle_name(index_buffer.handle(), &"GUI Index buffer".to_owned());
+
+        InterfaceFrameData {
+            vertex_buffer,
+            index_buffer,
+            descriptor_set_layout,
+        }
+    }
+
+    pub fn new(
+        swapchain : &Swapchain,
+        context : &RenderingContext,
+        is_presenting : bool,
+        options : InterfaceOptions<State>
+    ) -> Interface<State> {
+        let render_pass = Self::create_render_pass(swapchain, is_presenting, context);
+
+        let egui = egui_winit::State::new(options.context.clone(),
+            ViewportId::ROOT,
+            context.window.handle(),
+            Some(context.window.handle().scale_factor() as f32),
+            Some(context.device.physical_device.properties.limits.max_image_dimension2_d as usize));
+
+        // Create a descriptor pool.
+        let descriptor_set_layouts = (0..swapchain.image_count()).map(|_|
+            DescriptorSetLayout::builder()
+                .sets(1024)
+                .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
+                .build(&context)
+        ).collect::<Vec<_>>();
+
+        let (_pipeline_layout, pipeline) = Self::create_pipeline(&descriptor_set_layouts, context, &render_pass);
+
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .anisotropy(false)
@@ -255,26 +288,7 @@ impl<State : Default> Interface<State> {
 
         let mut frame_data = vec![];
         for descriptor_set_layout in descriptor_set_layouts.into_iter() {
-            let vertex_buffer = StaticBufferBuilder::fixed_size()
-                .cpu_to_gpu()
-                .linear(true)
-                .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
-                .build(&context, 1024 * 1024 * 4);
-            context.device.set_handle_name(vertex_buffer.handle(), &"GUI Vertex buffer".to_owned());
-
-            let index_buffer = StaticBufferBuilder::fixed_size()
-                .cpu_to_gpu()
-                .linear(true)
-                .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-                .index(vk::IndexType::UINT32)
-                .build(&context, 1024 * 1024 * 4);
-            context.device.set_handle_name(index_buffer.handle(), &"GUI Index buffer".to_owned());
-
-            frame_data.push(InterfaceFrameData {
-                vertex_buffer,
-                index_buffer,
-                descriptor_set_layout,
-            });
+            frame_data.push(Self::create_frame_data(context, descriptor_set_layout));
         }
 
         let graphics_queue = context.device.get_queue(QueueAffinity::Graphics, 0).unwrap();
@@ -283,11 +297,11 @@ impl<State : Default> Interface<State> {
             .build(&context);
 
         Self {
-            context: egui_context,
+            egui_ctx : options.context,
             egui,
             
             rendering_context : context.clone(),
-            pipeline_layout,
+            _pipeline_layout,
             pipeline,
 
             frame_data,
@@ -299,20 +313,23 @@ impl<State : Default> Interface<State> {
             textures : HashMap::default(),
             render_pass,
 
-            delegate,
-
             state : State::default(),
-            visualizer : AllocatorVisualizer::new(),
+            // visualizer : AllocatorVisualizer::new(),
+
+            delegate : options.delegate,
         }
     }
+}
 
+// Actual user API
+impl<State : Default> Interface<State> {
     pub fn begin_frame(&mut self, window : &Window) {
         let raw_input = self.egui.take_egui_input(window.handle());
-        self.context.begin_frame(raw_input);
+        self.egui_ctx.begin_frame(raw_input);
     }
 
     pub fn end_frame(&mut self, window : &Window) -> egui::FullOutput {
-        let output = self.context.end_frame();
+        let output = self.egui_ctx.end_frame();
         self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
 
         output
@@ -566,10 +583,5 @@ impl<State : Default> Interface<State> {
                 image
             });
         }
-    }
-
-    pub fn render_visualizer(&self, ui : &mut Ui) {
-        // Broken with version mismatch required by the visualizer feature
-        // self.visualizer.render_breakdown_ui(ui, self.rendering_context.device.allocator().lock().unwrap().borrow())
     }
 }

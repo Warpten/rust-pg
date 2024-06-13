@@ -1,5 +1,4 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 
 #[allow(dead_code)]
 
@@ -8,7 +7,7 @@ use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
 use renderer::gui::context::{Interface, InterfaceOptions};
-use renderer::orchestration::rendering::Orchestrator;
+use renderer::orchestration::orchestrator::Orchestrator;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -20,7 +19,7 @@ mod interface;
 mod theming;
 mod rendering;
 
-pub struct ApplicationData { // Get rid of this
+pub struct ApplicationData {
 }
 
 fn setup(app : &mut Application) -> ApplicationData {
@@ -45,17 +44,13 @@ fn prepare() -> ApplicationOptions {
 
                     let mut fonts = FontDefinitions::default();
                     load_fonts(&mut fonts, &None, "./assets/fonts");
+                    for (k, v) in &fonts.families { println!("Loaded {:?} {:?}", k, v); }
 
-                    for (k, v) in &fonts.families {
-                        println!("Loaded {:?} {:?}", k, v);
-                    }
+                    let options = InterfaceOptions::default(render_interface)
+                        .fonts(fonts)
+                        .style(style);
 
-                    let options = InterfaceOptions {
-                        style,
-                        fonts
-                    };
-
-                    Box::new(Interface::supplier(swapchain, ctx, true, render_interface, options))
+                    Box::new(Interface::new(swapchain, ctx, true, options))
                 }, None, None)
         })
 }

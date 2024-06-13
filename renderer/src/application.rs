@@ -2,7 +2,7 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::orchestration::rendering::{Orchestrator, RendererOrchestrator};
+use crate::orchestration::orchestrator::{Orchestrator, RendererOrchestrator};
 use crate::vk::{context::Context, renderer::RendererOptions};
 use crate::window::Window;
 
