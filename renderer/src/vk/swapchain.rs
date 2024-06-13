@@ -28,12 +28,6 @@ pub trait SwapchainOptions {
     /// be selected.
     fn select_surface_format(&self, format : &vk::SurfaceFormatKHR) -> bool;
 
-    /// Returns the width of the swapchain's images.
-    fn width(&self) -> u32;
-
-    /// Returns the height of the swapchain's images.
-    fn height(&self) -> u32;
-
     /// Returns the composite flags to be used by the swapchain's images.
     fn composite_alpha(&self) -> vk::CompositeAlphaFlagsKHR { vk::CompositeAlphaFlagsKHR::OPAQUE }
 
@@ -105,7 +99,7 @@ impl Swapchain {
     ) -> Swapchain {
         let surface_format = Self::select_format(options, context.window.get_surface_formats(&context.device.physical_device));
         let surface_capabilities = context.window.get_surface_capabilities(&context.device.physical_device);
-        let extent = Self::get_extent(surface_capabilities, options);
+        let extent = Self::get_extent(surface_capabilities, &context.window);
 
         let image_count = surface_capabilities.min_image_count + 1;
         let image_count = if surface_capabilities.max_image_count != 0 {
@@ -278,14 +272,15 @@ impl Swapchain {
         formats[0]
     }
 
-    fn get_extent<T : SwapchainOptions>(capabilities : vk::SurfaceCapabilitiesKHR, options : &T) -> vk::Extent2D {
+    fn get_extent(capabilities : vk::SurfaceCapabilitiesKHR, window : &Window) -> vk::Extent2D {
         if capabilities.current_extent.width != u32::MAX {
             capabilities.current_extent
         } else {
+            // TODO: This is a bit stupid innit - we need explicit tiled rendering here, aka another can of worms
             vk::Extent2D {
-                width: options.width()
+                width: window.width()
                     .clamp(capabilities.min_image_extent.width, capabilities.max_image_extent.width),
-                height: options.height()
+                height: window.height()
                     .clamp(capabilities.max_image_extent.height, capabilities.min_image_extent.height),
             }
         }

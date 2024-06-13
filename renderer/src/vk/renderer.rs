@@ -20,7 +20,6 @@ impl From<f32> for DynamicState<f32> {
 #[derive(Debug, Copy, Clone)]
 pub struct RendererOptions {
     pub(in crate) line_width : DynamicState<f32>,
-    pub(in crate) resolution : [u32; 2],
     pub(in crate) get_queue_count : fn(&QueueFamily) -> u32,
     pub(in crate) get_pipeline_cache_file : fn() -> PathBuf,
     pub(in crate) depth : bool,
@@ -36,8 +35,6 @@ impl RendererOptions {
         self
     }
     
-    value_builder! { resolution, [u32; 2] }
-
     #[inline] pub fn queue_count(mut self, getter : fn(&QueueFamily) -> u32) -> Self {
         self.get_queue_count = getter;
         self
@@ -58,7 +55,6 @@ impl Default for RendererOptions {
     fn default() -> Self {
         Self {
             line_width: DynamicState::Fixed(1.0f32),
-            resolution : [1280, 720],
             get_queue_count : |&_| 1,
             get_pipeline_cache_file : || "pipelines.dat".into(),
             depth : true,
@@ -74,9 +70,6 @@ impl SwapchainOptions for RendererOptions {
     fn select_surface_format(&self, format : &vk::SurfaceFormatKHR) -> bool {
         format.format == vk::Format::B8G8R8A8_SRGB && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
     }
-
-    fn width(&self) -> u32 { self.resolution[0] }
-    fn height(&self) -> u32 { self.resolution[1] }
 
     fn depth(&self) -> bool { self.depth }
     fn stencil(&self) -> bool { self.stencil }

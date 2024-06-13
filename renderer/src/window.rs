@@ -24,7 +24,7 @@ impl Window {
         Self {
             handle : WindowBuilder::default()
                 .with_title(options.title.clone())
-                .with_inner_size(winit::dpi::LogicalSize::new(options.renderer_options.resolution[0], options.renderer_options.resolution[1]))
+                .with_inner_size(winit::dpi::LogicalSize::new(options.resolution[0], options.resolution[1]))
                 .build(event_loop)
                 .expect("Window creation failed"),
             surface : None
