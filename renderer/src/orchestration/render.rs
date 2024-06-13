@@ -2,59 +2,28 @@ use std::{ffi::CString, mem::ManuallyDrop, slice, sync::Arc};
 
 use ash::vk;
 use egui::ahash::HashMapExt;
-use egui_winit::winit::event::WindowEvent;
 use nohash_hasher::IntMap;
 use puffin::profile_scope;
 
-use crate::{application::RendererError, orchestration::rendering::RenderingContextImpl, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, framebuffer::Framebuffer, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
+use crate::{application::RendererError, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, framebuffer::Framebuffer, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
 
-use super::rendering::{Renderer, RendererFn, RenderingContext};
+use super::rendering::{Renderable, RenderingContext, RenderingContextImpl};
 
-
-pub struct Orchestrator {
+pub struct RendererCallbacks {
     context : Arc<Context>,
-    renderers : Vec<RendererFn>,
-    update_order : Vec<usize>,
-    render_order : Vec<usize>,
 }
-impl Orchestrator {
-    /// Creates a new orchestrator. This object is in charge of preparing Vulkan structures for rendering
-    /// as well as the way command buffers will be recorded and executed.
+impl RendererCallbacks {
     pub fn new(context : Arc<Context>) -> Self {
         Self {
             context,
-            renderers : vec![],
-            update_order : vec![],
-            render_order : vec![]
         }
     }
 
-    pub fn update_order(mut self, order : &[usize]) -> Self {
-        self.update_order = order.to_vec();
-        self
-    }
-
-    pub fn render_order(mut self, order : &[usize]) -> Self {
-        self.render_order = order.to_vec();
-        self
-    }
-
-    /// Adds a renderable to this orchestrator. See the documentation on [`Renderer`] for more informations.
-    pub fn add_renderer(mut self, renderer : RendererFn, update_order : Option<usize>, render_order : Option<usize>) -> Self {
-        self.renderers.push(renderer);
-        self.render_order.push(render_order.unwrap_or(self.render_order.len()));
-        self.update_order.push(update_order.unwrap_or(self.update_order.len()));
-        self
-    }
-
-    pub fn build(&self,
+    pub fn build(self,
         options : RendererOptions,
         window : Window,
         device_extensions : Vec<CString>,
-    ) -> RendererOrchestrator {
-        assert_eq!(self.renderers.len(), self.render_order.len());
-        assert_eq!(self.renderers.len(), self.update_order.len());
-
+    ) -> Renderer {
         let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &options, device_extensions);
 
         let context = Arc::new(RenderingContextImpl {
@@ -71,23 +40,22 @@ impl Orchestrator {
 
         let swapchain = Swapchain::new(&context, &options, vec![graphics_queue, presentation_queue]);
 
-        let (renderers, framebuffers, frames) = self.create_frame_data(&swapchain, &context);
-        
-        RendererOrchestrator {
+        let mut frames = Vec::<FrameData>::with_capacity(swapchain.image_count());
+        for i in 0..swapchain.image_count() {
+            frames.push(FrameData::new(i, &context));
+        }
+
+        Renderer {
             context,
             swapchain : ManuallyDrop::new(swapchain),
 
-            renderers,
-            render_order : self.render_order.clone(),
-            update_order : self.update_order.clone(),
-
-            framebuffers,
+            framebuffers : vec![],
             frames,
             frame_index : 0,
-            image_index : 0
+            image_index : 0,
         }
     }
-
+    
     fn create_device(&self, window : &Window, settings : &RendererOptions, device_extensions : Vec<CString>)
         -> (LogicalDevice, QueueFamily, QueueFamily, QueueFamily)
     {
@@ -105,7 +73,7 @@ impl Orchestrator {
         let device = physical_device.create_logical_device(
             &self.context,
             queue_families.iter()
-                .map(|queue : &QueueFamily| ((settings.get_queue_count)(queue), queue))
+                .map(|queue| ((settings.get_queue_count)(queue), queue))
                 .collect::<Vec<_>>(),
             |_index, _family| 1.0_f32,
             &device_extensions,
@@ -115,72 +83,39 @@ impl Orchestrator {
 
         (device, graphics_queue, presentation_queue, transfer_queue)
     }
-
-    fn create_frame_data(&self, swapchain : &Swapchain, context : &RenderingContext) -> (Vec<Box<dyn Renderer>>, Vec<Framebuffer>, Vec<FrameData>) {
-        let mut framebuffers = vec![];
-        let mut created_renderers = vec![];
-        let renderer_count = self.renderers.len();
-        for renderer in &self.renderers {
-            let renderer = renderer(context, swapchain);
-
-            framebuffers.extend(renderer.create_framebuffers(&swapchain));
-            created_renderers.push(renderer);
-        }
-
-        assert_eq!(renderer_count * swapchain.image_count(), framebuffers.len());
-
-        // Create frame data
-        let frames = {
-            let mut frames = Vec::<FrameData>::with_capacity(swapchain.image_count());
-            for i in 0..swapchain.image_count() {
-                frames.push(FrameData::new(i, &context));
-            }
-            frames
-        };
-
-        (created_renderers, framebuffers, frames)
-    }
 }
 
-pub struct RendererOrchestrator {
+pub struct Renderer {
     pub context : RenderingContext,
     pub swapchain : ManuallyDrop<Swapchain>,
 
-    renderers : Vec<Box<dyn Renderer>>,
-    render_order : Vec<usize>,
-    update_order : Vec<usize>,
-    // This should be a bidimensional array but for the sake of memory layout, we use a single dimensional array.
-    // The layout is effectively [renderer 1's framebuffers], [renderer 2's framebuffers], ...
-    framebuffers : Vec<Framebuffer>,
-    
+    // renderers : Vec<&'a dyn Renderable>,
+
+    pub framebuffers : Vec<Framebuffer>, // Code smell, this should be private
     frames : Vec<FrameData>,
-    image_index : usize,
     frame_index : usize,
+    image_index : usize,
 }
-impl RendererOrchestrator {
-    pub fn update(&mut self) {
-        for i in &self.update_order {
-            self.renderers[*i].update();
-        }
+impl Renderer {
+    #[inline] pub fn builder(context : Arc<Context>) -> RendererCallbacks {
+        RendererCallbacks::new(context)
     }
 
-    pub fn draw_frame(&mut self) -> Result<(), RendererError> {
-        profile_scope!("Application rendering");
+    pub fn draw_frame(&mut self, renderers : Vec<&mut dyn Renderable>) -> Result<(), RendererError> {
+        profile_scope!("Frame draw calls");
 
         let (image_acquired, _) = self.acquire_image()?;
         let frame = &self.frames[self.frame_index];
 
+        let mut i = 0;
         frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        for i in &self.render_order {
-            let renderer = &mut self.renderers[*i];
-            profile_scope!("Renderer ", renderer.marker_data().0);
+        for renderer in renderers {
+            profile_scope!("Renderer draw calls", renderer.marker_data().0);
 
             let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
-
-            let marker_data = renderer.marker_data();
-            frame.cmd.begin_label(marker_data.0, marker_data.1);
             renderer.record_commands(&self.swapchain, framebuffer, frame);
-            frame.cmd.end_label();
+
+            i += 1;
         }
         frame.cmd.end();
 
@@ -188,21 +123,6 @@ impl RendererOrchestrator {
         self.present_frame(signal_semaphore)?;
 
         Ok(())
-    }
-
-    pub fn handle_event(&mut self, event : &WindowEvent) {
-        profile_scope!("Event handling");
-
-        let mut repaint_instructions = Vec::<bool>::with_capacity(self.renderers.len());
-        for i in 0..self.renderers.len() {
-            let event_response = self.renderers[i].handle_event(event);
-            repaint_instructions.push(event_response.repaint);
-            if event_response.consumed {
-                break;
-            }
-        }
-
-        // TOOD: do somethign with the repaint instructions.
     }
 
     fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {
@@ -279,7 +199,7 @@ impl RendererOrchestrator {
         }
     }
 
-    pub fn recreate_swapchain(&mut self) {
+    pub fn recreate_swapchain(&mut self, renderers : Vec<&dyn Renderable>) {
         self.context.device.wait_idle();
 
         self.framebuffers.clear();
@@ -294,7 +214,7 @@ impl RendererOrchestrator {
             self.context.presentation_queue
         ]));
 
-        for renderer in &mut self.renderers {
+        for renderer in renderers {
             self.framebuffers.extend(renderer.create_framebuffers(&self.swapchain));
         }
 
@@ -305,4 +225,12 @@ impl RendererOrchestrator {
 
         // I think that's it? Everything should drop.
     }
+}
+
+pub trait RendererAPI {
+    fn is_minimized(&self) -> bool;
+
+    fn recreate_swapchain(&mut self);
+
+    fn wait_idle(&self);
 }

@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-use egui_winit::winit::event::WindowEvent;
-use egui_winit::EventResponse;
-
 use crate::vk::context::Context;
 use crate::vk::frame_data::FrameData;
 use crate::vk::framebuffer::Framebuffer;
@@ -13,7 +10,7 @@ use crate::vk::swapchain::Swapchain;
 use crate::window::Window;
 
 /// A renderer is effectively a type that declares the need to work with its own render pass.
-pub trait Renderer {
+pub trait Renderable {
     /// Returns a recorded command buffer that contains all the commands needed to render the contents of this renderer.
     /// 
     /// # Arguments
@@ -32,12 +29,6 @@ pub trait Renderer {
 
     /// Returns a debug marker used with [`ash::vk::DebugUtilsLabelEXT`].
     fn marker_data<'a>(&self) -> (&'a str, [f32; 4]);
-
-    fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
-        EventResponse { repaint : false, consumed : false }
-    }
-
-    fn update(&mut self) { }
 }
 
 pub struct RenderingContextImpl {
@@ -53,4 +44,4 @@ pub struct RenderingContextImpl {
 }
 pub type RenderingContext = Arc<RenderingContextImpl>;
 
-pub type RendererFn = fn(context : &RenderingContext, swapchain : &Swapchain) -> Box<dyn Renderer>;
+pub type RendererFn = fn(context : &RenderingContext, swapchain : &Swapchain) -> Box<dyn Renderable>;

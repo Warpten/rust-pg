@@ -2,7 +2,7 @@ use std::mem::{offset_of, size_of};
 
 use ash::vk;
 use puffin::profile_scope;
-use renderer::{orchestration::rendering::{Renderer, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use renderer::{orchestration::rendering::{Renderable, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -33,7 +33,7 @@ impl Vertex for TerrainVertex {
     }
 }
 
-impl Renderer for GeometryRenderer {
+impl Renderable for GeometryRenderer {
     fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
         let mut framebuffers = vec![];
         for image in &swapchain.images {

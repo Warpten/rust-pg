@@ -6,11 +6,13 @@ use egui::Context;
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
-use renderer::gui::context::{Interface, InterfaceOptions};
-use renderer::orchestration::orchestrator::Orchestrator;
+use renderer::gui::context::{InterfaceRenderer, InterfaceOptions};
+use renderer::orchestration::render::{Renderer, RendererAPI};
+use renderer::orchestration::rendering::Renderable;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
+use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
 use winit::event::WindowEvent;
 
@@ -20,47 +22,70 @@ mod theming;
 mod rendering;
 
 pub struct ApplicationData {
+    renderer : Renderer,
+    geometry : GeometryRenderer,
+    interface : InterfaceRenderer<InterfaceState>,
+}
+impl RendererAPI for ApplicationData {
+    fn is_minimized(&self) -> bool { self.renderer.context.window.is_minimized() }
+
+    fn recreate_swapchain(&mut self) {
+        self.renderer.recreate_swapchain(vec![
+            &self.geometry,
+            &self.interface
+        ]);
+    }
+
+    fn wait_idle(&self) { self.renderer.context.device.wait_idle() }
 }
 
-fn setup(app : &mut Application) -> ApplicationData {
-    ApplicationData { }
+fn setup(app : &mut Application, window : Window) -> ApplicationData {
+    let renderer = RendererOptions::default()
+        .line_width(DynamicState::Fixed(1.0f32))
+        .multisampling(vk::SampleCountFlags::TYPE_4);
+
+    let mut renderer = Renderer::builder(app.context.clone())
+        .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()]);
+
+    ApplicationData {
+        geometry : {
+            let slf = GeometryRenderer::supplier(&renderer.swapchain, &renderer.context, false);
+            renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
+            slf
+        },
+        interface : {
+            let _theme = theming::themes::StandardDark{};
+            let style = egui::Style::default(); // _theme.custom_style();
+
+            let mut fonts = FontDefinitions::default();
+            load_fonts(&mut fonts, &None, "./assets/fonts");
+            for (k, v) in &fonts.families { println!("Loaded {:?} {:?}", k, v); }
+
+            let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| state.render(ctx))
+                .fonts(fonts)
+                .style(style);
+
+            let slf = InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options);
+            renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
+            slf
+        },
+
+        renderer, // Dead last to avoid moved-from borrow issues
+    }
 }
 
 fn prepare() -> ApplicationOptions {
     ApplicationOptions::default()
         .title("Send help")
-        .device_extension(ash::khr::swapchain::NAME.to_owned())
-        .renderer(RendererOptions::default()
-            .line_width(DynamicState::Fixed(1.0f32))
-            .resolution([1280, 720])
-            .multisampling(vk::SampleCountFlags::TYPE_4)
-        )
-        .orchestrator(|context| {
-            Orchestrator::new(context)
-                .add_renderer(|ctx, swapchain| Box::new(GeometryRenderer::supplier(swapchain, ctx, false)), None, None)
-                .add_renderer(|ctx, swapchain| {
-                    let _theme = theming::themes::StandardDark{};
-                    let style = egui::Style::default(); // _theme.custom_style();
-
-                    let mut fonts = FontDefinitions::default();
-                    load_fonts(&mut fonts, &None, "./assets/fonts");
-                    for (k, v) in &fonts.families { println!("Loaded {:?} {:?}", k, v); }
-
-                    let options = InterfaceOptions::default(render_interface)
-                        .fonts(fonts)
-                        .style(style);
-
-                    Box::new(Interface::new(swapchain, ctx, true, options))
-                }, None, None)
-        })
+        .resolution([1280, 720])
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
-    app.orchestrator.draw_frame()
+    data.renderer.draw_frame(vec![&mut data.geometry, &mut data.interface])
 }
 
 pub fn window_event(app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {
-    _ = app.orchestrator.handle_event(&event);
+    _ = data.interface.egui.on_window_event(data.renderer.context.window.handle(), event)
 }
 
 fn main() {
@@ -69,10 +94,6 @@ fn main() {
         .render(render)
         .window_event(window_event)
         .run();
-}
-
-#[inline] fn render_interface(ctx : &Context, state : &mut InterfaceState) {
-    state.render(ctx);
 }
 
 fn load_fonts<P>(def : &mut FontDefinitions, mut family : &Option<FontFamily>, dir : P) where P : AsRef<Path> {

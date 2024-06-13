@@ -8,7 +8,7 @@ use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, U
 use egui_winit::winit::event::WindowEvent;
 use egui_winit::EventResponse;
 use puffin::profile_scope;
-use crate::orchestration::rendering::{Renderer, RenderingContext};
+use crate::orchestration::rendering::{Renderable, RenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
 use crate::vk::command_buffer::{BarrierPhase, CommandBuffer};
@@ -76,17 +76,13 @@ impl Vertex for InterfaceVertex {
     }
 }
 
-impl<T : Default> Renderer for Interface<T> {
+impl<T : Default> Renderable for InterfaceRenderer<T> {
     fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
         let mut framebuffers = vec![];
         for image in &swapchain.images {
             framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
         }
         framebuffers
-    }
-
-    fn handle_event(&mut self, event : &WindowEvent) -> EventResponse {
-        self.egui.on_window_event(self.rendering_context.window.handle(), event)
     }
 
     fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
@@ -121,9 +117,9 @@ pub struct InterfaceFrameData {
 
 type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
 
-pub struct Interface<State : Default> {
+pub struct InterfaceRenderer<State : Default> {
     egui_ctx : Context,
-    egui : egui_winit::State,
+    pub egui : egui_winit::State,
 
     // Rendering data structures
     rendering_context : RenderingContext,
@@ -167,7 +163,7 @@ impl<S> InterfaceOptions<S> {
     }
 }
 
-impl<State : Default> Interface<State> {
+impl<State : Default> InterfaceRenderer<State> {
     fn create_render_pass(swapchain : &Swapchain, is_presenting : bool, context : &RenderingContext) -> RenderPass {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
@@ -258,7 +254,7 @@ impl<State : Default> Interface<State> {
         context : &RenderingContext,
         is_presenting : bool,
         options : InterfaceOptions<State>
-    ) -> Interface<State> {
+    ) -> InterfaceRenderer<State> {
         let render_pass = Self::create_render_pass(swapchain, is_presenting, context);
 
         let egui = egui_winit::State::new(options.context.clone(),
@@ -322,7 +318,7 @@ impl<State : Default> Interface<State> {
 }
 
 // Actual user API
-impl<State : Default> Interface<State> {
+impl<State : Default> InterfaceRenderer<State> {
     pub fn begin_frame(&mut self, window : &Window) {
         let raw_input = self.egui.take_egui_input(window.handle());
         self.egui_ctx.begin_frame(raw_input);

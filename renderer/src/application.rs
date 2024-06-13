@@ -2,34 +2,15 @@ use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 
-use crate::orchestration::orchestrator::{Orchestrator, RendererOrchestrator};
-use crate::vk::{context::Context, renderer::RendererOptions};
+use crate::orchestration::render::RendererAPI;
+use crate::vk::context::Context;
 use crate::window::Window;
-
-type OrchestratorFn = fn(Arc<Context>) -> Orchestrator;
 
 pub struct ApplicationOptions {
     pub title : String,
-    pub renderer_options : RendererOptions,
-    pub device_extensions : Vec<CString>,
     pub instance_extensions : Vec<CString>,
-    pub orchestrator : OrchestratorFn,
+    pub resolution : [u32; 2],
 }
-
-impl Default for ApplicationOptions {
-    fn default() -> Self {
-        Self {
-            title: "WorldEdit".to_owned(),
-
-            orchestrator : Orchestrator::new,
-
-            renderer_options: Default::default(),
-            device_extensions : vec![],
-            instance_extensions : vec![],
-        }
-    }
-}
-
 impl ApplicationOptions {
     #[inline] pub fn title(mut self, title : impl Into<String>) -> Self {
         self.title = title.into();
@@ -41,13 +22,20 @@ impl ApplicationOptions {
         self
     }
 
-    #[inline] pub fn device_extension(mut self, value : CString) -> Self {
-        self.device_extensions.push(value);
+    #[inline] pub fn resolution(mut self, res : [u32; 2]) -> Self {
+        self.resolution = res;
         self
     }
+}
+impl Default for ApplicationOptions {
+    fn default() -> Self {
+        Self {
+            title: "WorldEdit".to_owned(),
 
-    value_builder! { renderer, renderer_options, RendererOptions }
-    value_builder! { orchestrator, orchestrator, OrchestratorFn }
+            resolution : [1280, 720],
+            instance_extensions : vec![],
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -56,7 +44,7 @@ pub enum RendererError {
 }
 
 pub type PrepareFn = fn() -> ApplicationOptions;
-pub type SetupFn<T> = fn(&mut Application) -> T;
+pub type SetupFn<T> = fn(&mut Application, Window) -> T;
 pub type UpdateFn<T> = fn(&mut Application, &mut T);
 pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), RendererError>;
 pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
@@ -78,7 +66,7 @@ pub struct ApplicationCallbacks<State : 'static> {
     pub render : RenderFn<State>,
 }
 
-impl<T> ApplicationBuilder<T> {
+impl<T : RendererAPI> ApplicationBuilder<T> {
     pub fn prepare(mut self, prepare: PrepareFn) -> Self {
         self.prepare = Some(prepare);
         self
@@ -105,7 +93,7 @@ impl<T> ApplicationBuilder<T> {
 }
 
 #[allow(dead_code, unused)]
-fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
+fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>) {
     let event_loop = EventLoop::new().unwrap();
 
     let builder = ApplicationCallbacks {
@@ -118,8 +106,8 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
     let mut settings = (builder.prepare)();
 
-    let mut app = Application::new(settings, &event_loop);
-    let mut app_data = (builder.setup)(&mut app);
+    let (mut app, window) = Application::new(settings, &event_loop);
+    let mut app_data = (builder.setup)(&mut app, window);
     let mut dirty_swapchain = false;
 
     let now = SystemTime::now();
@@ -128,9 +116,9 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
 
-        if !app.orchestrator.context.window.is_minimized() {
+        if !app_data.is_minimized() {
             if dirty_swapchain {
-                app.recreate_swapchain();
+                app_data.recreate_swapchain();
                 dirty_swapchain = false;
             }
 
@@ -157,7 +145,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::Suspended => println!("Suspended."),
                 Event::Resumed => println!("Resumed."),
-                Event::LoopExiting => app.orchestrator.context.device.wait_idle(),
+                Event::LoopExiting => app_data.wait_idle(),
                 _ => { }
             }
         }
@@ -166,7 +154,7 @@ fn main_loop<T : 'static>(builder: ApplicationBuilder<T>) {
 
 
 pub struct Application {
-    pub orchestrator : RendererOrchestrator,
+    pub context : Arc<Context>
 }
 
 impl Application {
@@ -180,7 +168,7 @@ impl Application {
         }
     }
 
-    pub fn new(options : ApplicationOptions, event_loop : &EventLoop<()>) -> Self {
+    pub fn new(options : ApplicationOptions, event_loop : &EventLoop<()>) -> (Self, Window) {
         let mut window = Window::new(&options, event_loop);
 
         let context = Arc::new(unsafe {
@@ -193,14 +181,6 @@ impl Application {
         });
         window.create_surface(&context);
 
-        let orchestrator = (options.orchestrator)(context).build(options.renderer_options, window, options.device_extensions);
-
-        Self {
-            orchestrator,
-        }
-    }
-
-    pub fn recreate_swapchain(&mut self) {
-        self.orchestrator.recreate_swapchain();
+        (Self { context }, window)
     }
 }
