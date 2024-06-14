@@ -2,7 +2,7 @@ use std::mem::{offset_of, size_of};
 
 use ash::vk;
 use puffin::profile_scope;
-use renderer::{orchestration::rendering::{Renderable, RenderingContext}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use renderer::{orchestration::{render::Renderer, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -96,8 +96,8 @@ pub struct GeometryRenderer {
 }
 
 impl GeometryRenderer {
-    pub fn supplier(swapchain : &Swapchain, context : &RenderingContext, is_presenting : bool) -> Self {
-        let render_pass = swapchain.create_render_pass(is_presenting)
+    pub fn new(renderer : &mut Renderer, is_presenting : bool) -> Self {
+        let render_pass = renderer.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
                 0,
@@ -109,19 +109,15 @@ impl GeometryRenderer {
                 SubpassAttachment::color(0),
                 SubpassAttachment::resolve(0)
             ], None)
-            .build(context);
+            .build(&renderer.context);
 
-        Self::initialize(swapchain, context, render_pass)
-    }
-
-    pub fn initialize(swapchain : &Swapchain, context : &RenderingContext, render_pass : RenderPass) -> Self {
-        let transfer_pool = CommandPool::builder(&context.transfer_queue)
-            .build(&context);
+        let transfer_pool = CommandPool::builder(&renderer.context.transfer_queue)
+            .build(&renderer.context);
 
         let buffer = DynamicBufferBuilder::dynamic()
             .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
             .gpu_only()
-            .build(&context, &transfer_pool, &[
+            .build(&renderer.context, &transfer_pool, &[
                 TerrainVertex {
                     pos : [ 0.0f32, -0.5f32 ],
                     color : [ 1.0f32, 0.0f32, 0.0f32 ]
@@ -141,7 +137,7 @@ impl GeometryRenderer {
 
         let pipeline_layout = PipelineLayoutInfo::default()
         //     .layout(&descriptor_set_layout)
-            .build(&context);
+            .build(&renderer.context);
 
         let pipeline = PipelineInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
@@ -159,20 +155,24 @@ impl GeometryRenderer {
             .cull_mode(vk::CullModeFlags::BACK)
             .front_face(vk::FrontFace::CLOCKWISE)
             .render_pass(render_pass.handle(), 0)
-            .samples(context.options.multisampling)
+            .samples(renderer.context.options.multisampling)
             .pool()
             .vertex::<TerrainVertex>()
             .add_shader("./assets/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
             .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
-            .build(&context);
+            .build(&renderer.context);
 
-        Self {
+        let slf = Self {
             buffer,
             transfer_pool,
             // descriptor_set_layout,
             pipeline_layout,
             pipeline,
             render_pass
-        }
+        };
+
+        renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
+
+        slf
     }
 }
