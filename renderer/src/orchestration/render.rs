@@ -1,11 +1,11 @@
-use std::{cell::RefCell, ffi::CString, mem::ManuallyDrop, slice, sync::{Arc, Weak}};
+use std::{ffi::CString, mem::ManuallyDrop, slice, sync::Arc};
 
 use ash::vk;
 use egui::ahash::HashMapExt;
 use nohash_hasher::IntMap;
 use puffin::profile_scope;
 
-use crate::{application::RendererError, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, framebuffer::Framebuffer, image, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
+use crate::{application::RendererError, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
 
 use super::rendering::{Renderable, RenderingContext, RenderingContextImpl};
 
@@ -23,7 +23,7 @@ impl RendererCallbacks {
         options : RendererOptions,
         window : Window,
         device_extensions : Vec<CString>,
-    ) -> BoundRenderer {
+    ) -> Renderer {
         let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &options, device_extensions);
 
         let context = Arc::new(RenderingContextImpl {
@@ -45,7 +45,7 @@ impl RendererCallbacks {
             frames.push(FrameData::new(i, &context));
         }
 
-        BoundRenderer {
+        Renderer {
             context,
             swapchain : ManuallyDrop::new(swapchain),
 
@@ -84,7 +84,7 @@ impl RendererCallbacks {
     }
 }
 
-pub struct BoundRenderer {
+pub struct Renderer {
     pub context: RenderingContext,
     pub swapchain : ManuallyDrop<Swapchain>,
     frames : Vec<FrameData>,
@@ -92,21 +92,74 @@ pub struct BoundRenderer {
     image_index : usize,
 }
 
-impl BoundRenderer {
-    pub fn finalize(mut self, renderers : Vec<Box<&mut dyn Renderable>>) -> Renderer {
-        let mut framebuffers = vec![];
-        for renderer in &renderers {
-            framebuffers.extend(renderer.create_framebuffers(&self.swapchain));
+pub struct RendererUpdater<'a> {
+    renderer : &'a mut Renderer,
+    objects : Vec<&'a mut dyn Renderable>,
+}
+impl RendererUpdater<'_> {
+    pub fn recreate_swapchain(&mut self) {
+        self.renderer.context.device.wait_idle();
+        self.renderer.frames.clear();
+
+        unsafe {
+            ManuallyDrop::drop(&mut self.renderer.swapchain);
         }
 
-        Renderer {
-            implementation : self,
-            framebuffers,
-            renderers
+        self.renderer.swapchain = ManuallyDrop::new(Swapchain::new(&self.renderer.context, &self.renderer.context.options, vec![
+            self.renderer.context.graphics_queue,
+            self.renderer.context.presentation_queue
+        ]));
+
+        for renderer in &mut self.objects {
+            renderer.create_framebuffers(&self.renderer.swapchain);
+        }
+
+        self.renderer.frames = Vec::<FrameData>::with_capacity(self.renderer.swapchain.image_count());
+        for i in 0..self.renderer.swapchain.image_count() {
+            self.renderer.frames.push(FrameData::new(i, &self.renderer.context));
         }
     }
 
-    pub fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {
+    pub fn draw(&mut self) -> Result<(), RendererError> {
+        profile_scope!("Frame draw calls");
+
+        let (image_acquired, _) = self.renderer.acquire_image()?;
+        let frame = &self.renderer.frames[self.renderer.frame_index];
+
+        frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        for renderer in &mut self.objects {
+            let marker = renderer.marker_data();
+
+            profile_scope!("Renderer draw calls", marker.0);
+
+            frame.cmd.begin_label(marker.0, marker.1);
+            renderer.record_commands(&self.renderer.swapchain, frame);
+            frame.cmd.end_label();
+        }
+        frame.cmd.end();
+
+        self.renderer.end_frame(image_acquired)
+    }
+}
+
+impl Renderer {
+    pub fn builder(context : Arc<Context>) -> RendererCallbacks {
+        RendererCallbacks::new(context)
+    }
+
+    /// Returns an updatability handling type that provides methods to properly manipulate rendering.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `renderers` - An array of renderables to associate with this renderer.
+    pub fn updater<'a>(&'a mut self, renderers : Vec<&'a mut dyn Renderable>) -> RendererUpdater<'a> {
+        RendererUpdater::<'a> {
+            objects : renderers,
+            renderer : self,
+        }
+    }
+
+    fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {
         profile_scope!("Frame acquisition");
 
         self.context.device.wait_for_fence(self.frames[self.frame_index].in_flight);
@@ -133,14 +186,7 @@ impl BoundRenderer {
         Ok((acquired_semaphore, self.frame_index))
     }
 
-    pub(in crate) fn begin_frame(&mut self) -> Result<(vk::Semaphore, &FrameData), RendererError>{
-        let (image_acquired, _) = self.acquire_image()?;
-        let frame = &self.frames[self.frame_index];
-
-        Ok((image_acquired, frame))
-    }
-
-    pub(in crate) fn end_frame(&mut self, image_acquired : vk::Semaphore) -> Result<(), RendererError> {
+    fn end_frame(&mut self, image_acquired : vk::Semaphore) -> Result<(), RendererError> {
         let signal_semaphore = self.submit_frame(&[(image_acquired, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]);
         self.present_frame(signal_semaphore)
     }
@@ -189,75 +235,6 @@ impl BoundRenderer {
                 Err(vk::Result::SUBOPTIMAL_KHR) => Err(RendererError::InvalidSwapchain),
                 Err(error) => panic!("Error while presenting frame: {:?}", error)
             }
-        }
-    }
-}
-
-pub struct Renderer<'me> {
-    pub implementation : BoundRenderer,
-
-    framebuffers : Vec<Framebuffer>,
-    renderers : Vec<Box<&'me mut dyn Renderable>>,
-}
-impl<'me> Renderer<'me> {
-    #[inline] pub fn builder(context : Arc<Context>) -> RendererCallbacks {
-        RendererCallbacks::new(context)
-    }
-
-    pub fn register(&mut self, renderer : Box<&'me mut dyn Renderable>){
-        self.renderers.push(renderer);
-    }
-
-    pub fn draw_frame(&mut self) -> Result<(), RendererError> {
-        profile_scope!("Frame draw calls");
-
-        let frame_count = self.implementation.frames.len();
-        let frame_index = self.implementation.frame_index;
-
-        let (image_acquired, _) = self.implementation.acquire_image()?;
-        let frame = &self.implementation.frames[self.implementation.frame_index];
-
-        let mut i = 0;
-        frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        for renderer in &mut self.renderers {
-            let marker = renderer.marker_data();
-
-            profile_scope!("Renderer draw calls", marker.0);
-
-            frame.cmd.begin_label(marker.0, marker.1);
-            let framebuffer = &self.framebuffers[frame_count * i + frame_index];
-            renderer.record_commands(&self.implementation.swapchain, framebuffer, frame);
-            frame.cmd.end_label();
-
-            i += 1;
-        }
-        frame.cmd.end();
-
-        self.implementation.end_frame(image_acquired)
-    }
-
-    pub fn recreate_swapchain(&mut self) {
-        self.implementation.context.device.wait_idle();
-
-        self.framebuffers.clear();
-        self.implementation.frames.clear();
-
-        unsafe {
-            ManuallyDrop::drop(&mut self.implementation.swapchain);
-        }
-
-        self.implementation.swapchain = ManuallyDrop::new(Swapchain::new(&self.implementation.context, &self.implementation.context.options, vec![
-            self.implementation.context.graphics_queue,
-            self.implementation.context.presentation_queue
-        ]));
-
-        for renderer in &mut self.renderers {
-            self.framebuffers.extend(renderer.create_framebuffers(&self.implementation.swapchain));
-        }
-
-        self.implementation.frames = Vec::<FrameData>::with_capacity(self.implementation.swapchain.image_count());
-        for i in 0..self.implementation.swapchain.image_count() {
-            self.implementation.frames.push(FrameData::new(i, &self.implementation.context));
         }
     }
 }

@@ -1,14 +1,11 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
 use std::slice;
-use std::sync::Arc;
 use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
-use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, Ui, ViewportId};
+use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
 use puffin::profile_scope;
-use crate::orchestration::render::Renderer;
 use crate::orchestration::rendering::{Renderable, RenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
@@ -78,18 +75,17 @@ impl Vertex for InterfaceVertex {
 }
 
 impl<T : Default> Renderable for InterfaceRenderer<T> {
-    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
-        let mut framebuffers = vec![];
+    fn create_framebuffers(&mut self, swapchain : &Swapchain) {
         for image in &swapchain.images {
-            framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
+            self.framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
         }
-        framebuffers
     }
 
-    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
+    fn record_commands(&mut self, swapchain : &Swapchain, frame : &FrameData) {
         profile_scope!("GUI command recording");
         
         let window = &self.rendering_context.window;
+        let scale_factor = window.handle().scale_factor();
 
         let raw_input = self.egui.take_egui_input(window.handle());
         self.egui_ctx.begin_frame(raw_input);
@@ -99,8 +95,9 @@ impl<T : Default> Renderable for InterfaceRenderer<T> {
         let output = self.egui_ctx.end_frame();
         self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
 
-        let clipped_meshes = self.egui_ctx.tessellate(output.shapes, self.scale_factor as _);
-        self.paint(&frame.cmd, swapchain, framebuffer, frame.index, clipped_meshes, output.textures_delta);
+
+        let clipped_meshes = self.egui_ctx.tessellate(output.shapes, scale_factor as _);
+        self.paint(&frame.cmd, swapchain, frame.index, clipped_meshes, output.textures_delta);
     }
 
     fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
@@ -127,6 +124,7 @@ pub struct InterfaceRenderer<State : Default> {
     _pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     command_pool : CommandPool,
+    framebuffers : Vec<Framebuffer>,
     frame_data : Vec<InterfaceFrameData>,
     render_pass : RenderPass,
     pub scale_factor : f64,
@@ -308,12 +306,20 @@ impl<State : Default> InterfaceRenderer<State> {
             scale_factor : context.window.handle().scale_factor(),
 
             textures : HashMap::default(),
-            render_pass,
 
             state : State::default(),
             // visualizer : AllocatorVisualizer::new(),
 
             delegate : options.delegate,
+            
+            framebuffers : {
+                let mut framebuffers = vec![];
+                for image in &swapchain.images {
+                    framebuffers.push(render_pass.create_framebuffer(swapchain, image));
+                }
+                framebuffers
+            },
+            render_pass,
         }
     }
 }
@@ -335,7 +341,6 @@ impl<State : Default> InterfaceRenderer<State> {
     pub fn paint(&mut self,
         cmd : &CommandBuffer,
         swapchain : &Swapchain,
-        framebuffer : &Framebuffer,
         swapchain_image_index : usize,
         clipped_meshes : Vec<egui::ClippedPrimitive>,
         texture_delta : TexturesDelta
@@ -351,7 +356,7 @@ impl<State : Default> InterfaceRenderer<State> {
         let mut vertex_buffer = frame_data.vertex_buffer.map();
         let mut index_buffer = frame_data.index_buffer.map();
 
-        cmd.begin_render_pass(&self.render_pass, framebuffer, vk::Rect2D {
+        cmd.begin_render_pass(&self.render_pass, &self.framebuffers[swapchain_image_index], vk::Rect2D {
             extent : swapchain.extent,
             offset : vk::Offset2D { x : 0, y : 0 }
         }, &[], vk::SubpassContents::INLINE);
