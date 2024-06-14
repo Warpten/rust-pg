@@ -5,9 +5,7 @@ use ash::prelude::VkResult;
 
 use crate::orchestration::rendering::RenderingContext;
 use crate::{make_handle, window::Window};
-use crate::vk::context::Context;
 use crate::vk::image::Image;
-use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
 use crate::vk::render_pass::RenderPass;
 

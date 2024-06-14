@@ -7,8 +7,6 @@ use ash::vk::{self};
 use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, Ui, ViewportId};
-use egui_winit::winit::event::WindowEvent;
-use egui_winit::EventResponse;
 use puffin::profile_scope;
 use crate::orchestration::render::Renderer;
 use crate::orchestration::rendering::{Renderable, RenderingContext};
@@ -253,27 +251,28 @@ impl<State : Default> InterfaceRenderer<State> {
     }
 
     pub fn new(
-        renderer : &mut Renderer,
+        swapchain : &Swapchain,
+        context : &RenderingContext,
         is_presenting : bool,
         options : InterfaceOptions<State>
-    ) -> Arc<RefCell<InterfaceRenderer<State>>> {
-        let render_pass = Self::create_render_pass(&renderer.swapchain, is_presenting, &renderer.context);
+    ) -> InterfaceRenderer<State> {
+        let render_pass = Self::create_render_pass(&swapchain, is_presenting, &context);
 
         let egui = egui_winit::State::new(options.context.clone(),
             ViewportId::ROOT,
-            renderer.context.window.handle(),
-            Some(renderer.context.window.handle().scale_factor() as f32),
-            Some(renderer.context.device.physical_device.properties.limits.max_image_dimension2_d as usize));
+            context.window.handle(),
+            Some(context.window.handle().scale_factor() as f32),
+            Some(context.device.physical_device.properties.limits.max_image_dimension2_d as usize));
 
         // Create a descriptor pool.
-        let descriptor_set_layouts = (0..renderer.swapchain.image_count()).map(|_|
+        let descriptor_set_layouts = (0..swapchain.image_count()).map(|_|
             DescriptorSetLayout::builder()
                 .sets(1024)
                 .binding(0, vk::DescriptorType::COMBINED_IMAGE_SAMPLER, vk::ShaderStageFlags::FRAGMENT, 1)
-                .build(&renderer.context)
+                .build(&context)
         ).collect::<Vec<_>>();
 
-        let (_pipeline_layout, pipeline) = Self::create_pipeline(&descriptor_set_layouts, &renderer.context, &render_pass);
+        let (_pipeline_layout, pipeline) = Self::create_pipeline(&descriptor_set_layouts, context, &render_pass);
 
         let sampler = Sampler::builder()
             .address_mode(vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE, vk::SamplerAddressMode::CLAMP_TO_EDGE)
@@ -281,24 +280,24 @@ impl<State : Default> InterfaceRenderer<State> {
             .filter(vk::Filter::LINEAR, vk::Filter::LINEAR)
             .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
             .lod(0.0, vk::LOD_CLAMP_NONE)
-            .build(&renderer.context);
-        renderer.context.device.set_handle_name(sampler.handle(), &"GUI Sampler".to_owned());
+            .build(&context);
+        context.device.set_handle_name(sampler.handle(), &"GUI Sampler".to_owned());
 
         let mut frame_data = vec![];
         for descriptor_set_layout in descriptor_set_layouts.into_iter() {
-            frame_data.push(Self::create_frame_data(&renderer.context, descriptor_set_layout));
+            frame_data.push(Self::create_frame_data(&context, descriptor_set_layout));
         }
 
-        let graphics_queue = renderer.context.device.get_queue(QueueAffinity::Graphics, 0).unwrap();
+        let graphics_queue = context.device.get_queue(QueueAffinity::Graphics, 0).unwrap();
         let command_pool = CommandPool::builder(graphics_queue.family())
             .reset()
-            .build(&renderer.context);
+            .build(&context);
 
-        let slf = Self {
+        Self {
             egui_ctx : options.context,
             egui,
             
-            rendering_context : renderer.context.clone(),
+            rendering_context : context.clone(),
             _pipeline_layout,
             pipeline,
 
@@ -306,7 +305,7 @@ impl<State : Default> InterfaceRenderer<State> {
             sampler,
             command_pool,
 
-            scale_factor : renderer.context.window.handle().scale_factor(),
+            scale_factor : context.window.handle().scale_factor(),
 
             textures : HashMap::default(),
             render_pass,
@@ -315,12 +314,7 @@ impl<State : Default> InterfaceRenderer<State> {
             // visualizer : AllocatorVisualizer::new(),
 
             delegate : options.delegate,
-        };
-        renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
-
-        let slf = Arc::new(RefCell::new(slf));
-        renderer.register(&slf);
-        slf
+        }
     }
 }
 

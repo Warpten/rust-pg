@@ -5,7 +5,7 @@ use egui::ahash::HashMapExt;
 use nohash_hasher::IntMap;
 use puffin::profile_scope;
 
-use crate::{application::RendererError, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, framebuffer::Framebuffer, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
+use crate::{application::RendererError, traits::handle::Handle, vk::{context::Context, frame_data::FrameData, framebuffer::Framebuffer, image, logical_device::LogicalDevice, queue::{QueueAffinity, QueueFamily}, renderer::RendererOptions, swapchain::Swapchain}, window::Window};
 
 use super::rendering::{Renderable, RenderingContext, RenderingContextImpl};
 
@@ -23,7 +23,7 @@ impl RendererCallbacks {
         options : RendererOptions,
         window : Window,
         device_extensions : Vec<CString>,
-    ) -> Renderer {
+    ) -> BoundRenderer {
         let (device, graphics_queue, presentation_queue, transfer_queue) = self.create_device(&window, &options, device_extensions);
 
         let context = Arc::new(RenderingContextImpl {
@@ -45,13 +45,10 @@ impl RendererCallbacks {
             frames.push(FrameData::new(i, &context));
         }
 
-        Renderer {
+        BoundRenderer {
             context,
             swapchain : ManuallyDrop::new(swapchain),
 
-            renderers : vec![],
-
-            framebuffers : vec![],
             frames,
             frame_index : 0,
             image_index : 0,
@@ -87,53 +84,29 @@ impl RendererCallbacks {
     }
 }
 
-pub struct Renderer {
-    pub context : RenderingContext,
+pub struct BoundRenderer {
+    pub context: RenderingContext,
     pub swapchain : ManuallyDrop<Swapchain>,
-
-    renderers : Vec<Weak<RefCell<dyn Renderable>>>,
-
-    pub framebuffers : Vec<Framebuffer>, // Code smell, this should be private
     frames : Vec<FrameData>,
     frame_index : usize,
     image_index : usize,
 }
-impl Renderer {
-    #[inline] pub fn builder(context : Arc<Context>) -> RendererCallbacks {
-        RendererCallbacks::new(context)
-    }
 
-    pub fn register(&mut self, renderer : &Arc<RefCell<dyn Renderable>>) {
-        self.renderers.push(Arc::downgrade(renderer));
-    }
-
-    pub fn draw_frame(&mut self) -> Result<(), RendererError> {
-        profile_scope!("Frame draw calls");
-
-        let (image_acquired, _) = self.acquire_image()?;
-        let frame = &self.frames[self.frame_index];
-
-        let mut i = 0;
-        frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        for renderer in &mut self.renderers {
-            let renderer = renderer.upgrade().unwrap();
-
-            profile_scope!("Renderer draw calls", renderer.marker_data().0);
-
-            let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
-            renderer.borrow_mut().record_commands(&self.swapchain, framebuffer, frame);
-
-            i += 1;
+impl BoundRenderer {
+    pub fn finalize(mut self, renderers : Vec<Box<&mut dyn Renderable>>) -> Renderer {
+        let mut framebuffers = vec![];
+        for renderer in &renderers {
+            framebuffers.extend(renderer.create_framebuffers(&self.swapchain));
         }
-        frame.cmd.end();
 
-        let signal_semaphore = self.submit_frame(&[(image_acquired, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]);
-        self.present_frame(signal_semaphore)?;
-
-        Ok(())
+        Renderer {
+            implementation : self,
+            framebuffers,
+            renderers
+        }
     }
 
-    fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {
+    pub fn acquire_image(&mut self) -> Result<(vk::Semaphore, usize), RendererError> {
         profile_scope!("Frame acquisition");
 
         self.context.device.wait_for_fence(self.frames[self.frame_index].in_flight);
@@ -158,6 +131,18 @@ impl Renderer {
         self.context.device.reset_fences(slice::from_ref(&self.frames[self.frame_index].in_flight));
 
         Ok((acquired_semaphore, self.frame_index))
+    }
+
+    pub(in crate) fn begin_frame(&mut self) -> Result<(vk::Semaphore, &FrameData), RendererError>{
+        let (image_acquired, _) = self.acquire_image()?;
+        let frame = &self.frames[self.frame_index];
+
+        Ok((image_acquired, frame))
+    }
+
+    pub(in crate) fn end_frame(&mut self, image_acquired : vk::Semaphore) -> Result<(), RendererError> {
+        let signal_semaphore = self.submit_frame(&[(image_acquired, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)]);
+        self.present_frame(signal_semaphore)
     }
 
     fn submit_frame(&mut self, wait_info : &[(vk::Semaphore, vk::PipelineStageFlags)]) -> vk::Semaphore {
@@ -206,34 +191,74 @@ impl Renderer {
             }
         }
     }
+}
+
+pub struct Renderer<'me> {
+    pub implementation : BoundRenderer,
+
+    framebuffers : Vec<Framebuffer>,
+    renderers : Vec<Box<&'me mut dyn Renderable>>,
+}
+impl<'me> Renderer<'me> {
+    #[inline] pub fn builder(context : Arc<Context>) -> RendererCallbacks {
+        RendererCallbacks::new(context)
+    }
+
+    pub fn register(&mut self, renderer : Box<&'me mut dyn Renderable>){
+        self.renderers.push(renderer);
+    }
+
+    pub fn draw_frame(&mut self) -> Result<(), RendererError> {
+        profile_scope!("Frame draw calls");
+
+        let frame_count = self.implementation.frames.len();
+        let frame_index = self.implementation.frame_index;
+
+        let (image_acquired, _) = self.implementation.acquire_image()?;
+        let frame = &self.implementation.frames[self.implementation.frame_index];
+
+        let mut i = 0;
+        frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        for renderer in &mut self.renderers {
+            let marker = renderer.marker_data();
+
+            profile_scope!("Renderer draw calls", marker.0);
+
+            frame.cmd.begin_label(marker.0, marker.1);
+            let framebuffer = &self.framebuffers[frame_count * i + frame_index];
+            renderer.record_commands(&self.implementation.swapchain, framebuffer, frame);
+            frame.cmd.end_label();
+
+            i += 1;
+        }
+        frame.cmd.end();
+
+        self.implementation.end_frame(image_acquired)
+    }
 
     pub fn recreate_swapchain(&mut self) {
-        self.context.device.wait_idle();
+        self.implementation.context.device.wait_idle();
 
         self.framebuffers.clear();
-        self.frames.clear();
+        self.implementation.frames.clear();
 
         unsafe {
-            ManuallyDrop::drop(&mut self.swapchain);
+            ManuallyDrop::drop(&mut self.implementation.swapchain);
         }
 
-        self.swapchain = ManuallyDrop::new(Swapchain::new(&self.context, &self.context.options, vec![
-            self.context.graphics_queue,
-            self.context.presentation_queue
+        self.implementation.swapchain = ManuallyDrop::new(Swapchain::new(&self.implementation.context, &self.implementation.context.options, vec![
+            self.implementation.context.graphics_queue,
+            self.implementation.context.presentation_queue
         ]));
 
         for renderer in &mut self.renderers {
-            let renderer = renderer.upgrade().unwrap();
-
-            self.framebuffers.extend(renderer.create_framebuffers(&self.swapchain));
+            self.framebuffers.extend(renderer.create_framebuffers(&self.implementation.swapchain));
         }
 
-        self.frames = Vec::<FrameData>::with_capacity(self.swapchain.image_count());
-        for i in 0..self.swapchain.image_count() {
-            self.frames.push(FrameData::new(i, &self.context));
+        self.implementation.frames = Vec::<FrameData>::with_capacity(self.implementation.swapchain.image_count());
+        for i in 0..self.implementation.swapchain.image_count() {
+            self.implementation.frames.push(FrameData::new(i, &self.implementation.context));
         }
-
-        // I think that's it? Everything should drop.
     }
 }
 
