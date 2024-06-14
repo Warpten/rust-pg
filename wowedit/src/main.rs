@@ -6,8 +6,7 @@ use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
 use renderer::gui::context::{InterfaceRenderer, InterfaceOptions};
-use renderer::orchestration::render::{Renderer, RendererAPI};
-use renderer::orchestration::rendering::Renderable;
+use renderer::orchestration::render::{Renderer, RendererAPI, RendererUpdater};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
@@ -20,19 +19,27 @@ mod interface;
 mod theming;
 mod rendering;
 
-pub struct ApplicationData<'me> {
-    renderer : Renderer<'me>,
+pub struct ApplicationData {
+    renderer : Renderer,
     geometry : GeometryRenderer,
     interface : InterfaceRenderer<InterfaceState>,
 }
-impl RendererAPI for ApplicationData<'_> {
-    fn is_minimized(&self) -> bool { self.renderer.implementation.context.window.is_minimized() }
+impl ApplicationData {
+    pub fn updater(&mut self) -> RendererUpdater {
+        self.renderer.updater(vec![
+            &mut self.geometry,
+            &mut self.interface
+        ])
+    }
+}
+impl RendererAPI for ApplicationData {
+    fn is_minimized(&self) -> bool { self.renderer.context.window.is_minimized() }
 
     fn recreate_swapchain(&mut self) {
-        self.renderer.recreate_swapchain();
+        self.updater().recreate_swapchain()
     }
 
-    fn wait_idle(&self) { self.renderer.implementation.context.device.wait_idle() }
+    fn wait_idle(&self) { self.renderer.context.device.wait_idle() }
 }
 
 fn setup(app : &mut Application, window : Window) -> ApplicationData {
@@ -59,9 +66,7 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
 
             InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
         },
-        renderer : {
-            renderer.finalize(vec![ Box::new(&mut geometry), Box::new(&mut interface) ])
-        }, // Dead last to avoid moved-from borrow issues
+        renderer,
     }
 }
 
@@ -72,7 +77,7 @@ fn prepare() -> ApplicationOptions {
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
-    data.renderer.draw_frame()
+    data.updater().draw()
 }
 
 pub fn window_event(app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {

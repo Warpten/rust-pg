@@ -2,7 +2,7 @@ use std::mem::{offset_of, size_of};
 
 use ash::vk;
 use puffin::profile_scope;
-use renderer::{orchestration::{render::{BoundRenderer, Renderer}, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use renderer::{orchestration::{render::Renderer, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -33,16 +33,15 @@ impl Vertex for TerrainVertex {
     }
 }
 
-impl Renderable for GeometryRenderer {
-    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
-        let mut framebuffers = vec![];
+impl Renderable for GeometryRenderer {    
+    fn create_framebuffers(&mut self, swapchain : &Swapchain) {
+        self.framebuffers.clear();
         for image in &swapchain.images {
-            framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
+            self.framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
         }
-        framebuffers
     }
 
-    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame : &FrameData) {
+    fn record_commands(&mut self, swapchain : &Swapchain, frame : &FrameData) {
         profile_scope!("Geometry command recording");
 
         let viewport = vk::Viewport::default()
@@ -57,7 +56,7 @@ impl Renderable for GeometryRenderer {
             .offset(vk::Offset2D { x: 0, y: 0 })
             .extent(swapchain.extent);
 
-        frame.cmd.begin_render_pass(&self.render_pass, framebuffer, vk::Rect2D {
+        frame.cmd.begin_render_pass(&self.render_pass, &self.framebuffers[frame.index], vk::Rect2D {
             offset : vk::Offset2D { x: 0, y : 0 },
             extent : swapchain.extent
         }, &[
@@ -89,6 +88,7 @@ impl Renderable for GeometryRenderer {
 pub struct GeometryRenderer {
     buffer : Buffer,
     transfer_pool : CommandPool,
+    framebuffers : Vec<Framebuffer>,
     // descriptor_set_layout : DescriptorSetLayout,
     pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
@@ -96,7 +96,7 @@ pub struct GeometryRenderer {
 }
 
 impl GeometryRenderer {
-    pub fn new(renderer : &BoundRenderer, is_presenting : bool) -> Self {
+    pub fn new(renderer : &Renderer, is_presenting : bool) -> Self {
         let render_pass = renderer.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
@@ -168,7 +168,14 @@ impl GeometryRenderer {
             // descriptor_set_layout,
             pipeline_layout,
             pipeline,
-            render_pass
+            framebuffers : {
+                let mut framebuffers = vec![];
+                for image in &renderer.swapchain.images {
+                    framebuffers.push(render_pass.create_framebuffer(&renderer.swapchain, image));
+                }
+                framebuffers
+            },
+            render_pass,
         }
     }
 }

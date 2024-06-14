@@ -1,9 +1,7 @@
-use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::vk::context::Context;
 use crate::vk::frame_data::FrameData;
-use crate::vk::framebuffer::Framebuffer;
 use crate::vk::logical_device::LogicalDevice;
 use crate::vk::queue::QueueFamily;
 use crate::vk::renderer::RendererOptions;
@@ -17,35 +15,18 @@ pub trait Renderable {
     /// # Arguments
     /// 
     /// * `swapchain` - The swapchain currently in use.
-    /// * `framebuffer` - The framebuffer in use for the current frame.
     /// * `frame_data` - A frame-specific data structure.
-    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame_data : &FrameData);
+    fn record_commands(&mut self, swapchain : &Swapchain, frame_data : &FrameData);
     
     /// Returns an array of compatible framebuffers for this renderer.
     /// 
     /// # Arguments
     /// 
     /// * `swapchain` - The swapchain currently in use.
-    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer>;
+    fn create_framebuffers(&mut self, swapchain : &Swapchain);
 
     /// Returns a debug marker used with [`ash::vk::DebugUtilsLabelEXT`].
     fn marker_data<'a>(&self) -> (&'a str, [f32; 4]);
-}
-
-pub type SharedRenderable = Arc<RefCell<Box<dyn Renderable>>>;
-
-impl<T> Renderable for RefCell<T> where T : Renderable + ?Sized {
-    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame_data : &FrameData) {
-        self.borrow_mut().record_commands(swapchain, framebuffer, frame_data)
-    }
-
-    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
-        self.borrow().create_framebuffers(swapchain)
-    }
-
-    fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
-        self.borrow().marker_data()
-    }
 }
 
 pub struct RenderingContextImpl {
