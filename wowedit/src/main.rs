@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::pin::Pin;
 
 #[allow(dead_code)]
 
@@ -30,10 +31,7 @@ impl RendererAPI for ApplicationData {
     fn is_minimized(&self) -> bool { self.renderer.context.window.is_minimized() }
 
     fn recreate_swapchain(&mut self) {
-        self.renderer.recreate_swapchain(vec![
-            &self.geometry,
-            &self.interface
-        ]);
+        self.renderer.recreate_swapchain();
     }
 
     fn wait_idle(&self) { self.renderer.context.device.wait_idle() }
@@ -48,11 +46,7 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
         .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()]);
 
     ApplicationData {
-        geometry : {
-            let slf = GeometryRenderer::supplier(&renderer.swapchain, &renderer.context, false);
-            renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
-            slf
-        },
+        geometry : GeometryRenderer::new(&mut renderer, false),
         interface : {
             let _theme = theming::themes::StandardDark{};
             let style = egui::Style::default(); // _theme.custom_style();
@@ -65,9 +59,7 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
                 .fonts(fonts)
                 .style(style);
 
-            let slf = InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options);
-            renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
-            slf
+            InterfaceRenderer::new(&mut renderer, true, options)
         },
 
         renderer, // Dead last to avoid moved-from borrow issues
@@ -81,7 +73,7 @@ fn prepare() -> ApplicationOptions {
 }
 
 pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
-    data.renderer.draw_frame(vec![&mut data.geometry, &mut data.interface])
+    data.renderer.draw_frame()
 }
 
 pub fn window_event(app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {

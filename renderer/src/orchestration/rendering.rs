@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use crate::vk::context::Context;
@@ -29,6 +30,22 @@ pub trait Renderable {
 
     /// Returns a debug marker used with [`ash::vk::DebugUtilsLabelEXT`].
     fn marker_data<'a>(&self) -> (&'a str, [f32; 4]);
+}
+
+pub type SharedRenderable = Arc<RefCell<Box<dyn Renderable>>>;
+
+impl<T> Renderable for RefCell<T> where T : Renderable + ?Sized {
+    fn record_commands(&mut self, swapchain : &Swapchain, framebuffer : &Framebuffer, frame_data : &FrameData) {
+        self.borrow_mut().record_commands(swapchain, framebuffer, frame_data)
+    }
+
+    fn create_framebuffers(&self, swapchain : &Swapchain) -> Vec<Framebuffer> {
+        self.borrow().create_framebuffers(swapchain)
+    }
+
+    fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
+        self.borrow().marker_data()
+    }
 }
 
 pub struct RenderingContextImpl {

@@ -1,4 +1,4 @@
-use std::{ffi::CString, mem::ManuallyDrop, slice, sync::Arc};
+use std::{cell::RefCell, ffi::CString, mem::ManuallyDrop, slice, sync::{Arc, Weak}};
 
 use ash::vk;
 use egui::ahash::HashMapExt;
@@ -19,7 +19,7 @@ impl RendererCallbacks {
         }
     }
 
-    pub fn build(self,
+    pub fn build<'a>(&'a self,
         options : RendererOptions,
         window : Window,
         device_extensions : Vec<CString>,
@@ -48,6 +48,8 @@ impl RendererCallbacks {
         Renderer {
             context,
             swapchain : ManuallyDrop::new(swapchain),
+
+            renderers : vec![],
 
             framebuffers : vec![],
             frames,
@@ -89,7 +91,7 @@ pub struct Renderer {
     pub context : RenderingContext,
     pub swapchain : ManuallyDrop<Swapchain>,
 
-    // renderers : Vec<&'a dyn Renderable>,
+    renderers : Vec<Weak<RefCell<dyn Renderable>>>,
 
     pub framebuffers : Vec<Framebuffer>, // Code smell, this should be private
     frames : Vec<FrameData>,
@@ -101,7 +103,11 @@ impl Renderer {
         RendererCallbacks::new(context)
     }
 
-    pub fn draw_frame(&mut self, renderers : Vec<&mut dyn Renderable>) -> Result<(), RendererError> {
+    pub fn register(&mut self, renderer : &Arc<RefCell<dyn Renderable>>) {
+        self.renderers.push(Arc::downgrade(renderer));
+    }
+
+    pub fn draw_frame(&mut self) -> Result<(), RendererError> {
         profile_scope!("Frame draw calls");
 
         let (image_acquired, _) = self.acquire_image()?;
@@ -109,11 +115,13 @@ impl Renderer {
 
         let mut i = 0;
         frame.cmd.begin(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        for renderer in renderers {
+        for renderer in &mut self.renderers {
+            let renderer = renderer.upgrade().unwrap();
+
             profile_scope!("Renderer draw calls", renderer.marker_data().0);
 
             let framebuffer = &self.framebuffers[self.frames.len() * i + self.frame_index];
-            renderer.record_commands(&self.swapchain, framebuffer, frame);
+            renderer.borrow_mut().record_commands(&self.swapchain, framebuffer, frame);
 
             i += 1;
         }
@@ -199,7 +207,7 @@ impl Renderer {
         }
     }
 
-    pub fn recreate_swapchain(&mut self, renderers : Vec<&dyn Renderable>) {
+    pub fn recreate_swapchain(&mut self) {
         self.context.device.wait_idle();
 
         self.framebuffers.clear();
@@ -214,7 +222,9 @@ impl Renderer {
             self.context.presentation_queue
         ]));
 
-        for renderer in renderers {
+        for renderer in &mut self.renderers {
+            let renderer = renderer.upgrade().unwrap();
+
             self.framebuffers.extend(renderer.create_framebuffers(&self.swapchain));
         }
 
