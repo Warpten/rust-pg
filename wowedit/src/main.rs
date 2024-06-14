@@ -1,9 +1,7 @@
 use std::path::Path;
-use std::pin::Pin;
 
 #[allow(dead_code)]
 
-use egui::Context;
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
@@ -22,19 +20,19 @@ mod interface;
 mod theming;
 mod rendering;
 
-pub struct ApplicationData {
-    renderer : Renderer,
+pub struct ApplicationData<'me> {
+    renderer : Renderer<'me>,
     geometry : GeometryRenderer,
     interface : InterfaceRenderer<InterfaceState>,
 }
-impl RendererAPI for ApplicationData {
-    fn is_minimized(&self) -> bool { self.renderer.context.window.is_minimized() }
+impl RendererAPI for ApplicationData<'_> {
+    fn is_minimized(&self) -> bool { self.renderer.implementation.context.window.is_minimized() }
 
     fn recreate_swapchain(&mut self) {
         self.renderer.recreate_swapchain();
     }
 
-    fn wait_idle(&self) { self.renderer.context.device.wait_idle() }
+    fn wait_idle(&self) { self.renderer.implementation.context.device.wait_idle() }
 }
 
 fn setup(app : &mut Application, window : Window) -> ApplicationData {
@@ -59,10 +57,11 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
                 .fonts(fonts)
                 .style(style);
 
-            InterfaceRenderer::new(&mut renderer, true, options)
+            InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
         },
-
-        renderer, // Dead last to avoid moved-from borrow issues
+        renderer : {
+            renderer.finalize(vec![ Box::new(&mut geometry), Box::new(&mut interface) ])
+        }, // Dead last to avoid moved-from borrow issues
     }
 }
 

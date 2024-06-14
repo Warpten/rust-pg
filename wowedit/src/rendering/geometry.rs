@@ -2,7 +2,7 @@ use std::mem::{offset_of, size_of};
 
 use ash::vk;
 use puffin::profile_scope;
-use renderer::{orchestration::{render::Renderer, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
+use renderer::{orchestration::{render::{BoundRenderer, Renderer}, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
 
 #[derive(Copy, Clone)]
 struct TerrainVertex {
@@ -96,7 +96,7 @@ pub struct GeometryRenderer {
 }
 
 impl GeometryRenderer {
-    pub fn new(renderer : &mut Renderer, is_presenting : bool) -> Self {
+    pub fn new(renderer : &BoundRenderer, is_presenting : bool) -> Self {
         let render_pass = renderer.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
@@ -162,17 +162,13 @@ impl GeometryRenderer {
             .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&renderer.context);
 
-        let slf = Self {
+        Self {
             buffer,
             transfer_pool,
             // descriptor_set_layout,
             pipeline_layout,
             pipeline,
             render_pass
-        };
-
-        renderer.framebuffers.extend(slf.create_framebuffers(&renderer.swapchain));
-
-        slf
+        }
     }
 }
