@@ -1591,6 +1591,8 @@ name = "tactfs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitmask-enum",
+ "byteorder",
  "bytes",
  "enumflags2",
  "md5",
