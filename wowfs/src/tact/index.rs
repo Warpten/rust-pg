@@ -56,6 +56,9 @@ impl Index {
         })
     }
 
+    pub fn bucket(&self) -> u8 { self.bucket }
+    pub fn entry_count(&self) -> u32 { self.entry_count }
+
     pub fn entry(&self, index : u32) -> Entry {
         let range : Range<usize> = Range {
             start : index as usize * (self.spec.size + self.spec.key + self.spec.offset) as usize,
