@@ -1587,19 +1587,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tactfs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitmask-enum",
- "byteorder",
- "bytes",
- "enumflags2",
- "md5",
- "thiserror",
-]
-
-[[package]]
 name = "thiserror"
 version = "1.0.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2308,10 +2295,23 @@ dependencies = [
  "puffin",
  "puffin_egui",
  "renderer",
- "tactfs",
  "thiserror",
  "vergen",
  "winit",
+ "wowfs",
+]
+
+[[package]]
+name = "wowfs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitmask-enum",
+ "byteorder",
+ "bytes",
+ "enumflags2",
+ "md5",
+ "thiserror",
 ]
 
 [[package]]

@@ -241,6 +241,7 @@ impl PSV {
             i += 1;
         }
 
+        columns.shrink_to_fit();
         values.shrink_to_fit();
 
         Ok(Self {
@@ -273,7 +274,7 @@ mod test {
 
     #[test]
     pub fn parser() {
-        let buffer = include_bytes!("../tests/build.info.sample");
+        let buffer = include_bytes!("../../tests/build.info.sample");
 
         let psv = PSV::new(&buffer[..]).expect("This should be a valid file");
 

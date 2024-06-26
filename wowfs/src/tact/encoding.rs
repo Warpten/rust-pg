@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::{ensure, Context, Result};
 use bytes::Buf;
@@ -40,7 +40,11 @@ pub enum ErrorCode {
 }
 
 impl Encoding {
-    pub(crate) fn new(data : &[u8], flags : BitFlags<LoadFlags>) -> Result<Encoding> {
+    pub fn from_file<P>(path : P) -> Result<Encoding> where P : AsRef<Path> {
+        todo!()
+    }
+
+    pub fn new(data : &[u8], flags : BitFlags<LoadFlags>) -> Result<Encoding> {
         let mut cursor = data;
         ensure!(cursor.remaining() >= 16, ErrorCode::TruncatedHeader);
         ensure!(&cursor[0..2] == b"NE", ErrorCode::NotEncoding);

@@ -3,7 +3,7 @@ resolver = "2"
 
 members = [
     "renderer",
-    "tactfs",
+    "wowfs",
     "wowedit"
 ]
 
