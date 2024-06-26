@@ -1,0 +1,17 @@
+fonts:
+  - name: Roboto
+    path: foo.ttf
+    families:
+      - Roboto
+      - Default
+  - name: Material
+    path: mtl.ttf
+    families:
+      - Default
+families:
+  - name: Roboto
+    kind: proportional
+  - name:
+    kind: monospace
+    tweak:
+      scale: 1.0

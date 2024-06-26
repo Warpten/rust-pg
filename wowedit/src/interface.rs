@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
-use tactfs::psv::PSV;
+use wowfs::file_formats::psv::PSV;
 
 #[derive(Default)]
 pub struct InterfaceState {    
