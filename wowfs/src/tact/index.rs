@@ -125,7 +125,7 @@ impl Entry<'_> {
 
         (
             (raw_value >> offset_bits) & ((1 << archive_bits) - 1),
-            (raw_value & (1 << offset_bits))
+            (raw_value & ((1 << offset_bits) - 1))
         )
     }
 }
