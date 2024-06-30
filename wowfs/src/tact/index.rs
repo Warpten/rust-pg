@@ -1,16 +1,24 @@
-use std::{io::Read, ops::Range};
+use std::{fs::File, io::{BufReader, Read}, ops::Range, path::{Path, PathBuf}};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::Buf;
 
 pub struct Index {
+    path : PathBuf,
     bucket : u8,
     spec : EntrySpec,
     entry_count : u32,
     buffer : Vec<u8>,
 }
 impl Index {
-    pub fn read(source : &[u8]) -> Result<Self, Error> {
+    pub fn new<P>(path : P) -> Result<Self, Error> where P : AsRef<Path> {
+        match std::fs::read(&path) {
+            Ok(file) => Self::read(path, &file[..]),
+            Err(_) => Err(Error::FileNotFound),
+        }
+    }
+
+    fn read<P>(path : P, source : &[u8]) -> Result<Self, Error> where P : AsRef<Path> {
         let mut cursor = source;
 
         // TODO: validate hashes
@@ -49,6 +57,7 @@ impl Index {
         _ = cursor.read_exact(&mut buffer[..]);
 
         Ok(Self {
+            path : path.as_ref().to_path_buf(),
             bucket,
             buffer,
             entry_count : entries_size / (spec.key as u32 + spec.offset as u32 + spec.size as u32),
@@ -80,6 +89,7 @@ struct EntrySpec {
 }
 pub enum Error {
     ReadError,
+    FileNotFound,
 }
 
 pub struct Entry<'a>(&'a Index, Range<usize>);
