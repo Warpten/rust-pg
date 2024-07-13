@@ -1,13 +1,10 @@
 use std::cmp::Ordering;
-use std::io::Read;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use bytes::Buf;
-use crate::casc::encoding::LoadFlags;
-use crate::casc::types::EncodingKey;
+use crate::casc::encoding::{self, Encoding, EncodingLoadFlags};
+use crate::casc::types::{ContentKey, EncodingKey};
 use crate::file_formats::config::Config;
-use crate::file_formats::config::specs::{Encoding, Spec};
+use crate::file_formats::config::specs::{EncodingSpec, Spec};
 use crate::casc::errors::Error;
 use crate::casc::index::{Entry, Index};
 
@@ -16,6 +13,7 @@ pub struct FileSystem {
     build : (PathBuf, Config),
     cdn : (PathBuf, Config),
     indices : Vec<Index>,
+    encoding : Encoding,
 }
 impl FileSystem {
     pub fn open<P>(path : P, build : &str, cdn : &str) -> Result<FileSystem, Error> where P : AsRef<Path> {
@@ -44,46 +42,57 @@ impl FileSystem {
         indices.sort_by(|l,r| l.bucket().cmp(&r.bucket()));
 
         // Now that indices are loaded, find encoding.
-        let encoding_keys = Encoding::read(&build.1);
-        println!("({}, {})", encoding_keys.0, encoding_keys.1);
-        let encoding = find_key(&indices, encoding_keys.1)
+        let encoding_keys = EncodingSpec::read(&build.1);
+        let encoding = find_key(&indices, &encoding_keys.1)
             .into_iter()
-            .inspect(|e| println!("{:?}", e))
             .find_map(|e| {
-                match e.read() {
-                    Ok(file) => Some(file),
+                match e.read().and_then(|file| Encoding::new(&file.bytes(), EncodingLoadFlags::Content)) {
+                    Ok(encoding) => Some(encoding),
                     Err(_) => None,
                 }
-            })
-            .map(|raw| super::casc::encoding::Encoding::new(&raw.bytes(), LoadFlags::Content | LoadFlags::EncodingSpec).unwrap());
+            });
 
         if encoding.is_none() {
-            return Err(Error::EncodingNotFound(encoding_keys.0.to_string()));
+            return Err(Error::EncodingNotFound(encoding_keys.1.to_string()));
         }
 
         Ok(Self {
             path : path.as_ref().to_path_buf(),
+            encoding : encoding.unwrap(),
             build,
             cdn,
             indices,
         })
     }
 
-    /// Searches for a key, returning a slice of entries in the indices that match that key.
+    /// Searches for an encoding key, returning a slice of entries in the indices that match that key.
     /// 
     /// # Arguments
     /// 
-    /// * `key` - The key to search for.
-    pub fn search<K>(&self, key : K) -> Vec<Entry> where K : Into<EncodingKey> {
+    /// * `key` - The encoding key to search for.
+    pub fn find_encoding(&self, key : &EncodingKey) -> Vec<Entry> {
         find_key(&self.indices, key)
+    }
+
+    /// Searches for a content key, returning a set of entries in data indices that match the associated encoding key.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The content key to search for.
+    pub fn find_content(&self, key : &ContentKey) -> Vec<Entry> {
+        self.encoding.find(key)
+            .iter()
+            .flat_map(|entry| {
+                entry.keys
+                    .iter()
+                    .flat_map(|key| self.find_encoding(key))
+            })
+            .collect()
     }
 }
 
-fn find_key<K>(indices : &[Index], key : K) -> Vec<Entry>
-    where K : Into<EncodingKey>
+fn find_key<'a>(indices : &'a[Index], key : &EncodingKey) -> Vec<Entry<'a>>
 {
-    let key = key.into();
-
     // Bucket index
     let bucket_index = key[0] ^ key[1] ^ key[2] ^ key[3] ^ key[4] ^ key[5] ^ key[6] ^ key[7] ^ key[8];
     let bucket_index = (bucket_index & 0xF) ^ (bucket_index >> 4);

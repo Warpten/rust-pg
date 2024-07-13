@@ -1,7 +1,6 @@
-use std::{fs::File, io::{BufRead, BufReader, Read, Seek, SeekFrom}, ops::{Deref, Range}, path::Path};
+use std::{fs::File, io::{BufRead, BufReader, Read, Seek, SeekFrom}, ops::Deref, path::Path};
 use std::fmt::Debug;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use bytes::Buf;
 use flate2::read::ZlibDecoder;
 
 use super::errors::Error;
@@ -9,7 +8,7 @@ use super::errors::Error;
 struct ChunkInfo {
     compressed_size : u32,
     decompressed_size : u32,
-    checksum : [u8; 16],
+    checksum : u128,
 }
 
 pub struct Spec {
@@ -54,8 +53,7 @@ impl BLTE {
             let compressed_size = source.read_u32::<BigEndian>().unwrap();
             let decompressed_size = source.read_u32::<BigEndian>().unwrap();
 
-            let mut checksum = [0_u8; 16];
-            _ = source.read_exact(&mut checksum);
+            let checksum = source.read_u128::<BigEndian>().unwrap();
 
             Some(ChunkInfo { compressed_size: compressed_size - 1, decompressed_size, checksum })
         }).collect();
@@ -72,11 +70,18 @@ impl BLTE {
             };
 
             let mut section = source.take(chunk.compressed_size as _);
+            
 
             match encoding_mode {
                 b'N' => {
                     // _ = source.read_exact(&mut dest[section_range]);
-                    _ = section.read_to_end(dest);
+                    match section.read_to_end(dest) {
+                        Ok(size) => {
+                            let hash = u128::from_be_bytes(*md5::compute(&dest[dest.len() - size..]));
+                            assert_eq!(hash, chunk.checksum);
+                        },
+                        Err(_) => todo!(),
+                    }
                 },
                 b'Z' => {
                     let mut compressed_data = Vec::with_capacity(chunk.compressed_size as _);
@@ -84,6 +89,8 @@ impl BLTE {
                         Ok(value) if value as u32 == chunk.compressed_size => (),
                         _ => return Err(Error::MalformedArchive)
                     };
+
+                    assert_eq!(chunk.checksum, u128::from_be_bytes(*md5::compute(&compressed_data)));
 
                     match ZlibDecoder::new(&compressed_data[..]).read_to_end(dest) {
                         Ok(read_count) if read_count as u32 == chunk.decompressed_size => (),
