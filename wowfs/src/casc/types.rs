@@ -1,4 +1,4 @@
-use std::{cmp::{self, Ordering}, fmt::{Debug, Display, Formatter}, ops::Index, slice::SliceIndex};
+use std::{cmp::Ordering, fmt::{Debug, Display, Formatter}, ops::Index, slice::SliceIndex};
 
 macro_rules! make_key {
     ($t:ident) => {
@@ -9,7 +9,7 @@ macro_rules! make_key {
 
             pub fn new<R : std::io::Read>(source : &mut R, size : usize) -> Self {
                 let mut buffer = vec![0; size];
-                source.read_exact(&mut buffer);
+                source.read_exact(&mut buffer).unwrap();
                 Self::from(&buffer[..])
             }
         }
@@ -67,16 +67,7 @@ macro_rules! make_key {
 
 make_key! { ContentKey }
 make_key! { EncodingKey }
-
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ArchiveKey(pub(crate) u128);
-
-impl Display for ArchiveKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:032x}", self.0)
-    }
-}
+make_key! { ArchiveKey }
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub(crate) struct FileDataID(pub(crate) u32);

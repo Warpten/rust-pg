@@ -38,6 +38,8 @@ impl Config {
 }
 
 pub mod specs {
+    use crate::casc::types::{ContentKey, EncodingKey};
+
     pub trait Spec<'a> {
         type Value;
 
@@ -46,7 +48,9 @@ pub mod specs {
 
     enum SpecKind {
         Pair,
-        Vec
+        Vec,
+        ContentKey,
+        EncodingKey,
     }
 
     macro_rules! specs {
@@ -60,6 +64,17 @@ pub mod specs {
                 }
             }
         };
+        ($t:tt, $x:literal, SpecKind::Pair, $l:tt, $r:tt) => {
+            pub struct $t;
+            impl<'a> Spec<'a> for $t {
+                type Value = ($l, $r);
+
+                fn read(source : &'a super::Config) -> Self::Value {
+                    let vals = source.values.get($x).unwrap().split_once(' ').unwrap();
+                    ($l::from(vals.0), $r::from(vals.1))
+                }
+            }
+        };
         ($t:tt, $x:literal, SpecKind::Vec) => {
             pub struct $t;
             impl<'a> Spec<'a> for $t {
@@ -69,12 +84,22 @@ pub mod specs {
                     source.values.get($x).unwrap().split(' ').collect()
                 }
             }
-        }
+        };
+        ($t:tt, $x:literal, SpecKind::ContentKey) => {
+            pub struct $t;
+            impl<'a> Spec<'a> for $t {
+                type Value = ContentKey;
+
+                fn read(source : &'a super::Config) -> Self::Value {
+                    From::<&str>::from(source.values.get($x).unwrap())
+                }
+            }
+        };
     }
 
-    specs! { Encoding, "encoding", SpecKind::Pair }
-    specs! { Root, "root", SpecKind::Pair }
-    specs! { Archives, "archives", SpecKind::Vec }
+    specs! { EncodingSpec, "encoding", SpecKind::Pair, ContentKey, EncodingKey }
+    specs! { RootSpec, "root", SpecKind::ContentKey }
+    specs! { ArchivesSpec, "archives", SpecKind::Vec }
 }
 
 #[derive(Debug)]

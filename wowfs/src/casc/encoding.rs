@@ -1,55 +1,32 @@
 use std::ops::Range;
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 use std::io::Read;
-use std::path::PathBuf;
+use bitmask_enum::bitmask;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use enumflags2::{bitflags, BitFlags};
-use thiserror::Error;
 
 use crate::casc::errors::EncodingError;
 
 use super::errors::Error;
 use super::types::{ContentKey, EncodingKey};
 
-pub(crate) struct Encoding {
+pub struct Encoding {
     especs : Vec<String>,
-    content_map : HashMap<ContentKey, (Vec<EncodingKey>, u64)>,
+    content_map : HashMap<ContentKey, Entry>,
     encoding_map : HashMap<EncodingKey, (usize, u64)>,
     espec : String
 }
 
-#[bitflags]
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub(crate) enum LoadFlags {
-    Content = 0x01,
-    Encoding = 0x02,
-    EncodingSpec = 0x04,
-}
-
-#[derive(Error, Debug)]
-pub enum ErrorCode {
-    #[error("Truncated header")]
-    TruncatedHeader,
-    #[error("Not an encoding spec")]
-    NotEncoding,
-    #[error("Invalid encoding version : found {0}, expected 1")]
-    InvalidVersion(u8),
-    #[error("Unexpected value at {0}: found {1}, expected {2}")]
-    Unexpected(usize, u8, u8),
-    #[error("Truncated encoding-spec table: expected {0}, found {1}")]
-    TruncatedEspec(usize, usize),
-    #[error("Invalid hash")]
-    InvalidHash
+#[bitmask(u8)]
+pub enum EncodingLoadFlags {
+    Content,
+    Encoding,
+    EncodingSpec,
 }
 
 impl Encoding {
-    pub fn from_file<P>(path : P) -> Result<Encoding, Error> where P : AsRef<Path> {
-        todo!()
-    }
-
-    pub fn new(data : &[u8], flags : BitFlags<LoadFlags>) -> Result<Encoding, Error> {
+    pub fn new(data : &[u8], flags : EncodingLoadFlags) -> Result<Encoding, Error> {
         let mut cursor = data;
         if cursor.remaining() < 0x16 { return Err(EncodingError::Malformed.into()); }
         if &cursor[0..2] != b"EN"  { return Err(EncodingError::InvalidSignature.into()); }
@@ -62,7 +39,7 @@ impl Encoding {
         };
 
         let especs = {
-            if flags.contains(LoadFlags::EncodingSpec) {
+            if flags.contains(EncodingLoadFlags::EncodingSpec) {
                 cursor[0..header.espec].split(|byte| *byte == 0)
                     .filter_map(|bytes| {
                         match String::from_utf8(bytes.to_vec()) {
@@ -76,9 +53,9 @@ impl Encoding {
             }
         }; cursor.advance(header.espec);
 
-        let mut content_map = HashMap::<ContentKey, (Vec<EncodingKey>, u64)>::new();
+        let mut content_map = HashMap::<ContentKey, Entry>::new();
 
-        if flags.contains(LoadFlags::Content) {
+        if flags.contains(EncodingLoadFlags::Content) {
             let pages_sz = header.content.page_count * (header.content.key_size + 0x10 + header.content.page_size);
 
             let mut section = Vec::with_capacity(pages_sz);
@@ -88,7 +65,7 @@ impl Encoding {
                 Err(_) => return Err(EncodingError::Malformed.into()),
             };
 
-            for (i, ckr, hr, pr) in (0..header.content.page_count).map(|i| {
+            for (ckr, hr, pr) in (0..header.content.page_count).map(|i| {
                 let page_header = i * (header.content.key_size + 0x10);
                 let content_key = Range {
                     start : page_header,
@@ -107,7 +84,7 @@ impl Encoding {
                     end : page_data + header.content.page_size
                 };
 
-                (i, content_key, hash, page)
+                (content_key, hash, page)
             }) {
                 let first_ckey = ContentKey::from(&section[ckr]);
                 let hash = (&section[hr]).read_u128::<BigEndian>().unwrap();
@@ -128,15 +105,15 @@ impl Encoding {
 
                     page_data.advance(header.content.key_size);
 
-                    let mut encoding_keys = Vec::<EncodingKey>::with_capacity(key_count);
+                    let mut keys = Vec::<EncodingKey>::with_capacity(key_count);
                     page_data.chunks(header.encoding.key_size)
                         .take(key_count)
                         .map(&EncodingKey::from)
-                        .for_each(|k| encoding_keys.push(k));
+                        .for_each(|k| keys.push(k));
 
                     page_data.advance(key_count * header.encoding.key_size);
 
-                    content_map.insert(content_key, (encoding_keys, file_size));
+                    content_map.insert(content_key, Entry { keys, file_size });
                 }
             }
         } else {
@@ -144,7 +121,7 @@ impl Encoding {
         }
 
         let mut encoding_map = HashMap::<EncodingKey, (usize, u64)>::new();
-        if flags.contains(LoadFlags::Encoding) {
+        if flags.contains(EncodingLoadFlags::Encoding) {
             let pages_sz = header.encoding.page_count * (header.encoding.key_size + 0x10 + header.encoding.page_size);
 
             let mut section = Vec::with_capacity(pages_sz);
@@ -154,7 +131,7 @@ impl Encoding {
                 Err(_) => return Err(EncodingError::Malformed.into()),
             };
 
-            for (i, ekr, hr, pr) in (0..header.encoding.page_count).map(|i| {
+            for (ekr, hr, pr) in (0..header.encoding.page_count).map(|i| {
                 let page_header = i * (header.encoding.key_size + 0x10);
                 let encoding_key = Range {
                     start : page_header,
@@ -173,7 +150,7 @@ impl Encoding {
                     end : page_data + header.encoding.page_size
                 };
 
-                (i, encoding_key, hash, page)
+                (encoding_key, hash, page)
             }) {
                 let first_ekey = EncodingKey::from(&section[ekr]);
                 let hash = (&section[hr]).read_u128::<BigEndian>().unwrap();
@@ -184,7 +161,7 @@ impl Encoding {
                 assert_eq!(page_hash, hash);
 
                 let mut first = true;
-                while page_data.remaining() >= (1 + 5 + header.encoding.key_size) && page_data[0] != 0x00 {
+                while page_data.remaining() >= (4 + 5 + header.encoding.key_size) && page_data[0] != 0x00 {
                     let encoding_key = EncodingKey::from(&page_data[0..header.encoding.key_size]);
                     page_data.advance(header.encoding.key_size);
 
@@ -248,6 +225,15 @@ impl Encoding {
             espec : espec_size as _
         })
     }
+
+    pub fn find(&self, key : &ContentKey) -> Option<&Entry> {
+        self.content_map.get(key)
+    }
+}
+
+pub struct Entry {
+    pub keys : Vec<EncodingKey>,
+    pub file_size : u64
 }
 
 struct Header {
