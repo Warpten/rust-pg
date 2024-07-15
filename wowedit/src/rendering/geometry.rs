@@ -1,5 +1,6 @@
+use std::cell::RefCell;
 use std::mem::{offset_of, size_of};
-
+use std::rc::Rc;
 use ash::vk;
 use puffin::profile_scope;
 use renderer::{orchestration::{render::Renderer, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
@@ -33,7 +34,7 @@ impl Vertex for TerrainVertex {
     }
 }
 
-impl Renderable for GeometryRenderer {    
+impl<S> Renderable for GeometryRenderer<S> {
     fn create_framebuffers(&mut self, swapchain : &Swapchain) {
         self.framebuffers.clear();
         for image in &swapchain.images {
@@ -85,7 +86,7 @@ impl Renderable for GeometryRenderer {
     }
 }
 
-pub struct GeometryRenderer {
+pub struct GeometryRenderer<S> {
     buffer : Buffer,
     transfer_pool : CommandPool,
     framebuffers : Vec<Framebuffer>,
@@ -93,10 +94,12 @@ pub struct GeometryRenderer {
     pipeline_layout : PipelineLayout,
     pipeline : Pipeline,
     render_pass : RenderPass,
+
+    pub state : Rc<RefCell<S>>,
 }
 
-impl GeometryRenderer {
-    pub fn new(renderer : &Renderer, is_presenting : bool) -> Self {
+impl<S> GeometryRenderer<S> {
+    pub fn new(renderer : &Renderer, is_presenting : bool, state : Rc<RefCell<S>>) -> Self {
         let render_pass = renderer.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,
@@ -158,8 +161,8 @@ impl GeometryRenderer {
             .samples(renderer.context.options.multisampling)
             .pool()
             .vertex::<TerrainVertex>()
-            .add_shader("./assets/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
-            .add_shader("./assets/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
+            .add_shader("./assets/shaders/triangle.vert".into(), vk::ShaderStageFlags::VERTEX)
+            .add_shader("./assets/shaders/triangle.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&renderer.context);
 
         Self {
@@ -176,6 +179,7 @@ impl GeometryRenderer {
                 framebuffers
             },
             render_pass,
+            state
         }
     }
 }

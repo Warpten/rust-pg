@@ -43,10 +43,12 @@ impl FileSystem {
 
         // Now that indices are loaded, find encoding.
         let encoding_keys = EncodingSpec::read(&build.1);
-        let encoding = find_key(&indices, &encoding_keys.1)
+        let encoding = find_ekey(&indices, &encoding_keys.1)
             .into_iter()
+            .inspect(|e| println!("{:?}", e))
             .find_map(|e| {
-                match e.read().and_then(|file| Encoding::new(&file.bytes(), EncodingLoadFlags::Content)) {
+                match e.read()
+                    .and_then(|file| Encoding::new(&file.bytes(), EncodingLoadFlags::Content)) {
                     Ok(encoding) => Some(encoding),
                     Err(_) => None,
                 }
@@ -71,7 +73,7 @@ impl FileSystem {
     /// 
     /// * `key` - The encoding key to search for.
     pub fn find_encoding(&self, key : &EncodingKey) -> Vec<Entry> {
-        find_key(&self.indices, key)
+        find_ekey(&self.indices, key)
     }
 
     /// Searches for a content key, returning a set of entries in data indices that match the associated encoding key.
@@ -91,7 +93,7 @@ impl FileSystem {
     }
 }
 
-fn find_key<'a>(indices : &'a[Index], key : &EncodingKey) -> Vec<Entry<'a>>
+fn find_ekey<'a>(indices : &'a[Index], key : &EncodingKey) -> Vec<Entry<'a>>
 {
     // Bucket index
     let bucket_index = key[0] ^ key[1] ^ key[2] ^ key[3] ^ key[4] ^ key[5] ^ key[6] ^ key[7] ^ key[8];
@@ -129,7 +131,7 @@ fn find_key<'a>(indices : &'a[Index], key : &EncodingKey) -> Vec<Entry<'a>>
 mod tests {
     #[test]
     pub fn open_fs() {
-        let fs = super::FileSystem::open("D:/01 - Games/World of Warcraft/", "df750377895a52b1ce78afbc9a6d1bd6", "1c76ee368a486fd03befed99c1d14c76")
+        let fs = super::FileSystem::open("D:/01 - Games/World of Warcraft/", "3fca2ca5b5b1d2195b09b6ff4181410d", "1362038d83a2fd77738d50befc33e4f2")
             .expect("Failed to open fs");
 
     }

@@ -1,10 +1,7 @@
 use std::marker::PhantomData;
+use std::thread;
+use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub enum Event {
-
-}
-
-pub struct Publisher {
-    
+pub struct Event<T> {
+    _marker : PhantomData<T>,
 }

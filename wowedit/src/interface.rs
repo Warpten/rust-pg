@@ -1,18 +1,31 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-
+use std::rc::Rc;
 use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
 use wowfs::file_formats::psv::PSV;
+use crate::SharedState;
 
-#[derive(Default)]
 pub struct InterfaceState {    
     pub frame_time_profiler  : bool, // Toggles Puffer GUI (CPU profiler)
     pub allocation_breakdown : bool, // Toggles displaying GPU allocation breakdown
 
     installation_path : String,
-    psv_selection : Option<(String, String, String, String, String, PathBuf)>, // Row selected in .build.info
 
     active_tab : Tab,
+
+    state : Rc<RefCell<SharedState>>,
+}
+impl InterfaceState {
+    pub fn default(state : Rc<RefCell<SharedState>>) -> Self {
+        Self {
+            frame_time_profiler : false,
+            allocation_breakdown : false,
+            installation_path : Default::default(),
+            active_tab : Default::default(),
+            state
+        }
+    }
 }
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
@@ -229,13 +242,11 @@ impl InterfaceState {
                                         row.col(|ui| { Label::new(path_on_disk.to_str().unwrap()).selectable(false).ui(ui); });
                                         row.col(|ui| {
                                             if ui.button("Open").clicked() {
-                                                self.psv_selection = Some((version.to_string(),
-                                                    branch.to_string(),
-                                                    build_key.to_string(),
-                                                    cdn_key.to_string(),
-                                                    product.to_string(),
+                                                self.state.borrow_mut().load_game_install(
+                                                    cdn_key,
+                                                    build_key,
                                                     path_on_disk
-                                                ));
+                                                );
                                             }
                                         });
                                     });
@@ -314,4 +325,8 @@ fn find_flavor_path(source : &str, product : &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+pub enum InterfaceEvent {
+    InstallationSelected { version: String, branch: String, cdn: String, build: String, path: PathBuf }
 }

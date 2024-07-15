@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::{size_of, size_of_val};
+use std::ops::DerefMut;
 use std::slice;
 use ash::vk::{self};
 use bytemuck::bytes_of;
@@ -74,16 +76,10 @@ impl Vertex for InterfaceVertex {
     }
 }
 
-impl<T : Default> Renderable for InterfaceRenderer<T> {
-    fn create_framebuffers(&mut self, swapchain : &Swapchain) {
-        for image in &swapchain.images {
-            self.framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
-        }
-    }
-
+impl<T> Renderable for InterfaceRenderer<T> {
     fn record_commands(&mut self, swapchain : &Swapchain, frame : &FrameData) {
         profile_scope!("GUI command recording");
-        
+
         let window = &self.rendering_context.window;
         let scale_factor = window.handle().scale_factor();
 
@@ -98,6 +94,12 @@ impl<T : Default> Renderable for InterfaceRenderer<T> {
 
         let clipped_meshes = self.egui_ctx.tessellate(output.shapes, scale_factor as _);
         self.paint(&frame.cmd, swapchain, frame.index, clipped_meshes, output.textures_delta);
+    }
+
+    fn create_framebuffers(&mut self, swapchain : &Swapchain) {
+        for image in &swapchain.images {
+            self.framebuffers.push(self.render_pass.create_framebuffer(swapchain, image));
+        }
     }
 
     fn marker_data<'a>(&self) -> (&'a str, [f32; 4]) {
@@ -115,7 +117,7 @@ pub struct InterfaceFrameData {
 
 type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
 
-pub struct InterfaceRenderer<State : Default> {
+pub struct InterfaceRenderer<State> {
     egui_ctx : Context,
     pub egui : egui_winit::State,
 
@@ -142,12 +144,19 @@ pub struct InterfaceOptions<State> {
     pub context : Context,
     /// A delegate that will be called 
     pub delegate : InterfaceRenderDelegate<State>,
+    pub state : Option<State>,
 }
 impl<S> InterfaceOptions<S> {
+    pub fn with_state(mut self, state : S) -> InterfaceOptions<S> {
+        self.state = Some(state);
+        self
+    }
+
     pub fn default(delegate : InterfaceRenderDelegate<S>) -> InterfaceOptions<S> {
         Self {
             context : Context::default(),
-            delegate
+            state : None,
+            delegate,
         }
     }
 
@@ -162,7 +171,7 @@ impl<S> InterfaceOptions<S> {
     }
 }
 
-impl<State : Default> InterfaceRenderer<State> {
+impl<State> InterfaceRenderer<State> {
     fn create_render_pass(swapchain : &Swapchain, is_presenting : bool, context : &RenderingContext) -> RenderPass {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
@@ -217,8 +226,8 @@ impl<State : Default> InterfaceRenderer<State> {
             .samples(vk::SampleCountFlags::TYPE_1)
             .pool()
             .vertex::<InterfaceVertex>()
-            .add_shader("./assets/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
-            .add_shader("./assets/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
+            .add_shader("./assets/shaders/gui.vert".into(), vk::ShaderStageFlags::VERTEX)
+            .add_shader("./assets/shaders/gui.frag".into(), vk::ShaderStageFlags::FRAGMENT)
             .build(&context);
         context.device.set_handle_name(pipeline.handle(), &"GUI Pipeline".to_owned());
 
@@ -254,6 +263,7 @@ impl<State : Default> InterfaceRenderer<State> {
         is_presenting : bool,
         options : InterfaceOptions<State>
     ) -> InterfaceRenderer<State> {
+        let state_fn = options.state.unwrap();
         let render_pass = Self::create_render_pass(&swapchain, is_presenting, &context);
 
         let egui = egui_winit::State::new(options.context.clone(),
@@ -307,7 +317,7 @@ impl<State : Default> InterfaceRenderer<State> {
 
             textures : HashMap::default(),
 
-            state : State::default(),
+            state : state_fn,
             // visualizer : AllocatorVisualizer::new(),
 
             delegate : options.delegate,
@@ -325,7 +335,7 @@ impl<State : Default> InterfaceRenderer<State> {
 }
 
 // Actual user API
-impl<State : Default> InterfaceRenderer<State> {
+impl<State> InterfaceRenderer<State> {
     pub fn begin_frame(&mut self, window : &Window) {
         let raw_input = self.egui.take_egui_input(window.handle());
         self.egui_ctx.begin_frame(raw_input);

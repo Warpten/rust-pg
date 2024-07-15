@@ -163,6 +163,6 @@ impl Debug for Entry<'_> {
         let size = self.size();
         let key = self.key();
 
-        write!(f, "({:?}, {}, {}, {})", key, archive_index, archive_offset, size)
+        write!(f, "(key: {:?}, archive: {}, offset: {}, size: {})", key, archive_index, archive_offset, size)
     }
 }

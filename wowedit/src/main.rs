@@ -1,5 +1,6 @@
-use std::path::Path;
-
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 #[allow(dead_code)]
 
 use egui::{FontData, FontDefinitions, FontFamily};
@@ -13,6 +14,9 @@ use ash::vk;
 use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
 use winit::event::WindowEvent;
+use wowfs::casc::errors::Error;
+use wowfs::fs::FileSystem;
+use crate::interface::InterfaceEvent;
 
 mod events;
 mod interface;
@@ -21,8 +25,9 @@ mod rendering;
 
 pub struct ApplicationData {
     renderer : Renderer,
-    geometry : GeometryRenderer,
+    geometry : GeometryRenderer<SharedState>,
     interface : InterfaceRenderer<InterfaceState>,
+    shared_state : Rc<RefCell<SharedState>>
 }
 impl ApplicationData {
     pub fn updater(&mut self) -> RendererUpdater {
@@ -43,6 +48,12 @@ impl RendererAPI for ApplicationData {
 }
 
 fn setup(app : &mut Application, window : Window) -> ApplicationData {
+    // State shared across multiple objects
+    let shared_state = Rc::new(RefCell::new(SharedState {
+        fs: None
+    }));
+
+    // Vulkan renderer
     let renderer = RendererOptions::default()
         .line_width(DynamicState::Fixed(1.0f32))
         .multisampling(vk::SampleCountFlags::TYPE_4);
@@ -50,23 +61,43 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
     let mut renderer = Renderer::builder(app.context.clone())
         .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()]);
 
-    ApplicationData {
-        geometry : GeometryRenderer::new(&mut renderer, false),
-        interface : {
-            let _theme = theming::themes::StandardDark{};
-            let style = egui::Style::default(); // _theme.custom_style();
+    // Geometry renderer
+    let geometry  = GeometryRenderer::new(&mut renderer, false, shared_state.clone());
+    let interface = {
+        let _theme = theming::themes::StandardDark{};
+        let style = egui::Style::default(); // _theme.custom_style();
 
-            let mut fonts = FontDefinitions::default();
-            load_fonts(&mut fonts, &None, "./assets/fonts");
-            for (k, v) in &fonts.families { println!("Loaded {:?} {:?}", k, v); }
+        let mut fonts = FontDefinitions::default();
+        load_fonts(&mut fonts, &None, "./assets/fonts");
 
-            let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| state.render(ctx))
-                .fonts(fonts)
-                .style(style);
+        let state_copy = shared_state.clone();
+        let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| state.render(ctx))
+            .with_state(InterfaceState::default(state_copy))
+            .fonts(fonts)
+            .style(style);
 
-            InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
-        },
+        InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
+    };
+
+    // Application data
+    let mut slf = ApplicationData {
+        geometry,
+        interface,
         renderer,
+        shared_state
+    };
+
+    slf
+}
+
+impl ApplicationData {
+    fn load_game_install(&mut self, cdn : &str, build: &str, path : &PathBuf) -> Result<(), Error> {
+        let fs = match FileSystem::open(path, cdn, build) {
+            Ok(fs) => Some(fs),
+            Err(err) => return Err(err),
+        };
+
+        Ok(())
     }
 }
 
@@ -148,5 +179,19 @@ fn load_fonts<P>(def : &mut FontDefinitions, mut family : &Option<FontFamily>, d
                 }
             }
         }
+    }
+}
+
+pub struct SharedState {
+    fs : Option<FileSystem>,
+}
+impl SharedState {
+    pub fn load_game_install(&mut self, cdn : &str, build : &str, path : PathBuf) -> bool {
+        self.fs = match FileSystem::open(path.parent().unwrap(), build, cdn) {
+            Ok(fs) => Some(fs),
+            Err(_) => None
+        };
+
+        self.fs.is_some()
     }
 }
