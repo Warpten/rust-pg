@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run wowedit" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="command" value="run --package wowedit --bin wowedit" />
-    <option name="workingDirectory" value="file://$PROJECT_DIR$/wowedit" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />
     <option name="channel" value="DEFAULT" />

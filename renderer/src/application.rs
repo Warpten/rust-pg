@@ -110,7 +110,6 @@ fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>) {
     let mut app_data = (builder.setup)(&mut app, window);
     let mut dirty_swapchain = false;
 
-    let now = SystemTime::now();
     let mut modifiers = ModifiersState::default();
 
     event_loop.run(move |event, target| {
@@ -133,8 +132,6 @@ fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>) {
                 }
                 Event::AboutToWait => {
                     puffin::GlobalProfiler::lock().new_frame();
-            
-                    let now = now.elapsed().unwrap();
 
                     (builder.update)(&mut app, &mut app_data);
 
