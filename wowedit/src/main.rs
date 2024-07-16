@@ -97,6 +97,8 @@ impl ApplicationData {
             Err(err) => return Err(err),
         };
 
+        self.shared_state.borrow_mut().fs = fs;
+
         Ok(())
     }
 }
