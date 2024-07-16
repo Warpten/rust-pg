@@ -129,7 +129,6 @@ pub struct InterfaceRenderer<State> {
     framebuffers : Vec<Framebuffer>,
     frame_data : Vec<InterfaceFrameData>,
     render_pass : RenderPass,
-    pub scale_factor : f64,
     // The sampler used when updating textures used by the GUI.
     sampler : Sampler,
     textures : HashMap<TextureId, Texture>,
@@ -144,18 +143,13 @@ pub struct InterfaceOptions<State> {
     pub context : Context,
     /// A delegate that will be called 
     pub delegate : InterfaceRenderDelegate<State>,
-    pub state : Option<State>,
+    pub state : State,
 }
 impl<S> InterfaceOptions<S> {
-    pub fn with_state(mut self, state : S) -> InterfaceOptions<S> {
-        self.state = Some(state);
-        self
-    }
-
-    pub fn default(delegate : InterfaceRenderDelegate<S>) -> InterfaceOptions<S> {
+    pub fn default(delegate : InterfaceRenderDelegate<S>, state: S) -> InterfaceOptions<S> {
         Self {
             context : Context::default(),
-            state : None,
+            state,
             delegate,
         }
     }
@@ -263,7 +257,6 @@ impl<State> InterfaceRenderer<State> {
         is_presenting : bool,
         options : InterfaceOptions<State>
     ) -> InterfaceRenderer<State> {
-        let state_fn = options.state.unwrap();
         let render_pass = Self::create_render_pass(&swapchain, is_presenting, &context);
 
         let egui = egui_winit::State::new(options.context.clone(),
@@ -313,11 +306,9 @@ impl<State> InterfaceRenderer<State> {
             sampler,
             command_pool,
 
-            scale_factor : context.window.handle().scale_factor(),
-
             textures : HashMap::default(),
 
-            state : state_fn,
+            state : options.state,
             // visualizer : AllocatorVisualizer::new(),
 
             delegate : options.delegate,
@@ -383,8 +374,9 @@ impl<State> InterfaceRenderer<State> {
                 .height(swapchain.extent.height as f32)
         ]);
 
-        let width_points = swapchain.extent.width as f32 / self.scale_factor as f32;
-        let height_points = swapchain.extent.height as f32 / self.scale_factor as f32;
+        let scale_factor = self.rendering_context.window.handle().scale_factor() as f32;
+        let width_points = swapchain.extent.width as f32 / scale_factor;
+        let height_points = swapchain.extent.height as f32 / scale_factor;
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, 0,                                 bytes_of(&width_points));
         cmd.push_constants(&self.pipeline, vk::ShaderStageFlags::VERTEX, size_of_val(&width_points) as u32, bytes_of(&height_points));
 
@@ -425,12 +417,12 @@ impl<State> InterfaceRenderer<State> {
             }
 
             let min = egui::Pos2 {
-                x : f32::clamp(clip_rect.min.x * self.scale_factor as f32, 0.0, swapchain.extent.width as f32),
-                y : f32::clamp(clip_rect.min.y * self.scale_factor as f32, 0.0, swapchain.extent.height as f32)
+                x : f32::clamp(clip_rect.min.x * scale_factor, 0.0, swapchain.extent.width as f32),
+                y : f32::clamp(clip_rect.min.y * scale_factor, 0.0, swapchain.extent.height as f32)
             };
             let max = egui::Pos2 {
-                x : f32::clamp(clip_rect.max.x * self.scale_factor as f32, min.x, swapchain.extent.width as f32),
-                y : f32::clamp(clip_rect.max.y * self.scale_factor as f32, min.y, swapchain.extent.height as f32),
+                x : f32::clamp(clip_rect.max.x * scale_factor, min.x, swapchain.extent.width as f32),
+                y : f32::clamp(clip_rect.max.y * scale_factor, min.y, swapchain.extent.height as f32),
             };
 
             // Record draw commands

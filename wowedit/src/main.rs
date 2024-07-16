@@ -71,8 +71,9 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
         load_fonts(&mut fonts, &None, "./assets/fonts");
 
         let state_copy = shared_state.clone();
-        let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| state.render(ctx))
-            .with_state(InterfaceState::default(state_copy))
+        let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| {
+            state.render(ctx);
+        }, InterfaceState::default(state_copy))
             .fonts(fonts)
             .style(style);
 
