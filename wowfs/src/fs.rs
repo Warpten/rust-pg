@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
-use crate::casc::encoding::{self, Encoding, EncodingLoadFlags};
+use crate::casc::encoding::{Encoding, EncodingLoadFlags};
 use crate::casc::types::{ContentKey, EncodingKey};
 use crate::file_formats::config::Config;
 use crate::file_formats::config::specs::{EncodingSpec, Spec};

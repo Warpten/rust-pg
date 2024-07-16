@@ -1,4 +1,4 @@
-use std::{ffi::{CStr, CString}, sync::Arc, time::SystemTime};
+use std::{ffi::{CStr, CString}, sync::Arc};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
 

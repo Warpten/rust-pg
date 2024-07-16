@@ -1,7 +1,5 @@
 use std::{fs::File, io::{BufRead, BufReader, Read, Seek, SeekFrom}, ops::Deref, path::Path};
 use std::fmt::Debug;
-use std::ops::Range;
-use std::path::PathBuf;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use flate2::read::ZlibDecoder;
 

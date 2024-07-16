@@ -4,8 +4,6 @@ use std::io::Read;
 use bitmask_enum::bitmask;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
-use enumflags2::{bitflags, BitFlags};
-
 use crate::casc::errors::EncodingError;
 
 use super::errors::Error;
