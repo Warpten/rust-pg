@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufReader, Read}, ops::Range, path::{Path, PathBuf}};
+use std::{io::Read, ops::Range, path::{Path, PathBuf}};
 use std::fmt::{Debug, Formatter};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::Buf;

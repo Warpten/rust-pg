@@ -1,6 +1,7 @@
-use std::{fmt::Display, fs::File, io::{BufReader, Error, ErrorKind, Read, Seek, SeekFrom, Take}, path::PathBuf};
+use std::{fmt::Display, fs::File, io::{BufReader, Error, ErrorKind, Read, Seek}, path::PathBuf};
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
+
 use mapchunk::MapChunk;
 
 #[derive(Eq, PartialEq)]

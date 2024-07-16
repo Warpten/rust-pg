@@ -1,106 +1,75 @@
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
 #[allow(dead_code)]
+
+use std::cell::RefCell;
+use std::path::Path;
+use std::rc::Rc;
 
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
 use renderer::gui::context::{InterfaceRenderer, InterfaceOptions};
-use renderer::orchestration::render::{Renderer, RendererAPI, RendererUpdater};
+use renderer::orchestration::render::{Renderer, RendererAPI};
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
 use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
 use winit::event::WindowEvent;
-use wowfs::casc::errors::Error;
-use wowfs::fs::FileSystem;
-use crate::interface::InterfaceEvent;
+use crate::application::{ApplicationData, SharedState};
 
+mod application;
 mod events;
 mod interface;
 mod theming;
 mod rendering;
 
-pub struct ApplicationData {
-    renderer : Renderer,
-    geometry : GeometryRenderer<SharedState>,
-    interface : InterfaceRenderer<InterfaceState>,
-    shared_state : Rc<RefCell<SharedState>>
-}
-impl ApplicationData {
-    pub fn updater(&mut self) -> RendererUpdater {
-        self.renderer.updater(vec![
-            &mut self.geometry,
-            &mut self.interface
-        ])
-    }
-}
-impl RendererAPI for ApplicationData {
-    fn is_minimized(&self) -> bool { self.renderer.context.window.is_minimized() }
-
-    fn recreate_swapchain(&mut self) {
-        self.updater().recreate_swapchain()
-    }
-
-    fn wait_idle(&self) { self.renderer.context.device.wait_idle() }
-}
-
-fn setup(app : &mut Application, window : Window) -> ApplicationData {
-    // State shared across multiple objects
-    let shared_state = Rc::new(RefCell::new(SharedState {
-        fs: None
-    }));
-
-    // Vulkan renderer
+fn make_vk_renderer(app: &mut Application, window : Window) -> Renderer {
     let renderer = RendererOptions::default()
         .line_width(DynamicState::Fixed(1.0f32))
         .multisampling(vk::SampleCountFlags::TYPE_4);
 
-    let mut renderer = Renderer::builder(app.context.clone())
-        .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()]);
+    Renderer::builder(app.context.clone())
+        .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()])
+}
 
-    // Geometry renderer
-    let geometry  = GeometryRenderer::new(&mut renderer, false, shared_state.clone());
-    let interface = {
-        let _theme = theming::themes::StandardDark{};
-        let style = egui::Style::default(); // _theme.custom_style();
+fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<SharedState>>) -> GeometryRenderer<SharedState> {
+    GeometryRenderer::new(renderer, false, shared_state.clone())
+}
 
-        let mut fonts = FontDefinitions::default();
-        load_fonts(&mut fonts, &None, "./assets/fonts");
+fn make_interface_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<SharedState>>) -> InterfaceRenderer<InterfaceState> {
+    let _theme = theming::themes::StandardDark{};
+    let style = egui::Style::default(); // _theme.custom_style();
 
-        let state_copy = shared_state.clone();
-        let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| {
-            state.render(ctx);
-        }, InterfaceState::default(state_copy))
-            .fonts(fonts)
-            .style(style);
+    let mut fonts = FontDefinitions::default();
+    load_fonts(&mut fonts, &None, "./assets/fonts");
 
-        InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
-    };
+    let state_copy = shared_state.clone();
+    let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| {
+        state.render(ctx);
+    }, InterfaceState::default(state_copy))
+        .fonts(fonts)
+        .style(style);
 
-    // Application data
-    let mut slf = ApplicationData {
+    InterfaceRenderer::new(&renderer.swapchain, &renderer.context, true, options)
+}
+
+fn setup(app : &mut Application, window : Window) -> ApplicationData {
+    // State shared across multiple objects
+    let shared_state = Rc::new(RefCell::new(SharedState::default()));
+
+    // Shared Vulkan rendering "engine"
+    let mut renderer = make_vk_renderer(app, window);
+
+    // Individual renderers
+    let geometry  = make_geometry_renderer(&mut renderer, shared_state.clone());
+    let interface = make_interface_renderer(&mut renderer, shared_state.clone());
+
+    // Return the application data now
+    ApplicationData {
         geometry,
         interface,
         renderer,
         shared_state
-    };
-
-    slf
-}
-
-impl ApplicationData {
-    fn load_game_install(&mut self, cdn : &str, build: &str, path : &PathBuf) -> Result<(), Error> {
-        let fs = match FileSystem::open(path, cdn, build) {
-            Ok(fs) => Some(fs),
-            Err(err) => return Err(err),
-        };
-
-        self.shared_state.borrow_mut().fs = fs;
-
-        Ok(())
     }
 }
 
@@ -182,19 +151,5 @@ fn load_fonts<P>(def : &mut FontDefinitions, mut family : &Option<FontFamily>, d
                 }
             }
         }
-    }
-}
-
-pub struct SharedState {
-    fs : Option<FileSystem>,
-}
-impl SharedState {
-    pub fn load_game_install(&mut self, cdn : &str, build : &str, path : PathBuf) -> bool {
-        self.fs = match FileSystem::open(path.parent().unwrap(), build, cdn) {
-            Ok(fs) => Some(fs),
-            Err(_) => None
-        };
-
-        self.fs.is_some()
     }
 }

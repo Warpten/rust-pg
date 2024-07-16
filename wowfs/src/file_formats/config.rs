@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::HashMap, fs::File, hash::Hash, io::{BufRead, BufReader, Read}, ops::Range, path::Path, slice::Iter};
+use std::{borrow::Borrow, collections::HashMap, fs::File, hash::Hash, io::{BufRead, BufReader, Read}, path::Path};
 
 pub struct Config {
     values : HashMap<String, String>,
