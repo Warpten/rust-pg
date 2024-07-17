@@ -119,7 +119,10 @@ impl CommandBuffer {
             .src_access_mask(src.1)
             .dst_queue_family_index(dst.0)
             .src_queue_family_index(src.0)
-            .old_layout(image.layout())
+            // image.layout() causes validation error because it differs from the old image layout
+            // (assumes DST_ when it's actually SRC_ due to internal state changes)
+            // fixme (probably refactor this to make the call less verbose)
+            .old_layout(vk::ImageLayout::UNDEFINED)
             .new_layout(new_layout)
             .subresource_range(vk::ImageSubresourceRange::default()
                 .aspect_mask(image.aspect())
