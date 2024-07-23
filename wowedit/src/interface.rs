@@ -1,8 +1,9 @@
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
+use renderer::gui::context::InterfaceState as InterfaceStateTrait;
+use tokio::runtime::Runtime;
 use wowfs::file_formats::psv::PSV;
 use crate::SharedState;
 
@@ -14,10 +15,10 @@ pub struct InterfaceState {
 
     active_tab : Tab,
 
-    state : Rc<RefCell<SharedState>>,
+    state : Arc<Mutex<SharedState>>,
 }
 impl InterfaceState {
-    pub fn default(state : Rc<RefCell<SharedState>>) -> Self {
+    pub fn default(state : Arc<Mutex<SharedState>>) -> Self {
         Self {
             frame_time_profiler : false,
             allocation_breakdown : false,
@@ -28,55 +29,8 @@ impl InterfaceState {
     }
 }
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
-enum Tab {
-    #[default]
-    Home,
-    Database,
-    World,
-    Model,
-    Explorer,
-    Settings,
-    About,
-}
-
-macro_rules! include_license {
-    ($name:expr, $url:expr, $rem:expr, $license_type:expr, $ui:expr) => {
-        egui::collapsing_header::CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
-            .show_header($ui, |ui| {
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    egui::Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
-                        .size(18.0), $url)
-                        .ui(ui);
-
-                        ui.label($rem);
-                });
-            }).body(|ui| {
-                egui::TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false)
-                    .desired_width(f32::INFINITY)
-                    .ui(ui);
-            });
-    };
-    ($name:expr, $url:expr,  $license_type:expr, $ui:expr) => {
-        egui::collapsing_header::CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
-            .show_header($ui, |ui| {
-                egui::Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
-                    .size(18.0), $url)
-                    .ui(ui);
-            }).body(|ui| {
-                TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
-                    .font(egui::TextStyle::Monospace)
-                    .interactive(false)
-                    .desired_width(f32::INFINITY)
-                    .ui(ui);
-            });
-    };
-}
-
-impl InterfaceState {
-    pub fn render(&mut self, ctx : &Context) {
+impl InterfaceStateTrait for InterfaceState {
+    fn render(&mut self, ctx : &egui::Context) {
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 if ui.button("Profiler").clicked() {
@@ -165,7 +119,7 @@ impl InterfaceState {
                 .fill(egui::Color32::from_rgba_premultiplied(30, 30, 30, 127)))
             .show(ctx, |ui| {
                 match self.active_tab {
-                    Tab::Home     => self.render_home(ctx, ui),
+                    Tab::Home     => self.render_home(ctx, ui, todo!()),
                     Tab::Database => self.render_database(ctx, ui),
                     Tab::World    => self.render_world(ctx, ui),
                     Tab::Model    => self.render_model(ctx, ui),
@@ -190,8 +144,57 @@ impl InterfaceState {
                 ui.label("For various reasons related to dependencies, this does not work yet");
             });
     }
+}
 
-    fn render_home(&mut self, ctx : &Context, ui : &mut Ui) {
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug)]
+enum Tab {
+    #[default]
+    Home,
+    Database,
+    World,
+    Model,
+    Explorer,
+    Settings,
+    About,
+}
+
+macro_rules! include_license {
+    ($name:expr, $url:expr, $rem:expr, $license_type:expr, $ui:expr) => {
+        egui::collapsing_header::CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
+            .show_header($ui, |ui| {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    egui::Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
+                        .size(18.0), $url)
+                        .ui(ui);
+
+                        ui.label($rem);
+                });
+            }).body(|ui| {
+                egui::TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
+                    .font(egui::TextStyle::Monospace)
+                    .interactive(false)
+                    .desired_width(f32::INFINITY)
+                    .ui(ui);
+            });
+    };
+    ($name:expr, $url:expr,  $license_type:expr, $ui:expr) => {
+        egui::collapsing_header::CollapsingState::load_with_default_open($ui.ctx(), $ui.make_persistent_id(concat!($name, "-about")), false)
+            .show_header($ui, |ui| {
+                egui::Hyperlink::from_label_and_url(RichText::new(format!(concat!("{} ", $name), egui::special_emojis::GITHUB))
+                    .size(18.0), $url)
+                    .ui(ui);
+            }).body(|ui| {
+                TextEdit::multiline(&mut include_str!(concat!("../../assets/licenses/", $license_type)))
+                    .font(egui::TextStyle::Monospace)
+                    .interactive(false)
+                    .desired_width(f32::INFINITY)
+                    .ui(ui);
+            });
+    };
+}
+
+impl InterfaceState {
+    fn render_home(&mut self, ctx : &Context, ui : &mut Ui, runtime : &Runtime) {
         ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
             ui.label(RichText::new("Game installation")
                 .size(18.0));
@@ -212,7 +215,6 @@ impl InterfaceState {
                         .column(Column::auto()) // Branch
                         .column(Column::remainder()) // Build Key
                         .column(Column::remainder()) // CDN Key
-                        .column(Column::remainder()) // Directory
                         .column(Column::exact(100.0)) // Interaction button
                         .min_scrolled_height(0.0)
                         .header(20.0, |mut header| {
@@ -220,7 +222,6 @@ impl InterfaceState {
                             header.col(|ui| { ui.strong("Branch"); });
                             header.col(|ui| { ui.strong("Build Key"); });
                             header.col(|ui| { ui.strong("CDN Key"); });
-                            header.col(|ui| { ui.strong("Directory"); });
                             header.col(|_| { });
                         })
                         .body(|mut body| {
@@ -228,7 +229,7 @@ impl InterfaceState {
                                 // Try to find the directory containing this build.
                                 let product = record.read("Product").try_raw().unwrap_or("??");
 
-                                if let Some(path_on_disk) = find_flavor_path(&self.installation_path, product) {
+                                if let Some(_) = find_flavor_path(&self.installation_path, product) {
                                     body.row(18.0, |mut row | {
                                         let version = record.read("Version").try_raw().unwrap_or("??");
                                         let branch = record.read("Branch").try_raw().unwrap_or("??");
@@ -239,13 +240,14 @@ impl InterfaceState {
                                         row.col(|ui| { Label::new(branch).selectable(false).ui(ui); });
                                         row.col(|ui| { Label::new(build_key).selectable(false).ui(ui); });
                                         row.col(|ui| { Label::new(cdn_key).selectable(false).ui(ui); });
-                                        row.col(|ui| { Label::new(path_on_disk.to_str().unwrap()).selectable(false).ui(ui); });
                                         row.col(|ui| {
                                             if ui.button("Open").clicked() {
-                                                self.state.borrow_mut().load_game_install(
-                                                    cdn_key,
-                                                    build_key,
-                                                    path_on_disk
+                                                let state = self.state.lock().unwrap();
+                                                state.async_load_game_install(
+                                                    runtime,
+                                                    cdn_key.to_string(),
+                                                    build_key.to_string(),
+                                                    PathBuf::from(&self.installation_path)
                                                 );
                                             }
                                         });

@@ -1,9 +1,10 @@
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use futures::TryFutureExt;
 use renderer::gui::context::InterfaceRenderer;
 use renderer::orchestration::render::{Renderer, RendererAPI, RendererUpdater};
-use wowfs::casc::errors::Error;
+use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 use wowfs::fs::FileSystem;
 use crate::interface::InterfaceState;
 use crate::rendering::geometry::GeometryRenderer;
@@ -12,38 +13,34 @@ pub(in crate) struct ApplicationData {
     pub renderer : Renderer,
     pub geometry : GeometryRenderer<SharedState>,
     pub interface : InterfaceRenderer<InterfaceState>,
-    pub shared_state : Rc<RefCell<SharedState>>
+    pub shared_state : Arc<Mutex<SharedState>>,
 }
-
-impl ApplicationData {
-    fn load_game_install(&mut self, cdn : &str, build: &str, path : &PathBuf) -> Result<(), Error> {
-        let fs = match FileSystem::open(path, cdn, build) {
-            Ok(fs) => Some(fs),
-            Err(err) => return Err(err),
-        };
-
-        self.shared_state.borrow_mut().fs = fs;
-
-        Ok(())
-    }
-}
-
 
 pub struct SharedState {
     fs : Option<FileSystem>,
 }
 impl SharedState {
-    pub fn load_game_install(&mut self, cdn : &str, build : &str, path : PathBuf) -> bool {
-        self.fs = match FileSystem::open(path.parent().unwrap(), build, cdn) {
-            Ok(fs) => Some(fs),
-            Err(_) => None
-        };
+    /// Asynchronously loads a game installation. Returns a receiver that needs to be awaited to retrieve the file system.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `runtime` - The Tokio runtime in charge of running the CASC filesystem loading task.
+    /// * `cdn` - The CDN key of the configuration to load.
+    /// * `build` - The build key of the configuration to load.
+    /// * `path` - Path on disk of the game installation.
+    pub fn async_load_game_install(self : &mut SharedState, runtime: &Runtime, cdn : String, build : String, path : PathBuf) {
+        let (tx, mut rx) = oneshot::channel();
+        runtime.spawn(async move {
+            match FileSystem::open(path, build, cdn) {
+                Ok(fs) => { _ = tx.send(fs); }, // We don't care if the listener gave up
+                Err(_) => { },
+            };
+        });
 
-        self.fs.is_some()
+        let fs = rx.try_recv();
     }
-}
-impl Default for SharedState {
-    fn default() -> Self {
+    
+    pub fn default() -> Self {
         Self { fs: None }
     }
 }

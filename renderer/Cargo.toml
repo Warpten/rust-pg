@@ -21,3 +21,4 @@ shaderc = "0.8.3"
 nohash-hasher = { workspace = true }
 bytemuck = "1.16.0"
 # renderer_derive = { path = "../renderer_derive" }
+tokio = { workspace = true }
