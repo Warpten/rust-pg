@@ -137,4 +137,29 @@ impl<T> AsyncValue<T> {
             _ => (),
         };
     }
+
+    pub fn is_pending(&self) -> bool {
+        if let AsyncValue::Pending(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        if let AsyncValue::None = self {
+            true
+        } else {
+            false
+        }
+    }
+
+
+    pub fn is_value(&self) -> bool {
+        if let AsyncValue::Value(_) = self {
+            true
+        } else {
+            false
+        }
+    }
 }

@@ -246,12 +246,7 @@ impl InterfaceState {
 
             if let Some(_) = find_flavor_path(&self.installation_path, product) {
                 let currently_loading = if let Ok(state) = self.state.read() {
-                    if let AsyncValue::Pending(_) = &state.fs {
-                        true
-                    } else {
-                        // Eithor None or Value, either allows to show the button
-                        false
-                    }
+                    state.fs.is_pending()
                 } else {
                     false
                 };
