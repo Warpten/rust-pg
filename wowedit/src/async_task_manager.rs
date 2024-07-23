@@ -1,6 +1,14 @@
 use tokio::{runtime::{Builder, Runtime}, sync::oneshot};
 use tokio::sync::oneshot::error::TryRecvError;
 
+/// An asynchronous task manager.
+///
+/// # Description
+///
+/// This structure is essentially a wrapper around a tokio [`Runtime`]. It allows consumer code to
+/// start asynchronous tasks and obtain an handle to the eventual result of said tasks.
+///
+/// There is, for the moment, no concept of cancellation or timeouts.
 pub struct AsyncTaskManager {
     runtime : Runtime,
 }
@@ -62,6 +70,11 @@ pub struct AsyncOneshotTaskHandle<T> {
     rx : oneshot::Receiver<T>,
 }
 impl<T> AsyncOneshotTaskHandle<T> {
+    /// Attempts to read the result of this asynchronous operation and feeds it to the given lambda.
+    ///
+    /// # Arguments
+    ///
+    /// * `handler` - A lambda that will process the value.
     pub fn try_poll(&mut self, handler : impl FnOnce(T)) {
         match self.rx.try_recv() {
             Ok(value) => handler(value),
@@ -77,14 +90,21 @@ impl<T> AsyncOneshotTaskHandle<T> {
         }
     }
 
+    /// Attempts to return the value of this asynchronous operation.
+    ///
+    /// This method cannot fail spuriously.
     fn poll(&mut self) -> Result<T, TryRecvError> {
         self.rx.try_recv()
     }
 }
 
+/// An asynchronous value holder.
 pub enum AsyncValue<T> {
+    /// This object currently holds no value.
     None,
+    /// The value of this object is currently being calculated by a task associated with the given handle.
     Pending(AsyncOneshotTaskHandle<T>),
+    /// This object currently holds the given value.
     Value(T)
 }
 impl<T> AsyncValue<T> {
@@ -95,7 +115,16 @@ impl<T> AsyncValue<T> {
         }
     }
 
-    /// Updates this asynchronous value
+    /// Updates this asynchronous value.
+    ///
+    /// # Description
+    ///
+    /// If this is an instance of [`AsyncValue::Pending`], the underlying handle is polled
+    /// * If a value is found, this instance is updated to become [`AsyncValue::Value`].
+    /// * If a value is not found because the operation was aborted or failed to complete, this instance
+    ///   is updated to become [`AsyncValue::None`]
+    /// * If a value is not found because the operation has not yet completed, this instance is
+    ///   untouched so that subsequent calls get another chance.
     pub fn try_update(&mut self) {
         match self {
             AsyncValue::Pending(value) => {
