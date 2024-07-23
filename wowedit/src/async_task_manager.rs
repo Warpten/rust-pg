@@ -1,4 +1,5 @@
 use tokio::{runtime::{Builder, Runtime}, sync::oneshot};
+use tokio::sync::oneshot::error::TryRecvError;
 
 pub struct AsyncTaskManager {
     runtime : Runtime,
@@ -15,27 +16,35 @@ impl AsyncTaskManager {
     /// # Arguments
     /// 
     /// * `supplier` - A lambda providing the value to publish.
-    /// * `handler` - A lambda that will be called whenever [`AsyncOneshotTaskHandle::poll()`] reads a
-    ///               value from the async operation.
     /// 
     /// # Returns
     /// 
     /// A handle that can be [polled](AsyncOneshotTaskHandle::poll) for a value.
-    pub fn oneshot<T, S, H>(&mut self, supplier : S, handler : H) -> AsyncOneshotTaskHandle<T>
-        where S : 'static + Send + FnMut() -> T, T : Send,
-              H : 'static + FnMut(T)
+    pub fn oneshot<T, S>(&mut self, supplier : S) -> AsyncOneshotTaskHandle<T>
+        where S : 'static + Send + FnOnce() -> T,
+              T : 'static + Send
     {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
             _ = tx.send(supplier());
         });
 
-        AsyncOneshotTaskHandle { rx, handler: Box::new(handler) }
+        AsyncOneshotTaskHandle { rx }
     }
 
-    pub fn oneshot_maybe<T, S, H>(&mut self, supplier : S, handler : H) -> AsyncOneshotTaskHandle<T>
-        where S : 'static + Send + FnMut() -> Option<T>, T : Send,
-              H : 'static + FnMut(T)
+    /// Starts an asynchronous task over the execution of the provided `supplier`.
+    ///
+    /// # Arguments
+    ///
+    /// * `supplier` - A lambda providing an optional value to publish. If the optional is [None], no
+    ///                value is sent.
+    ///
+    /// # Returns
+    ///
+    /// A handle that can be [polled](AsyncOneshotTaskHandle::poll) for a value.
+    pub fn oneshot_maybe<T, S>(&mut self, supplier : S) -> AsyncOneshotTaskHandle<T>
+        where S : 'static + Send + FnOnce() -> Option<T>,
+              T : 'static + Send
     {
         let (tx, rx) = oneshot::channel();
         self.runtime.spawn(async move {
@@ -45,21 +54,31 @@ impl AsyncTaskManager {
             };
         });
 
-        AsyncOneshotTaskHandle { rx, handler: Box::new(handler) }
+        AsyncOneshotTaskHandle { rx }
     }
 }
 
 pub struct AsyncOneshotTaskHandle<T> {
     rx : oneshot::Receiver<T>,
-    handler : Box<dyn FnMut(T)>,
 }
 impl<T> AsyncOneshotTaskHandle<T> {
-    pub fn poll(&mut self) {
+    pub fn try_poll(&mut self, handler : impl FnOnce(T)) {
         match self.rx.try_recv() {
-            Ok(value) => (self.handler)(value),
-            Err(oneshot::error::TryRecvError::Empty) => { },
-            Err(oneshot::error::TryRecvError::Closed) => { },
+            Ok(value) => handler(value),
+            Err(TryRecvError::Empty) => { },
+            Err(TryRecvError::Closed) => { },
         };
+    }
+
+    fn poll_value(&mut self) -> Option<T> {
+        match self.rx.try_recv() {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        }
+    }
+
+    fn poll(&mut self) -> Result<T, TryRecvError> {
+        self.rx.try_recv()
     }
 }
 
@@ -69,10 +88,24 @@ pub enum AsyncValue<T> {
     Value(T)
 }
 impl<T> AsyncValue<T> {
-    pub fn try_poll(&mut self) {
+    pub fn try_poll(&mut self, handler : impl FnOnce(T)) {
         match self {
-            AsyncValue::Pending(mut handle) => handle.poll(),
+            AsyncValue::Pending(handle) => handle.try_poll(handler),
             _ => ()
         }
+    }
+
+    /// Updates this asynchronous value
+    pub fn try_update(&mut self) {
+        match self {
+            AsyncValue::Pending(value) => {
+                match value.poll() {
+                    Ok(value) => *self = AsyncValue::Value(value),
+                    Err(TryRecvError::Closed) => *self = AsyncValue::None,
+                    Err(TryRecvError::Empty) => { /* do nothing, still waiting */ }
+                }
+            },
+            _ => (),
+        };
     }
 }

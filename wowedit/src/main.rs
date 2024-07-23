@@ -2,10 +2,10 @@ use std::borrow::BorrowMut;
 #[allow(dead_code)]
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
-use renderer::application::{Application, ApplicationOptions, RendererError};
+use renderer::application::{Application, ApplicationOptions};
 use renderer::gui::context::{InterfaceRenderer, InterfaceOptions};
 use renderer::orchestration::render::Renderer;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
@@ -13,10 +13,9 @@ use renderer::vk::renderer::{DynamicState, RendererOptions};
 use ash::vk;
 use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
 use winit::event::WindowEvent;
 use crate::application::{ApplicationData, SharedState};
-use crate::async_task_manager::AsyncTaskManager;
 
 mod application;
 mod events;
@@ -40,7 +39,8 @@ fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Arc<RwLock<Sh
 
 fn make_interface_renderer(renderer : &mut Renderer, shared_state : Arc<RwLock<SharedState>>) -> InterfaceRenderer<InterfaceState> {
     let _theme = theming::themes::StandardDark{};
-    let style = egui::Style::default(); // _theme.custom_style();
+    let mut style = egui::Style::default(); // _theme.custom_style();
+    style.interaction.selectable_labels = false;
 
     let mut fonts = FontDefinitions::default();
     load_fonts(&mut fonts, &None, "./assets/fonts");
@@ -74,31 +74,30 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
     }
 }
 
-fn prepare() -> ApplicationOptions {
-    ApplicationOptions::default()
-        .title("Send help")
-        .resolution([1280, 720])
-}
-
-fn render(_app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
-    { // Scoped lock
-        let mut state = data.shared_state.write().unwrap();
-        state.fs.try_poll();
-    }
-
-    data.updater().draw()
-}
-
 fn window_event(_app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {
     _ = data.interface.egui.on_window_event(data.renderer.context.window.handle(), event)
+}
+
+fn update(_app : &mut Application, data : &mut ApplicationData) {
+    { // Scoped lock
+        let mut state = data.shared_state.write().unwrap();
+        state.fs.try_update();
+    }
 }
 
 fn main() {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
 
     Application::build(setup)
-        .prepare(prepare)
-        .render(render)
+        .update(update)
+        .prepare(|| {
+            ApplicationOptions::default()
+                .title("Send help")
+                .resolution([1280, 720])
+        })
+        .render(|_app, data| {
+            data.updater().draw()
+        })
         .window_event(window_event)
         .run(&runtime);
 }

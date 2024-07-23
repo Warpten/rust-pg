@@ -98,6 +98,10 @@ impl Value {
 
 pub struct OptionalValue<'a>(Option<&'a Value>);
 impl<'a> OptionalValue<'a> {
+    pub fn unsafe_raw(self : OptionalValue<'a>) -> &'a str {
+        self.0.unwrap().raw()
+    }
+
     pub fn try_raw(self : OptionalValue<'a>) -> Result<&'a str, Error> {
         if let Some(this) = self.0 {
             Ok(this.raw())
