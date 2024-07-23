@@ -35,7 +35,7 @@ pub struct Graph {
 impl Graph { // Graph compilation functions
     /// Builds this graph into a render pass.
     pub fn build(&mut self) {
-        let topology = {
+        /*let topology = {
             let mut sorter = TopologicalSorter::<PassID>::default();
             for pass in self.passes.iter() {
                 for resource in pass.inputs() {
@@ -49,7 +49,7 @@ impl Graph { // Graph compilation functions
                 Ok(sorted) => sorted,
                 Err(_) => panic!("Cyclic graph detected"),
             }
-        };
+        };*/
 
         // Walk the topology and process resources
         /*let graphics_queues = self.renderer.device.get_queues(QueueAffinity::Graphics);

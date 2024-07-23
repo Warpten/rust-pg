@@ -1,7 +1,7 @@
 use std::{ffi::{CStr, CString}, sync::Arc};
 
 use egui_winit::winit::{event::{Event, WindowEvent}, event_loop::{ControlFlow, EventLoop}, keyboard::ModifiersState};
-
+use tokio::runtime::Runtime;
 use crate::orchestration::render::RendererAPI;
 use crate::vk::context::Context;
 use crate::window::Window;
@@ -49,6 +49,7 @@ pub type UpdateFn<T> = fn(&mut Application, &mut T);
 pub type RenderFn<T> = fn(&mut Application, &mut T) -> Result<(), RendererError>;
 pub type WindowEventFn<T> = fn(&mut Application, &mut T, event : &WindowEvent);
 pub type InterfaceFn<T> = fn(&mut T, ctx : &mut egui::Context);
+pub type UpdateRuntimeFn = fn(&mut Application, &AsyncTaskManager);
 
 pub struct ApplicationBuilder<State : 'static> {
     pub prepare : Option<PrepareFn>,
@@ -56,12 +57,14 @@ pub struct ApplicationBuilder<State : 'static> {
     pub update : Option<UpdateFn<State>>,
     pub event : Option<WindowEventFn<State>>,
     pub render : Option<RenderFn<State>>,
+    pub update_runtime : Option<UpdateRuntimeFn>,
 }
 
 pub struct ApplicationCallbacks<State : 'static> {
     pub prepare : PrepareFn,
     pub setup : SetupFn<State>,
     pub update : UpdateFn<State>,
+    pub update_runtime : UpdateRuntimeFn,
     pub event : WindowEventFn<State>,
     pub render : RenderFn<State>,
 }
@@ -77,6 +80,11 @@ impl<T : RendererAPI> ApplicationBuilder<T> {
         self
     }
 
+    pub fn update_runtime(mut self, update : UpdateRuntimeFn) -> Self {
+        self.update_runtime = Some(update);
+        self;
+    }
+
     pub fn render(mut self, render: RenderFn<T>) -> Self {
         self.render = Some(render);
         self
@@ -87,21 +95,22 @@ impl<T : RendererAPI> ApplicationBuilder<T> {
         self
     }
 
-    pub fn run(self) {
-        main_loop(self);
+    pub fn run(self, runtime: &Runtime) {
+        main_loop(self, runtime);
     }
 }
 
 #[allow(dead_code, unused)]
-fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>) {
+fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>, runtime: &Runtime) {
     let event_loop = EventLoop::new().unwrap();
 
     let builder = ApplicationCallbacks {
         prepare: builder.prepare.unwrap_or(ApplicationOptions::default),
         setup: builder.setup,
-        update: builder.update.unwrap_or(|_, _| { }),
-        event: builder.event.unwrap_or(|_, _, _| { }),
+        update: builder.update.unwrap_or(|_, _| {}),
+        event: builder.event.unwrap_or(|_, _, _| {}),
         render: builder.render.unwrap_or(|_, _| Ok(())),
+        update_runtime: builder.update_runtime.unwrap_or(|_, _| {})
     };
 
     let mut settings = (builder.prepare)();
@@ -114,6 +123,8 @@ fn main_loop<T : RendererAPI + 'static>(builder: ApplicationBuilder<T>) {
 
     event_loop.run(move |event, target| {
         target.set_control_flow(ControlFlow::Poll);
+
+        (builder.update_runtime)(&mut app, runtime);
 
         if !app_data.is_minimized() {
             if dirty_swapchain {
@@ -162,6 +173,7 @@ impl Application {
             update : None,
             event : None,
             render : None,
+            update_runtime : None,
         }
     }
 
@@ -178,6 +190,8 @@ impl Application {
         });
         window.create_surface(&context);
 
-        (Self { context }, window)
+        (Self {
+            context,
+        }, window)
     }
 }

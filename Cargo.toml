@@ -19,3 +19,6 @@ shaderc = "0.8.3"
 nohash-hasher = "0.2.0"
 puffin = { version = "0.19", default-features = false }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator", branch = "ash-0.38", default-features = false, features = ["vulkan", "visualizer"] }
+
+tokio = { version = "1.38.1", features = ["full"] } # I'd rather not, but... fine.
+futures = { version = "0.3.30" }

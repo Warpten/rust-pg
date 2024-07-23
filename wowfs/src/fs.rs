@@ -16,14 +16,14 @@ pub struct FileSystem {
     encoding : Encoding,
 }
 impl FileSystem {
-    pub fn open<P>(path : P, build : &str, cdn : &str) -> Result<FileSystem, Error> where P : AsRef<Path> {
-        let build = path.as_ref().join(format!("Data/config/{}/{}/{}", &build[0..2], &build[2..4], build));
+    pub fn open<P, S>(path : P, build : S, cdn : S) -> Result<FileSystem, Error> where P : AsRef<Path>, S : AsRef<str> {
+        let build = path.as_ref().join(format!("Data/config/{}/{}/{}", &build.as_ref()[0..2], &build.as_ref()[2..4], build.as_ref()));
         let build = match Config::from_file(&build) {
             Ok(file) => (build, file),
             Err(_) => return Err(Error::FileNotFound(PathBuf::from(build)))
         };
 
-        let cdn = path.as_ref().join(format!("Data/config/{}/{}/{}", &cdn[0..2], &cdn[2..4], cdn));
+        let cdn = path.as_ref().join(format!("Data/config/{}/{}/{}", &cdn.as_ref()[0..2], &cdn.as_ref()[2..4], cdn.as_ref()));
         let cdn = match Config::from_file(&cdn) {
             Ok(file) => (cdn, file),
             Err(_) => return Err(Error::FileNotFound(PathBuf::from(cdn)))

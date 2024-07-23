@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::mem::{offset_of, size_of};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use ash::vk;
 use puffin::profile_scope;
 use renderer::{orchestration::{render::Renderer, rendering::{Renderable, RenderingContext}}, traits::handle::Handle, vk::{buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer}, command_pool::CommandPool, frame_data::FrameData, framebuffer::Framebuffer, pipeline::{layout::{PipelineLayout, PipelineLayoutInfo}, DepthOptions, Pipeline, PipelineInfo, Vertex}, render_pass::{RenderPass, SubpassAttachment}, swapchain::Swapchain}};
@@ -95,11 +96,11 @@ pub struct GeometryRenderer<S> {
     pipeline : Pipeline,
     render_pass : RenderPass,
 
-    pub state : Rc<RefCell<S>>,
+    pub state : Arc<Mutex<S>>,
 }
 
 impl<S> GeometryRenderer<S> {
-    pub fn new(renderer : &Renderer, is_presenting : bool, state : Rc<RefCell<S>>) -> Self {
+    pub fn new(renderer : &Renderer, is_presenting : bool, state : Arc<Mutex<S>>) -> Self {
         let render_pass = renderer.swapchain.create_render_pass(is_presenting)
             .dependency(
                 vk::SUBPASS_EXTERNAL,

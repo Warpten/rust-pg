@@ -13,14 +13,18 @@ anyhow = "1.0.82"
 thiserror = "1.0.59"
 md5 = "0.7.0"
 enumflags2 = "0.7.9"
-renderer = { path = "../renderer" }
-wowfs = { path = "../wowfs" }
 winit = "^0.29.4" # Synchronize this with whatever egui-winit depends on
 ash = { workspace = true }
 egui = { workspace = true }
 egui_extras = { workspace = true }
 egui-winit = { workspace = true }
 gpu-allocator = { workspace = true }
+
+renderer = { path = "../renderer" }
+wowfs = { path = "../wowfs" }
+
+tokio = { workspace = true }
+futures = { workspace = true }
 
 [build-dependencies]
 vergen = { version = "8.3.1", features = [ "build", "git", "gitcl" ] }

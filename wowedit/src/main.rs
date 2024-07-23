@@ -1,27 +1,28 @@
 #[allow(dead_code)]
 
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
-
+use std::sync::{Arc, Mutex};
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
 use renderer::gui::context::{InterfaceRenderer, InterfaceOptions};
-use renderer::orchestration::render::{Renderer, RendererAPI};
+use renderer::orchestration::render::Renderer;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
 use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
+use tokio::runtime::{Builder, Runtime};
 use winit::event::WindowEvent;
 use crate::application::{ApplicationData, SharedState};
+use crate::async_task_manager::AsyncTaskManager;
 
 mod application;
 mod events;
 mod interface;
 mod theming;
 mod rendering;
+mod async_task_manager;
 
 fn make_vk_renderer(app: &mut Application, window : Window) -> Renderer {
     let renderer = RendererOptions::default()
@@ -32,11 +33,11 @@ fn make_vk_renderer(app: &mut Application, window : Window) -> Renderer {
         .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()])
 }
 
-fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<SharedState>>) -> GeometryRenderer<SharedState> {
+fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Arc<Mutex<SharedState>>) -> GeometryRenderer<SharedState> {
     GeometryRenderer::new(renderer, false, shared_state.clone())
 }
 
-fn make_interface_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<SharedState>>) -> InterfaceRenderer<InterfaceState> {
+fn make_interface_renderer(renderer : &mut Renderer, shared_state : Arc<Mutex<SharedState>>) -> InterfaceRenderer<InterfaceState> {
     let _theme = theming::themes::StandardDark{};
     let style = egui::Style::default(); // _theme.custom_style();
 
@@ -44,9 +45,7 @@ fn make_interface_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<S
     load_fonts(&mut fonts, &None, "./assets/fonts");
 
     let state_copy = shared_state.clone();
-    let options = InterfaceOptions::default(|ctx, state : &mut InterfaceState| {
-        state.render(ctx);
-    }, InterfaceState::default(state_copy))
+    let options = InterfaceOptions::default(InterfaceState::default(state_copy))
         .fonts(fonts)
         .style(style);
 
@@ -55,7 +54,7 @@ fn make_interface_renderer(renderer : &mut Renderer, shared_state : Rc<RefCell<S
 
 fn setup(app : &mut Application, window : Window) -> ApplicationData {
     // State shared across multiple objects
-    let shared_state = Rc::new(RefCell::new(SharedState::default()));
+    let shared_state = Arc::new(Mutex::new(SharedState::default()));
 
     // Shared Vulkan rendering "engine"
     let mut renderer = make_vk_renderer(app, window);
@@ -69,7 +68,7 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
         geometry,
         interface,
         renderer,
-        shared_state
+        shared_state,
     }
 }
 
@@ -79,20 +78,27 @@ fn prepare() -> ApplicationOptions {
         .resolution([1280, 720])
 }
 
-pub fn render(app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
+fn render(_app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
     data.updater().draw()
 }
 
-pub fn window_event(app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {
+fn window_event(_app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {
     _ = data.interface.egui.on_window_event(data.renderer.context.window.handle(), event)
 }
 
+fn update_runtime(_app : &mut Application, runtime : &AsyncTaskManager) {
+
+}
+
 fn main() {
+    let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+
     Application::build(setup)
         .prepare(prepare)
         .render(render)
         .window_event(window_event)
-        .run();
+        .update_runtime(update_runtime)
+        .run(&runtime);
 }
 
 fn load_fonts<P>(def : &mut FontDefinitions, mut family : &Option<FontFamily>, dir : P) where P : AsRef<Path> {

@@ -8,6 +8,7 @@ use bytemuck::bytes_of;
 use egui::epaint::{ImageDelta, Primitive};
 use egui::{Color32, Context, FontDefinitions, Style, TextureId, TexturesDelta, ViewportId};
 use puffin::profile_scope;
+use tokio::runtime::Runtime;
 use crate::orchestration::rendering::{Renderable, RenderingContext};
 use crate::traits::handle::Handle;
 use crate::vk::buffer::{Buffer, DynamicBufferBuilder, DynamicInitializer, StaticBufferBuilder, StaticInitializer};
@@ -76,7 +77,7 @@ impl Vertex for InterfaceVertex {
     }
 }
 
-impl<T> Renderable for InterfaceRenderer<T> {
+impl<T : InterfaceState> Renderable for InterfaceRenderer<T> {
     fn record_commands(&mut self, swapchain : &Swapchain, frame : &FrameData) {
         profile_scope!("GUI command recording");
 
@@ -86,7 +87,7 @@ impl<T> Renderable for InterfaceRenderer<T> {
         let raw_input = self.egui.take_egui_input(window.handle());
         self.egui_ctx.begin_frame(raw_input);
 
-        (self.delegate)(&self.egui_ctx, &mut self.state);
+        self.state.render(&self.egui_ctx);
 
         let output = self.egui_ctx.end_frame();
         self.egui.handle_platform_output(window.handle(), output.platform_output.clone());
@@ -115,9 +116,11 @@ pub struct InterfaceFrameData {
     descriptor_set_layout : DescriptorSetLayout,
 }
 
-type InterfaceRenderDelegate<T> = fn(&Context, &mut T);
+pub trait InterfaceState {
+    fn render(&mut self, ctx : &egui::Context);
+}
 
-pub struct InterfaceRenderer<State> {
+pub struct InterfaceRenderer<State : InterfaceState> {
     egui_ctx : Context,
     pub egui : egui_winit::State,
 
@@ -132,25 +135,21 @@ pub struct InterfaceRenderer<State> {
     // The sampler used when updating textures used by the GUI.
     sampler : Sampler,
     textures : HashMap<TextureId, Texture>,
-    delegate : InterfaceRenderDelegate<State>,
 
     // User data structures
     pub state : State,
 }
 
-pub struct InterfaceOptions<State> {
+pub struct InterfaceOptions<State : InterfaceState> {
     /// The egui context.
     pub context : Context,
-    /// A delegate that will be called 
-    pub delegate : InterfaceRenderDelegate<State>,
     pub state : State,
 }
-impl<S> InterfaceOptions<S> {
-    pub fn default(delegate : InterfaceRenderDelegate<S>, state: S) -> InterfaceOptions<S> {
+impl<S : InterfaceState> InterfaceOptions<S> {
+    pub fn default(state: S) -> InterfaceOptions<S> {
         Self {
             context : Context::default(),
             state,
-            delegate,
         }
     }
 
@@ -165,7 +164,7 @@ impl<S> InterfaceOptions<S> {
     }
 }
 
-impl<State> InterfaceRenderer<State> {
+impl<State : InterfaceState> InterfaceRenderer<State> {
     fn create_render_pass(swapchain : &Swapchain, is_presenting : bool, context : &RenderingContext) -> RenderPass {
         let final_format = if is_presenting {
             vk::ImageLayout::PRESENT_SRC_KHR
@@ -311,8 +310,6 @@ impl<State> InterfaceRenderer<State> {
             state : options.state,
             // visualizer : AllocatorVisualizer::new(),
 
-            delegate : options.delegate,
-            
             framebuffers : {
                 let mut framebuffers = vec![];
                 for image in &swapchain.images {
@@ -326,7 +323,7 @@ impl<State> InterfaceRenderer<State> {
 }
 
 // Actual user API
-impl<State> InterfaceRenderer<State> {
+impl<State : InterfaceState> InterfaceRenderer<State> {
     pub fn begin_frame(&mut self, window : &Window) {
         let raw_input = self.egui.take_egui_input(window.handle());
         self.egui_ctx.begin_frame(raw_input);
