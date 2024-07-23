@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs::File, io::{BufReader, Error, ErrorKind, Read, Seek}, path::PathBuf};
+use std::{fmt::Display, fs::File, io::{BufReader, Error, ErrorKind, Read}, path::PathBuf};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -12,12 +12,10 @@ impl PartialEq<u32> for FourCC {
 
 impl Display for FourCC {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            write!(f, "{}{}{}{}", char::from_u32((self.0 >> 0) & 0xFF).unwrap_or('?'),
-                char::from_u32((self.0 >> 8) & 0xFF).unwrap_or('?'),
-                char::from_u32((self.0 >> 16) & 0xFF).unwrap_or('?'),
-                char::from_u32((self.0 >> 24) & 0xFF).unwrap_or('?'))
-        }
+        write!(f, "{}{}{}{}", char::from_u32((self.0 >> 0) & 0xFF).unwrap_or('?'),
+            char::from_u32((self.0 >> 8) & 0xFF).unwrap_or('?'),
+            char::from_u32((self.0 >> 16) & 0xFF).unwrap_or('?'),
+            char::from_u32((self.0 >> 24) & 0xFF).unwrap_or('?'))
     }
 }
 

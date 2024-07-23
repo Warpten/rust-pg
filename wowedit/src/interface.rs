@@ -2,10 +2,12 @@ use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::{Column, TableBody, TableBuilder};
 use renderer::gui::context::InterfaceState as InterfaceStateTrait;
 use tokio::runtime::Runtime;
 use wowfs::file_formats::psv::PSV;
+use wowfs::fs::FileSystem;
+use crate::async_task_manager::AsyncValue;
 use crate::SharedState;
 
 pub struct InterfaceState {    
@@ -120,7 +122,7 @@ impl InterfaceStateTrait for InterfaceState {
                 .fill(egui::Color32::from_rgba_premultiplied(30, 30, 30, 127)))
             .show(ctx, |ui| {
                 match self.active_tab {
-                    Tab::Home     => self.render_home(ctx, ui, todo!()),
+                    Tab::Home     => self.render_home(ctx, ui),
                     Tab::Database => self.render_database(ctx, ui),
                     Tab::World    => self.render_world(ctx, ui),
                     Tab::Model    => self.render_model(ctx, ui),
@@ -195,16 +197,17 @@ macro_rules! include_license {
 }
 
 impl InterfaceState {
-    fn render_home(&mut self, ctx : &Context, ui : &mut Ui, runtime : &Runtime) {
+    fn render_home(&mut self, ctx : &Context, ui : &mut Ui) {
         ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
             ui.label(RichText::new("Game installation")
                 .size(18.0));
 
             ui.label("Select the path to your game installation directory");
-            egui::TextEdit::singleline(&mut self.installation_path)
+            TextEdit::singleline(&mut self.installation_path)
                 .margin(Margin::symmetric(6.0, 8.0))
                 .ui(ui);
 
+            // Render build table
             let build_info = PSV::from_file(&Path::new(&self.installation_path).join(".build.info"));
             match build_info {
                 Ok(build_info) => {
@@ -226,42 +229,58 @@ impl InterfaceState {
                             header.col(|_| { });
                         })
                         .body(|mut body| {
-                            build_info.for_each_record(move |record| {
-                                // Try to find the directory containing this build.
-                                let product = record.read("Product").try_raw().unwrap_or("??");
-
-                                if let Some(_) = find_flavor_path(&self.installation_path, product) {
-                                    body.row(18.0, |mut row | {
-                                        let version = record.read("Version").try_raw().unwrap_or("??");
-                                        let branch = record.read("Branch").try_raw().unwrap_or("??");
-                                        let build_key = record.read("Build Key").try_raw().unwrap_or("??");
-                                        let cdn_key = record.read("CDN Key").try_raw().unwrap_or("??");
-    
-                                        row.col(|ui| { Label::new(version).selectable(false).ui(ui); });
-                                        row.col(|ui| { Label::new(branch).selectable(false).ui(ui); });
-                                        row.col(|ui| { Label::new(build_key).selectable(false).ui(ui); });
-                                        row.col(|ui| { Label::new(cdn_key).selectable(false).ui(ui); });
-                                        row.col(|ui| {
-                                            if ui.button("Open").clicked() {
-                                                let state = self.state.lock().unwrap().borrow_mut();
-                                                state.async_load_game_install(
-                                                    runtime,
-                                                    cdn_key.to_string(),
-                                                    build_key.to_string(),
-                                                    PathBuf::from(&self.installation_path)
-                                                );
-                                            }
-                                        });
-                                    });
-                                }
-                            });
-                        })
-                        ;
-                    
+                            self.render_build_table_body(&build_info, &mut body);
+                        });
                 },
                 Err(_) => {
                     ui.label(RichText::new("Could not find .build.info.").color(Color32::from_rgb(200, 0, 0)));
                 },
+            }
+        });
+    }
+
+    fn render_build_table_body(&mut self, build_info : &PSV, body : &mut TableBody) {
+        build_info.for_each_record(move |record| {
+            // Try to find the directory containing this build.
+            let product = record.read("Product").unsafe_raw();
+
+            if let Some(_) = find_flavor_path(&self.installation_path, product) {
+                body.row(18.0, |mut row | {
+                    let version = record.read("Version").unsafe_raw();
+                    let branch = record.read("Branch").unsafe_raw();
+                    let build_key = record.read("Build Key").unsafe_raw();
+                    let cdn_key = record.read("CDN Key").unsafe_raw();
+
+                    row.col(|ui| { Label::new(version).ui(ui); });
+                    row.col(|ui| { Label::new(branch).ui(ui); });
+                    row.col(|ui| { Label::new(build_key).ui(ui); });
+                    row.col(|ui| { Label::new(cdn_key).ui(ui); });
+                    row.col(|ui| {
+                        if let Ok(state) = self.state.read() {
+                            match &state.fs {
+                                AsyncValue::Pending(_) => {
+                                    // Pending, display a spinner on all lines
+                                    ui.spinner();
+                                    return; // Early return out
+                                }
+                                _ => {
+                                    // Either None or Value. Regardless, this means we can allow loading
+                                    // a new one, so skip this case.
+                                }
+                            }
+                        }
+
+                        if !ui.button("Open").clicked() {
+                            return;
+                        }
+
+                        // If the code gets here then there is no filesystem loading so we can load a new one
+                        if let Ok(mut state) = self.state.write() {
+                            state.async_load_game_install(cdn_key.to_string(), build_key.to_string(),
+                                PathBuf::from(&self.installation_path));
+                        }
+                    });
+                });
             }
         });
     }

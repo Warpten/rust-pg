@@ -1,12 +1,11 @@
+use std::{hint, slice};
+use std::{cmp::Ordering, ffi::CString, sync::Arc};
 use std::backtrace::Backtrace;
 use std::collections::HashSet;
 use std::ffi::CStr;
 use std::ptr::null;
-use std::{hint, slice};
-use std::{cmp::Ordering, ffi::CString, sync::Arc};
 
 use ash::vk;
-use tokio::runtime::Runtime;
 
 use crate::traits::handle::Handle;
 use crate::vk::physical_device::PhysicalDevice;
