@@ -245,6 +245,17 @@ impl InterfaceState {
             let product = record.read("Product").unsafe_raw();
 
             if let Some(_) = find_flavor_path(&self.installation_path, product) {
+                let currently_loading = if let Ok(state) = self.state.read() {
+                    if let AsyncValue::Pending(_) = &state.fs {
+                        true
+                    } else {
+                        // Eithor None or Value, either allows to show the button
+                        false
+                    }
+                } else {
+                    false
+                };
+
                 body.row(18.0, |mut row | {
                     let version = record.read("Version").unsafe_raw();
                     let branch = record.read("Branch").unsafe_raw();
@@ -256,21 +267,15 @@ impl InterfaceState {
                     row.col(|ui| { Label::new(build_key).ui(ui); });
                     row.col(|ui| { Label::new(cdn_key).ui(ui); });
                     row.col(|ui| {
-                        if let Ok(state) = self.state.read() {
-                            match &state.fs {
-                                AsyncValue::Pending(_) => {
-                                    // Pending, display a spinner on all lines
-                                    ui.spinner();
-                                    return; // Early return out
-                                }
-                                _ => {
-                                    // Either None or Value. Regardless, this means we can allow loading
-                                    // a new one, so skip this case.
-                                }
-                            }
+                        if currently_loading {
+                            // Pending, display a spinner on all lines
+                            ui.spinner();
+
+                            // Important. Prevents the load button from being inserted.
+                            return;
                         }
 
-                        if !ui.button("Open").clicked() {
+                        if !ui.button("Load").clicked() {
                             return;
                         }
 
