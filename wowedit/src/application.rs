@@ -1,11 +1,12 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use futures::TryFutureExt;
 use renderer::gui::context::InterfaceRenderer;
 use renderer::orchestration::render::{Renderer, RendererAPI, RendererUpdater};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use wowfs::fs::FileSystem;
+use crate::async_task_manager::{AsyncTaskManager, AsyncValue};
 use crate::interface::InterfaceState;
 use crate::rendering::geometry::GeometryRenderer;
 
@@ -13,11 +14,13 @@ pub(in crate) struct ApplicationData {
     pub renderer : Renderer,
     pub geometry : GeometryRenderer<SharedState>,
     pub interface : InterfaceRenderer<InterfaceState>,
-    pub shared_state : Arc<Mutex<SharedState>>,
+
+    pub shared_state : Arc<RwLock<SharedState>>,
 }
 
 pub struct SharedState {
-    fs : Option<FileSystem>,
+    pub fs : AsyncValue<FileSystem>,
+    pub task_mgr : AsyncTaskManager,
 }
 impl SharedState {
     /// Asynchronously loads a game installation. Returns a receiver that needs to be awaited to retrieve the file system.
@@ -29,19 +32,33 @@ impl SharedState {
     /// * `build` - The build key of the configuration to load.
     /// * `path` - Path on disk of the game installation.
     pub fn async_load_game_install(self : &mut SharedState, runtime: &Runtime, cdn : String, build : String, path : PathBuf) {
-        let (tx, mut rx) = oneshot::channel();
-        runtime.spawn(async move {
+        let task_handle = self.task_mgr.oneshot_maybe(move || {
             match FileSystem::open(path, build, cdn) {
-                Ok(fs) => { _ = tx.send(fs); }, // We don't care if the listener gave up
-                Err(_) => { },
-            };
+                Ok(value) => Some(value),
+                Err(_) => None
+            }
+        }, |fs| {
+            self.fs = AsyncValue::Value(fs);
         });
 
-        let fs = rx.try_recv();
+        match self.fs {
+            AsyncValue::None => {
+                self.fs = AsyncValue::Pending(task_handle)
+            },
+            // Currently loading, abort?
+            AsyncValue::Pending(mut _handle) => {
+                todo!("Filesystem replacement not implemented")
+            },
+            // Already loaded, unload?
+            AsyncValue::Value(_old_fs) => todo!("Filesystem replacement not implemented"),
+        };
     }
     
     pub fn default() -> Self {
-        Self { fs: None }
+        Self {
+            fs: AsyncValue::None,
+            task_mgr : AsyncTaskManager::new()
+        }
     }
 }
 

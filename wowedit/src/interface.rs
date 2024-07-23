@@ -1,5 +1,6 @@
+use std::borrow::BorrowMut;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use egui::{text::LayoutJob, Color32, Context, FontFamily, FontId, FontSelection, Label, Margin, RichText, Style, TextEdit, Ui, Widget};
 use egui_extras::{Column, TableBuilder};
 use renderer::gui::context::InterfaceState as InterfaceStateTrait;
@@ -15,10 +16,10 @@ pub struct InterfaceState {
 
     active_tab : Tab,
 
-    state : Arc<Mutex<SharedState>>,
+    state : Arc<RwLock<SharedState>>,
 }
 impl InterfaceState {
-    pub fn default(state : Arc<Mutex<SharedState>>) -> Self {
+    pub fn default(state : Arc<RwLock<SharedState>>) -> Self {
         Self {
             frame_time_profiler : false,
             allocation_breakdown : false,
@@ -242,7 +243,7 @@ impl InterfaceState {
                                         row.col(|ui| { Label::new(cdn_key).selectable(false).ui(ui); });
                                         row.col(|ui| {
                                             if ui.button("Open").clicked() {
-                                                let state = self.state.lock().unwrap();
+                                                let state = self.state.lock().unwrap().borrow_mut();
                                                 state.async_load_game_install(
                                                     runtime,
                                                     cdn_key.to_string(),

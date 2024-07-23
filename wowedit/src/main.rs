@@ -1,7 +1,8 @@
+use std::borrow::BorrowMut;
 #[allow(dead_code)]
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use egui::{FontData, FontDefinitions, FontFamily};
 use interface::InterfaceState;
 use renderer::application::{Application, ApplicationOptions, RendererError};
@@ -33,11 +34,11 @@ fn make_vk_renderer(app: &mut Application, window : Window) -> Renderer {
         .build(renderer, window, vec![ash::khr::swapchain::NAME.to_owned()])
 }
 
-fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Arc<Mutex<SharedState>>) -> GeometryRenderer<SharedState> {
+fn make_geometry_renderer(renderer : &mut Renderer, shared_state : Arc<RwLock<SharedState>>) -> GeometryRenderer<SharedState> {
     GeometryRenderer::new(renderer, false, shared_state.clone())
 }
 
-fn make_interface_renderer(renderer : &mut Renderer, shared_state : Arc<Mutex<SharedState>>) -> InterfaceRenderer<InterfaceState> {
+fn make_interface_renderer(renderer : &mut Renderer, shared_state : Arc<RwLock<SharedState>>) -> InterfaceRenderer<InterfaceState> {
     let _theme = theming::themes::StandardDark{};
     let style = egui::Style::default(); // _theme.custom_style();
 
@@ -54,7 +55,7 @@ fn make_interface_renderer(renderer : &mut Renderer, shared_state : Arc<Mutex<Sh
 
 fn setup(app : &mut Application, window : Window) -> ApplicationData {
     // State shared across multiple objects
-    let shared_state = Arc::new(Mutex::new(SharedState::default()));
+    let shared_state = Arc::new(RwLock::new(SharedState::default()));
 
     // Shared Vulkan rendering "engine"
     let mut renderer = make_vk_renderer(app, window);
@@ -68,6 +69,7 @@ fn setup(app : &mut Application, window : Window) -> ApplicationData {
         geometry,
         interface,
         renderer,
+
         shared_state,
     }
 }
@@ -79,15 +81,16 @@ fn prepare() -> ApplicationOptions {
 }
 
 fn render(_app: &mut Application, data: &mut ApplicationData) -> Result<(), RendererError> {
+    { // Scoped lock
+        let mut state = data.shared_state.write().unwrap();
+        state.fs.try_poll();
+    }
+
     data.updater().draw()
 }
 
 fn window_event(_app: &mut Application, data : &mut ApplicationData, event: &WindowEvent) {
     _ = data.interface.egui.on_window_event(data.renderer.context.window.handle(), event)
-}
-
-fn update_runtime(_app : &mut Application, runtime : &AsyncTaskManager) {
-
 }
 
 fn main() {
@@ -97,7 +100,6 @@ fn main() {
         .prepare(prepare)
         .render(render)
         .window_event(window_event)
-        .update_runtime(update_runtime)
         .run(&runtime);
 }
 

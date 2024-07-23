@@ -138,11 +138,6 @@ impl BLTE {
     }
 
     pub fn bytes(self) -> Vec<u8> { self.0 }
-
-    pub fn dump<P>(&self, path : P) where P : AsRef<Path> {
-        _ = std::fs::write(&path, &self.0).unwrap();
-        println!("Dumped to {:?}", std::path::absolute(path.as_ref()).unwrap());
-    }
 }
 
 impl Deref for BLTE {
