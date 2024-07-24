@@ -11,6 +11,7 @@ use renderer::orchestration::render::Renderer;
 use renderer::vk::renderer::{DynamicState, RendererOptions};
 
 use ash::vk;
+use re_memory::AccountingAllocator;
 use renderer::window::Window;
 use rendering::geometry::GeometryRenderer;
 use tokio::runtime::Builder;

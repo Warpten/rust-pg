@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum Error {
     FileNotFound(PathBuf),
     EncodingNotFound(String),
+    RootNotFound(String),
     ReadError,
     MalformedArchive,
     Encrypted,
