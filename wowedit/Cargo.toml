@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+lto = true
+codegen-units = 1
+
 # TODO: Clarify the whole dependency hell I have going on here.
 [dependencies]
 puffin_egui = "0.27.0"
@@ -19,6 +24,8 @@ egui = { workspace = true }
 egui_extras = { workspace = true }
 egui-winit = { workspace = true }
 gpu-allocator = { workspace = true }
+re_memory = "0.17.0"
+re_format = "0.17.0"
 
 renderer = { path = "../renderer" }
 wowfs = { path = "../wowfs" }

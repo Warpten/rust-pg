@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use crate::casc::encoding::{Encoding, EncodingLoadFlags};
 use crate::casc::types::{ContentKey, EncodingKey};
 use crate::file_formats::config::Config;
-use crate::file_formats::config::specs::{EncodingSpec, Spec};
+use crate::file_formats::config::specs::{EncodingSpec, RootSpec, Spec};
 use crate::casc::errors::Error;
 use crate::casc::index::{Entry, Index};
+use crate::casc::root::Root;
 
 pub struct FileSystem {
     path : PathBuf,
@@ -14,6 +15,7 @@ pub struct FileSystem {
     cdn : (PathBuf, Config),
     indices : Vec<Index>,
     encoding : Encoding,
+    root : Root,
 }
 impl FileSystem {
     pub fn open<P, S>(path : P, build : S, cdn : S) -> Result<FileSystem, Error> where P : AsRef<Path>, S : AsRef<str> {
@@ -58,9 +60,28 @@ impl FileSystem {
             return Err(Error::EncodingNotFound(encoding_keys.1.to_string()));
         }
 
+        let encoding = encoding.unwrap();
+
+        let root_key = RootSpec::read(&build.1);
+        let root : Option<Root> = find_ckey(&indices, &encoding, &root_key)
+            .into_iter()
+            .inspect(|r| println!("{:?}", r))
+            .find_map(|r| {
+                if let Ok(file) = r.read() {
+                    Root::read(&file.bytes())
+                } else {
+                    None
+                }
+            });
+
+        if root.is_none() {
+            return Err(Error::RootNotFound(root_key.to_string()));
+        }
+
         Ok(Self {
             path : path.as_ref().to_path_buf(),
-            encoding : encoding.unwrap(),
+            encoding,
+            root : root.unwrap(),
             build,
             cdn,
             indices,
@@ -91,6 +112,17 @@ impl FileSystem {
             })
             .collect()
     }
+}
+
+fn find_ckey<'a>(indices : &'a[Index], encoding: &'a Encoding, key : &ContentKey) -> Vec<Entry<'a>> {
+    encoding.find(key)
+        .iter()
+        .flat_map(|entry| {
+            entry.keys
+                .iter()
+                .flat_map(|key| find_ekey(indices, key))
+        })
+        .collect()
 }
 
 fn find_ekey<'a>(indices : &'a[Index], key : &EncodingKey) -> Vec<Entry<'a>>

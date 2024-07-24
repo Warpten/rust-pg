@@ -29,8 +29,13 @@ impl SharedState {
     /// * `path` - Path on disk of the game installation.
     pub fn async_load_game_install(self : &mut SharedState, cdn : String, build : String, path : PathBuf) {
         let task_handle = self.task_mgr.oneshot_maybe(move || {
+            let now = std::time::Instant::now();
+
             match FileSystem::open(path.as_path(), build, cdn) {
-                Ok(value) => Some(value),
+                Ok(value) => {
+                    println!("FS loaded in {:.3?}", now.elapsed());
+                    Some(value)
+                },
                 Err(_) => None
             }
         });

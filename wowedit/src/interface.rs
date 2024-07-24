@@ -88,6 +88,7 @@ impl InterfaceStateTrait for InterfaceState {
                         ui.selectable_value(&mut self.active_tab, Tab::Explorer, "📂 File explorer");
                         ui.selectable_value(&mut self.active_tab, Tab::Settings, "⚙ Settings");
                         ui.selectable_value(&mut self.active_tab, Tab::About, "ℹ About");
+                        ui.selectable_value(&mut self.active_tab, Tab::Debug, "DEBUG MEMORY");
                     });
 
                 ui.with_layout(
@@ -129,6 +130,7 @@ impl InterfaceStateTrait for InterfaceState {
                     Tab::Explorer => self.render_explorer(ctx, ui),
                     Tab::Settings => self.render_settings(ctx, ui),
                     Tab::About    => self.render_about(ctx, ui),
+                    Tab::Debug    => self.render_debug(ctx, ui),
                 }
             });
 
@@ -159,6 +161,7 @@ enum Tab {
     Explorer,
     Settings,
     About,
+    Debug,
 }
 
 macro_rules! include_license {
@@ -303,6 +306,30 @@ impl InterfaceState {
 
     fn render_settings(&mut self, ctx : &Context, ui : &mut Ui) {
 
+    }
+
+    fn render_debug(&mut self, ctx: &Context, ui: &mut Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                let mem_use = re_memory::MemoryUse::capture();
+                if let Some(counted) = mem_use.counted {
+                    ui.label(format!("Counted memory: {}", re_format::format_bytes(counted as _)));
+                }
+                if let Some(resident) = mem_use.resident {
+                    ui.label(format!("Resident memory: {}", re_format::format_bytes(resident as _)));
+                }
+
+                let tracking_stats = re_memory::accounting_allocator::tracking_stats();
+                if let Some(tracking_stats) = tracking_stats {
+                    ui.label(format!("Tracking threshold: {}", re_format::format_bytes(tracking_stats.track_size_threshold as _)));
+
+                    tracking_stats.top_callstacks.iter().enumerate().for_each(|(i, callstack)| {
+                        ui.label(format!("[{}]: {} allocations, {} bytes", i, callstack.extant.count, re_format::format_bytes(callstack.extant.size as _)));
+                        ui.label(callstack.readable_backtrace.to_string());
+                    });
+                }
+            });
+        });
     }
 
     fn render_about(&mut self, ctx : &Context, ui : &mut Ui) {
