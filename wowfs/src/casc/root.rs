@@ -96,6 +96,14 @@ impl Root {
             });
         }
 
+        #[cfg(debug_assertions)]
+        match format {
+            Format::MSFT { total_file_count, .. } => {
+                assert_eq!(total_file_count as usize, pages.iter().fold(0, |s, p| s + p.records.len()))
+            },
+            _ => (),
+        };
+
         if cursor.has_remaining() {
             None
         } else {
