@@ -9,6 +9,7 @@ use crate::casc::errors::Error;
 use crate::casc::index::{Entry, Index};
 use crate::casc::root::Root;
 
+/// Models a World of Warcraft filesystem, providing utility methods to read a file.
 pub struct FileSystem {
     path : PathBuf,
     build : (PathBuf, Config),
@@ -18,14 +19,20 @@ pub struct FileSystem {
     root : Root,
 }
 impl FileSystem {
+    #[inline]
+    fn format_ckey_path<P, S>(path : P, ckey : S) -> PathBuf where P : AsRef<Path>, S : AsRef<str> {
+        let ckey = ckey.as_ref();
+        path.as_ref().join(format!("Data/config/{}/{}/{}", &ckey[0..2], &ckey[2..4], ckey))
+    }
+
     pub fn open<P, S>(path : P, build : S, cdn : S) -> Result<FileSystem, Error> where P : AsRef<Path>, S : AsRef<str> {
-        let build = path.as_ref().join(format!("Data/config/{}/{}/{}", &build.as_ref()[0..2], &build.as_ref()[2..4], build.as_ref()));
+        let build = Self::format_ckey_path(&path, build);
         let build = match Config::from_file(&build) {
             Ok(file) => (build, file),
             Err(_) => return Err(Error::FileNotFound(PathBuf::from(build)))
         };
 
-        let cdn = path.as_ref().join(format!("Data/config/{}/{}/{}", &cdn.as_ref()[0..2], &cdn.as_ref()[2..4], cdn.as_ref()));
+        let cdn = Self::format_ckey_path(&path, cdn);
         let cdn = match Config::from_file(&cdn) {
             Ok(file) => (cdn, file),
             Err(_) => return Err(Error::FileNotFound(PathBuf::from(cdn)))
@@ -110,6 +117,36 @@ impl FileSystem {
                     .iter()
                     .flat_map(|key| self.find_encoding(key))
             })
+            .collect()
+    }
+
+    /// Finds a file given the Jenkins hash of its name.
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - The hash of the file's path in the filesystem.
+    pub fn find_name_hash(&self, hash : u64) -> Vec<Entry> {
+        self.root.find_hash(hash)
+            .map(|record| {
+                self.find_content(record.content_key())
+            })
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    /// Finds a file given its [`FileDataID`].
+    ///
+    /// # Argument
+    ///
+    /// * `fdid` - An unique identifier for the file.
+    pub fn find_fdid(&self, fdid : u64) -> Vec<Entry> {
+        self.root.find_fdid(fdid)
+            .map(|record| {
+                self.find_content(record.content_key())
+            })
+            .into_iter()
+            .flatten()
             .collect()
     }
 }
