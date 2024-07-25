@@ -60,14 +60,20 @@ impl Root {
                     }
                     records
                 }
-                Format::MSFT { .. } => {
+                Format::MSFT { total_file_count, named_file_count, .. } => {
+                    let allow_non_named_files = (total_file_count != named_file_count) && (content_flags & 0x10000000) != 0;
+
                     let ckr : Range<usize> = Range {
                         start: 0,
                         end: record_count * 16
                     };
                     let nhr = Range {
                         start : ckr.end,
-                        end: ckr.end + 8 * record_count
+                        end: ckr.end + if !allow_non_named_files {
+                            8 * record_count
+                        } else {
+                            0
+                        }
                     };
                     let section_size = nhr.end;
 
@@ -82,7 +88,11 @@ impl Root {
                             end : (i + 1) * 16
                         }]);
 
-                        let name_hash = name_hashes.get_u64_le();
+                        let name_hash = if name_hashes.remaining() >= 8 {
+                            name_hashes.get_u64_le()
+                        } else {
+                            0
+                        };
                         records.push(Record(content_key, name_hash, fdids[i]));
                     }
                     records
@@ -107,6 +117,7 @@ impl Root {
         if cursor.has_remaining() {
             None
         } else {
+            pages.shrink_to_fit();
             Some(Root(pages))
         }
     }
@@ -119,8 +130,21 @@ impl Root {
             }
         }).unwrap_err();
 
+        let upper_bound = self.0.binary_search_by(|page| {
+            match page.records[0].fdid().cmp(&fdid) {
+                Ordering::Equal => Ordering::Less,
+                ord => ord,
+            }
+        }).unwrap_err();
+
+        if upper_bound == lower_bound {
+            return None;
+        }
+
+        assert!(lower_bound + 1 == upper_bound);
+
         let page = &self.0[lower_bound];
-        if let Ok(record_index) = page.records.binary_search_by(|record| record.2.cmp(&fdid)) {
+        if let Ok(record_index) = page.records.binary_search_by(|record| record.fdid().cmp(&fdid)) {
             Some(&page.records[record_index])
         } else {
             None
