@@ -53,15 +53,24 @@ pub mod specs {
         fn read(source : &'a super::Config) -> Self::Value;
     }
 
-    enum SpecKind {
-        Pair,
-        Vec,
-        ContentKey,
-        EncodingKey,
-    }
-
     macro_rules! specs {
-        ($t:tt, $x:literal, SpecKind::Pair) => {
+        ($t:tt, $x:literal, RegularExpression) => {
+            pub struct $t;
+            impl<'a> Spec<'a> for $t {
+                type Value = std::collections::HashMap<&'a str, &'a str>;
+
+                fn read(source: &'a super::Config) -> Self::Value {
+                    source.values.iter()
+                        .flat_map(|(k, v)| {
+                            k.matches($x).map(|arg| {
+                                (arg, v.as_str())
+                            })
+                        })
+                        .collect()
+                }
+            }
+        };
+        ($t:tt, $x:literal, Pair) => {
             pub struct $t;
             impl<'a> Spec<'a> for $t {
                 type Value = (&'a str, &'a str);
@@ -71,7 +80,7 @@ pub mod specs {
                 }
             }
         };
-        ($t:tt, $x:literal, SpecKind::Pair, $l:tt, $r:tt) => {
+        ($t:tt, $x:literal, Pair, $l:tt, $r:tt) => {
             pub struct $t;
             impl<'a> Spec<'a> for $t {
                 type Value = ($l, $r);
@@ -82,7 +91,7 @@ pub mod specs {
                 }
             }
         };
-        ($t:tt, $x:literal, SpecKind::Vec) => {
+        ($t:tt, $x:literal, Vec) => {
             pub struct $t;
             impl<'a> Spec<'a> for $t {
                 type Value = Vec<&'a str>;
@@ -92,7 +101,7 @@ pub mod specs {
                 }
             }
         };
-        ($t:tt, $x:literal, SpecKind::ContentKey) => {
+        ($t:tt, $x:literal, ContentKey) => {
             pub struct $t;
             impl<'a> Spec<'a> for $t {
                 type Value = ContentKey;
@@ -104,9 +113,10 @@ pub mod specs {
         };
     }
 
-    specs! { EncodingSpec, "encoding", SpecKind::Pair, ContentKey, EncodingKey }
-    specs! { RootSpec, "root", SpecKind::ContentKey }
-    specs! { ArchivesSpec, "archives", SpecKind::Vec }
+    specs! { EncodingSpec, "encoding", Pair, ContentKey, EncodingKey }
+    specs! { RootSpec, "root", ContentKey }
+    specs! { ArchivesSpec, "archives", Vec }
+    specs! { KeyringSpec, "key-([a-f0-9]+)", RegularExpression }
 }
 
 #[derive(Debug)]
