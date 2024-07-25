@@ -1,10 +1,13 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ops::Range;
 use bytes::Buf;
 use crate::casc::types::ContentKey;
 
-pub struct Root(Vec<Page>);
-
+pub struct Root {
+    pages: Vec<Page>,
+    hashes: HashMap<u64, (usize, usize)>,
+}
 impl Root {
     pub fn read(source: &[u8]) -> Option<Root> {
         let mut cursor = source;
@@ -26,6 +29,13 @@ impl Root {
             Format::Legacy
         };
 
+        let allow_non_named_files = match format {
+            Format::Legacy => false,
+            Format::MSFT { total_file_count, named_file_count, .. } => {
+                total_file_count != named_file_count
+            }
+        };
+
         let mut pages = Vec::<Page>::new();
         while cursor.has_remaining() {
             let record_count = cursor.get_u32_le() as usize;
@@ -41,8 +51,10 @@ impl Root {
             {
                 let mut fdid = -1;
                 for _ in 0..record_count {
-                    // NOTE: This violently breaks if FDID delta goes negative even once.
-                    fdid += cursor.get_i32_le() + 1;
+                    let increment = cursor.get_i32_le();
+                    assert!(increment >= 0, "Negative fdid increment");
+
+                    fdid += increment + 1;
                     fdids.push(fdid as _);
                 }
             }
@@ -60,16 +72,14 @@ impl Root {
                     }
                     records
                 }
-                Format::MSFT { total_file_count, named_file_count, .. } => {
-                    let allow_non_named_files = (total_file_count != named_file_count) && (content_flags & 0x10000000) != 0;
-
+                Format::MSFT { .. } => {
                     let ckr : Range<usize> = Range {
                         start: 0,
                         end: record_count * 16
                     };
                     let nhr = Range {
                         start : ckr.end,
-                        end: ckr.end + if !allow_non_named_files {
+                        end: ckr.end + if !(allow_non_named_files && (content_flags & 0x10000000) != 0) {
                             8 * record_count
                         } else {
                             0
@@ -118,37 +128,64 @@ impl Root {
             None
         } else {
             pages.shrink_to_fit();
-            Some(Root(pages))
+            pages.sort_by_key(|p| p.records[0].fdid());
+
+            // Collect hash associative map
+            let hashes : HashMap<u64, (usize, usize)> = pages
+                .iter()
+                .enumerate()
+                .filter_map(|(pg_idx, page)| {
+                    if !(allow_non_named_files && (page.content_flags & 0x10000000) != 0) {
+                        None
+                    } else {
+                        page.records
+                            .iter()
+                            .enumerate()
+                            .map(move |(rec_idx, rec)| {
+                                (rec.name_hash(), (pg_idx, rec_idx))
+                            })
+                            .into()
+                    }
+                })
+                .flatten()
+                .collect();
+
+            Some(Root {
+                pages,
+                hashes
+            })
         }
     }
 
     pub fn find_fdid(&self, fdid: u64) -> Option<&Record> {
-        let lower_bound = self.0.binary_search_by(|page| {
-            match page.records[0].fdid().cmp(&fdid) {
-                Ordering::Equal => Ordering::Greater,
-                ord => ord,
+        self.pages.binary_search_by(|page| {
+            let range = Range {
+                start: page.records[0].fdid(),
+                end: page.records[page.records.len() - 1].fdid() + 1 // End is exclusive
+            };
+
+            if range.contains(&fdid) {
+                Ordering::Equal
+            } else if range.start > fdid {
+                Ordering::Less
+            } else {
+                Ordering::Greater
             }
-        }).unwrap_err();
+        }).and_then(|pg_idx| {
+            let page = &self.pages[pg_idx];
 
-        let upper_bound = self.0.binary_search_by(|page| {
-            match page.records[0].fdid().cmp(&fdid) {
-                Ordering::Equal => Ordering::Less,
-                ord => ord,
-            }
-        }).unwrap_err();
+            page.records
+                .binary_search_by(|record| record.fdid().cmp(&fdid))
+                .map(|rec_idx| (rec_idx, pg_idx))
+        }).map(|(rec_idx, pg_idx)| {
+            &self.pages[pg_idx].records[rec_idx]
+        }).ok()
+    }
 
-        if upper_bound == lower_bound {
-            return None;
-        }
-
-        assert!(lower_bound + 1 == upper_bound);
-
-        let page = &self.0[lower_bound];
-        if let Ok(record_index) = page.records.binary_search_by(|record| record.fdid().cmp(&fdid)) {
-            Some(&page.records[record_index])
-        } else {
-            None
-        }
+    pub fn find_hash(&self, hash : u64) -> Option<&Record> {
+        self.hashes.get(&hash).map(|(pg_idx, rec_idx)| {
+            &(self.pages[*pg_idx].records[*rec_idx])
+        })
     }
 }
 
