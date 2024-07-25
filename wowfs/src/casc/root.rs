@@ -4,6 +4,9 @@ use std::ops::Range;
 use bytes::Buf;
 use crate::casc::types::ContentKey;
 
+/// A World of Warcraft "Root" file, as specified by build-configuration files. This file associates
+/// [`ContentKey`]s with [`FileDataID`], and optionally one or many name hashes. These hashes are
+/// Jenkins hashes of the file's complete path in the game's directory structure.
 pub struct Root {
     pages: Vec<Page>,
     hashes: HashMap<u64, (usize, usize)>,
@@ -157,6 +160,11 @@ impl Root {
         }
     }
 
+    /// Finds a record in the file for a given [`FileDataID`].
+    ///
+    /// # Arguments
+    ///
+    /// * `fdid` - The file data ID to look for. This ID is unique for the file.
     pub fn find_fdid(&self, fdid: u64) -> Option<&Record> {
         self.pages.binary_search_by(|page| {
             let range = Range {
@@ -182,6 +190,11 @@ impl Root {
         }).ok()
     }
 
+    /// Finds the given file hash in this structure.
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - The Jenkins hash of the file path.
     pub fn find_hash(&self, hash : u64) -> Option<&Record> {
         self.hashes.get(&hash).map(|(pg_idx, rec_idx)| {
             &(self.pages[*pg_idx].records[*rec_idx])
