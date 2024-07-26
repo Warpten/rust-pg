@@ -149,8 +149,9 @@ impl BLTE {
                             b'S' => {
                                 let mut state = Salsa20::new(
                                     Key::Key16(*key),
-                                    std::array::from_fn(|i| iv[i]),
-                                    0);
+                                    std::array::from_fn(|i| iv.get(i).copied().unwrap_or(0_u8)),
+                                    0
+                                );
 
                                 let data_offset = dest.len();
                                 section.read_to_end(dest);

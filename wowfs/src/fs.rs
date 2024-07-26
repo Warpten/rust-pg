@@ -3,6 +3,7 @@ use std::default;
 use std::path::{Path, PathBuf};
 
 use crate::casc::encoding::{Encoding, EncodingLoadFlags};
+use crate::casc::keyring::KeyRing;
 use crate::casc::types::{ContentKey, EncodingKey};
 use crate::file_formats::config::Config;
 use crate::file_formats::config::specs::{EncodingSpec, RootSpec, Spec};
@@ -18,7 +19,7 @@ pub struct FileSystem {
     indices : Vec<Index>,
     encoding : Encoding,
     root : Root,
-    keyring: KeyRing,
+    pub keyring: KeyRing,
 }
 impl FileSystem {
     #[inline]
