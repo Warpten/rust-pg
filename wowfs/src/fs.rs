@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::default;
 use std::path::{Path, PathBuf};
 
 use crate::casc::encoding::{Encoding, EncodingLoadFlags};
@@ -17,6 +18,7 @@ pub struct FileSystem {
     indices : Vec<Index>,
     encoding : Encoding,
     root : Root,
+    keyring: KeyRing,
 }
 impl FileSystem {
     #[inline]
@@ -92,6 +94,7 @@ impl FileSystem {
             build,
             cdn,
             indices,
+            keyring : Default::default()
         })
     }
 
