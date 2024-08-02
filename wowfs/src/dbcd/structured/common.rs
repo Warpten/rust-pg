@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use bytes::Buf;
 use custom_attrs::CustomAttrs;
@@ -26,24 +26,25 @@ impl Common {
                 std::mem::transmute::<_, CommonValueType>(data.get_u8())
             };
 
-            let split_offset = if padded {
-                cnt * (4 + 4)
+            let item_size = if padded {
+                4 + 4
             } else {
-                cnt * (4 + value_type.width())
+                4 + value_type.width()
             };
 
-            let (chunk, remainder) = data.split_at(split_offset);
+            let (chunk, remainder) = data.split_at(item_size * cnt);
             data = remainder;
 
-            let range = Range {
-                start: flattened_data.len(),
-                end: flattened_data.len() + split_offset
-            };
+            let values: HashMap<_, _> = chunk.chunks(item_size).map(|mut element| {
+                let id = element.get_u32_le();
+                let data = element.to_vec();
 
-            flattened_data.extend_from_slice(chunk);
+                (id, data)
+            }).collect();
+
             entries.push(CommonEntry {
                 value_type,
-                range,
+                values,
             });
         }
 
@@ -53,17 +54,15 @@ impl Common {
         }
     }
 
-    pub fn read(&self, column_index: usize, offset: usize) -> &[u8] {
+    pub fn read<'a, 'b: 'a>(&'a self, column_index: usize, id: u32, default_value: &'b [u8]) -> &'a [u8] {
         let entry = &self.entries[column_index];
-        let range = &self.data[entry.range.clone()];
-
-        &range[offset..(offset + entry.value_type.width())]
+        entry.values.get(&id).map(|o| &o[..]).unwrap_or(default_value)
     }
 }
 
 pub struct CommonEntry {
     value_type: CommonValueType,
-    range: Range<usize>,
+    values: HashMap<u32, Vec<u8>>,
 }
 
 #[repr(u8)]

@@ -1,9 +1,5 @@
-use std::ops::{Deref, Range};
-
 use bytes::Buf;
 use custom_attrs::CustomAttrs;
-
-use crate::dbcd::raw::Chunked;
 
 #[derive(Debug)]
 pub struct FieldInfo {

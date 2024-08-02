@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use bytemuck::cast_slice;
+use bytemuck::{cast_slice, PodCastError, try_cast_slice};
 use bytes::Buf;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 
@@ -121,7 +121,7 @@ impl WDC1<'_> {
 }
 
 pub struct Parser<'a> {
-    field_info: Vec<(FieldInfo, Range<usize>)>,
+    field_info: Vec<(FieldInfo, Range<usize> /* additional data range */, usize /* category index */)>,
     pallet: Vec<u8>,
     common: Common,
     ids: Vec<u32>,
@@ -140,26 +140,34 @@ impl Parser<'_> {
             let mut result = vec![];
 
             let mut category_offsets = [0; FieldCompressionCategory::MAX as usize];
+            let mut category_indices = [0; FieldCompressionCategory::MAX as usize];
             field_info.iter().for_each(|field_info| {
                 // We do a bit of extra work but can't skip those that have no additional
                 // size because both iterations would not line up when zipped below. We
                 // will get an empty range anyways.
 
-                let value = &mut category_offsets[field_info.storage_type.category() as usize];
+                let offset = &mut category_offsets[field_info.storage_type.category() as usize];
                 let range = Range {
-                    start: *value,
-                    end: *value + field_info.additional_data_size
+                    start: *offset,
+                    end: *offset + field_info.additional_data_size
                 };
 
-                *value = range.end;
-                result.push(range);
+                let index = &mut category_indices[field_info.storage_type.category() as usize];
+                
+                *offset = range.end; // `range` is moved-from next line
+                result.push((range, *index));
+                
+                *index += 1;
             });
 
             result
         };
 
         // Zip fields and their additional data ranges
-        let field_info: Vec<_> = field_info.into_iter().zip(additional_data_ranges.into_iter()).collect();
+        let field_info: Vec<_> = field_info.into_iter()
+            .zip(additional_data_ranges.into_iter())
+            .map(|(f, (r, i))| (f, r, i))
+            .collect();
 
         // Parse the common block
         let common = Common::new(data.common.data(), true);
@@ -205,39 +213,63 @@ impl shared::Parser for Parser<'_> {
             }
         };
 
-        let mut values = vec![];
+        let mut values = Vec::with_capacity(structure.len());
 
-        let mut inline_index = 0;
-        structure.iter().map(|column_reference| {
-            if column_reference.id && column_reference.noninline {
-                // Fast path for this kind of column - but is it correct?
-                self.ids.iter()
-                    .map(|&i| RawValue::U32(smallvec![i]))
-                    .collect()
-            } else if !column_reference.noninline {
+        // Collect the ID column first
+        let ids: Vec<_> = structure.iter()
+            .find(|column| column.id)
+            .map(|column| {
+                // Fast path if non-inline
+                if column.noninline {
+                    self.ids.iter()
+                        .map(|&i| RawValue::U32(smallvec![i]))
+                        .collect()
+                } else {
+                    // ...Find the specification
+                    let spec = unsafe {
+                        // SAFETY: this should never fail; the file is malformed otherwise.
+                        definition.spec(column).unwrap_unchecked()
+                    };
+
+                    let (ref field_info, ref additional_data_range, category_index) = self.field_info[0];
+                    assert!(field_info.storage_type.category() != FieldCompressionCategory::Common);
+                    
+                    // ...For each record, read the column's values
+                    records.iter()
+                        .map(|record| {
+                            // ID is nonsensical here
+                            self.parse_value(0, record, field_info, category_index, column, spec, additional_data_range)
+                        })
+                        .collect()
+                }
+            })
+            .unwrap();
+
+        structure.iter()
+            .filter(|column| !column.noninline)
+            .enumerate()
+            .map(|(column_index, column_reference)| {
                 // ...Find the specification
                 let spec = unsafe {
                     // SAFETY: this should never fail; the file is malformed otherwise.
                     definition.spec(column_reference).unwrap_unchecked()
                 };
 
-                let (field_info, additional_data_range) = &self.field_info[inline_index];
+                let (ref field_info, ref additional_data_range, category_index) = self.field_info[column_index];
                 
                 // ...For each record, read the column's values
-                let values : Vec<_> = records.iter().map(|record| {
-                    self.parse_value(record, field_info, column_reference, spec, additional_data_range)
-                }).collect();
+                records.iter()
+                    .zip(ids.iter())
+                    .map(|(record, id)| {
+                        let RawValue::U32(id) = id else { unreachable!("Impossible non-u32 index") };
+                        self.parse_value(id[0], record, field_info, category_index, column_reference, spec, additional_data_range)
+                    })
+                    .collect()
+            })
+            .for_each(|v| values.push(v));
 
-                inline_index += 1;
-
-                values
-            } else if column_reference.relation {
-                panic!("Unsupported relationship column")
-            } else {
-                panic!("Unknown column kind")
-            }
-        }).for_each(|v| values.push(v));
-
+        values.insert(0, ids);
+        values.shrink_to_fit();
         values
     }
 }
@@ -252,8 +284,10 @@ impl Parser<'_> {
     /// * `column` - A [`ColumnReference`] provided by the DBD schema.
     /// * `spec` - A [`ColumnDefinition`] provided by the DBD schema.
     pub fn parse_value(&self,
+        id: u32,
         record: &[u8],
         field_info: &FieldInfo,
+        category_index: usize,
         column: &ColumnReference,
         spec: &ColumnDefinition,
         additional_data_range: &Range<usize>,
@@ -270,7 +304,7 @@ impl Parser<'_> {
         };
 
         let raw_bytes = &record[range];
-        self.transform_values_raw(raw_bytes, field_info, column, spec, additional_data_range)
+        self.transform_values_raw(id, raw_bytes, field_info, category_index, column, spec, additional_data_range)
     }
 
     fn encapsulate_raw(&self, values: &[u8], column: &ColumnReference, spec: &ColumnDefinition) -> RawValue {
@@ -309,17 +343,49 @@ impl Parser<'_> {
                 }
             },
             ColumnType::Integer => {
-                // This works if column.bits <= bitness of the values, but fails otherwise
-                // (because it becomes a non-narrowing conversion)
-                match (column.bits.unwrap_or(32), column.unsigned) {
+                // Deduce the step for sequential values in the packed buffer
+                let packed_step = values.len() / column.arity as usize;
+
+                let step = column.bits.unwrap_or(32);
+                match (step, column.unsigned) {
                     (0..=8,  false) => RawValue::I8 (cast_slice(values).to_smallvec()),
-                    (9..=16, false) => RawValue::I16(cast_slice(values).to_smallvec()),
-                    (0..=32, false) => RawValue::I32(cast_slice(values).to_smallvec()),
-                    (0..=64, false) => RawValue::I64(cast_slice(values).to_smallvec()),
-                    (0..=8,  true)  => RawValue::U8 (cast_slice(values).to_smallvec()),
-                    (9..=16, true)  => RawValue::U16(cast_slice(values).to_smallvec()),
-                    (0..=32, true)  => RawValue::U32(cast_slice(values).to_smallvec()),
-                    (0..=64, true)  => RawValue::U64(cast_slice(values).to_smallvec()),
+                    (9..=16, false) => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as i16
+                        });
+                        RawValue::I16(SmallVec::from_iter(expanded))
+                    },
+                    (0..=32, false) => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as i32
+                        });
+                        RawValue::I32(SmallVec::from_iter(expanded))
+                    },
+                    (0..=64, false) => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as i64
+                        });
+                        RawValue::I64(SmallVec::from_iter(expanded))
+                    },
+                    (0..=8,  true)  => RawValue::U8 (values.to_smallvec()),
+                    (9..=16, true)  => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as u16
+                        });
+                        RawValue::U16(SmallVec::from_iter(expanded))
+                    },
+                    (0..=32, true)  => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as u32
+                        });
+                        RawValue::U32(SmallVec::from_iter(expanded))
+                    },
+                    (0..=64, true)  => {
+                        let expanded = values.chunks(packed_step).map(|mut data| {
+                            data.get_uint_le(packed_step) as u64
+                        });
+                        RawValue::U64(SmallVec::from_iter(expanded))
+                    },
                     (bits, _) => panic!("Unsupported {} bit width", bits)
                 }
             },
@@ -350,8 +416,10 @@ impl Parser<'_> {
     }
 
     fn transform_values_raw(&self,
+        id: u32,
         values: &[u8],
         field_info: &FieldInfo,
+        category_index: usize,
         column: &ColumnReference,
         spec: &ColumnDefinition,
         additional_data_range: &Range<usize>,
@@ -365,8 +433,15 @@ impl Parser<'_> {
 
                 self.encapsulate_raw(&bitpacked_data, column, spec)
             }
-            FieldCompressionType::Common { .. } => { 
-                todo!()
+            FieldCompressionType::Common { default, .. } => {
+                assert!(matches!(spec.column_type, ColumnType::Integer | ColumnType::Float),
+                    "Unexpected compression type for non-arithmetic field {:#?}", field_info.storage_type);
+                
+                let default_data = &[default];
+                let default_slice: &[u8] = cast_slice(default_data);
+                let data = self.common.read(category_index, id, default_slice);
+
+                self.encapsulate_raw(&data, column, spec)
             }
             FieldCompressionType::BitpackedIndexed { .. } => {
                 let raw_offsets = Self::read_bitpacked(values, field_info);
@@ -384,17 +459,21 @@ impl Parser<'_> {
                 let byte_slice : &[u8] = cast_slice(&values);
                 self.encapsulate_raw(byte_slice, column, spec)
             }
-            FieldCompressionType::BitpackedIndexedArray { .. } => {
-                // TODO: incorrect! use category_index to determine data range
-                let pallet_indices : &[u32] = cast_slice(values);
-                assert_eq!(pallet_indices.len(), 4);
+            FieldCompressionType::BitpackedIndexedArray { arity, .. } => {
+                let raw_offsets = Self::read_bitpacked(values, field_info);
+                let offsets: &[u32] = cast_slice(&raw_offsets);
+                assert_eq!(offsets.len(), 1, "Probably bad expectations for bitpacked indexed pallet array: {:#?}", field_info);
+
+                // Shift the pallet data to the range related to this column and
+                // cast the pallet data to u32s.
+                let pallet_data: &[u32] = cast_slice(&self.pallet[additional_data_range.start .. additional_data_range.end]);
 
                 let range = Range {
-                    start: pallet_indices[0] as usize,
-                    end: (pallet_indices[0] + column.arity) as usize
+                    start: offsets[0] as usize,
+                    end: (offsets[0] + arity) as usize
                 };
 
-                let values = &self.pallet[range];
+                let values = &pallet_data[range];
                 let byte_slice: &[u8] = cast_slice(&values);
                 
                 self.encapsulate_raw(byte_slice, column, spec)
@@ -422,8 +501,17 @@ mod chunks {
 pub mod tests {
     use std::io::BufRead;
 
-    use crate::dbcd::dbd::Definition;
+    use crate::dbcd::{dbd::Definition, shared::RawValue};
     use super::WDC1;
+
+    macro_rules! validate_column {
+        ($row:expr, $spec:expr, $col:literal, $pattern:pat $(if $guard:expr)? $(,)?) => {
+            match &$row[$spec[$col].index] {
+                $pattern => (),
+                _ => panic!("Invalid column type for {}: {:#?}", $col, $row)
+            }
+        }
+    }
 
     #[test]
     pub fn test_map() {
@@ -441,16 +529,42 @@ pub mod tests {
 
     #[test]
     pub fn test_area_table() {
+        // Note: in my data set this dbc has been modified so that the last column of DunMorogh is set to 1
         let dbc_data = include_bytes!("../../tests/wdc1/AreaTable.db2.0CA01129");
         let dbd_data = include_bytes!("../../tests/AreaTable.dbd");
 
         let dbd = Definition::new(dbd_data.lines(), "AreaTable.dbd".to_string()).unwrap();
         let dbc = WDC1::new(&dbc_data[4..]);
+        let spec = dbd.select(Some(dbc.layout_hash), None).unwrap();
 
         let now = std::time::Instant::now();
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
 
-        println!("{:#?}", rows[0]);
+        let dun_morogh = &rows[0];
+        validate_column!(dun_morogh, spec, "ID",                 RawValue::U32(v)    if v == &[1]);
+        validate_column!(dun_morogh, spec, "ZoneName",           RawValue::String(v) if v == &["DunMorogh"]);
+        validate_column!(dun_morogh, spec, "AreaName_lang",      RawValue::String(v) if v == &["Dun Morogh"]);
+        validate_column!(dun_morogh, spec, "Flags",              RawValue::I32(v)    if v == &[0x4041, 0]);
+        validate_column!(dun_morogh, spec, "Ambient_multiplier", RawValue::F32(v)    if v == &[0.3]);
+        validate_column!(dun_morogh, spec, "ContinentID",        RawValue::U16(v)    if v == &[0]);
+        validate_column!(dun_morogh, spec, "ParentAreaID",       RawValue::U16(v)    if v == &[0]);
+        validate_column!(dun_morogh, spec, "AreaBit",            RawValue::I16(v)    if v == &[119]);
+        validate_column!(dun_morogh, spec, "AmbienceID",         RawValue::U16(v)    if v == &[598]);
+        validate_column!(dun_morogh, spec, "ZoneMusic",          RawValue::U16(v)    if v == &[759]);
+        validate_column!(dun_morogh, spec, "IntroSound",         RawValue::U16(v)    if v == &[0]);
+        validate_column!(dun_morogh, spec, "LiquidTypeID",       RawValue::U16(v)    if v == &[0, 0, 0, 0]);
+        validate_column!(dun_morogh, spec, "UwZoneMusic",        RawValue::U16(v)    if v == &[0]);
+        validate_column!(dun_morogh, spec, "UwAmbience",         RawValue::U16(v)    if v == &[675]);
+        validate_column!(dun_morogh, spec, "PvpCombatWorldStateID", RawValue::I16(v) if v == &[-1]);
+        validate_column!(dun_morogh, spec, "SoundProviderPref",  RawValue::U8(v)     if v == &[0]);
+        validate_column!(dun_morogh, spec, "SoundProviderPrefUnderwater", RawValue::U8(v) if v == &[11]);
+        validate_column!(dun_morogh, spec, "ExplorationLevel",   RawValue::I8(v)     if v == &[0]);
+        validate_column!(dun_morogh, spec, "FactionGroupMask",   RawValue::U8(v)     if v == &[2]);
+        validate_column!(dun_morogh, spec, "MountFlags",         RawValue::U8(v)     if v == &[15]);
+        validate_column!(dun_morogh, spec, "WildBattlePetLevelMin", RawValue::U8(v)  if v == &[1]);
+        validate_column!(dun_morogh, spec, "WildBattlePetLevelMax", RawValue::U8(v)  if v == &[2]);
+        validate_column!(dun_morogh, spec, "WindSettingsID",     RawValue::U8(v)     if v == &[0]);
+        validate_column!(dun_morogh, spec, "UwIntroSound",       RawValue::U32(v)    if v == &[1]);
     }
 }
