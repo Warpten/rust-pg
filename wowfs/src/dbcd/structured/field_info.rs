@@ -1,3 +1,4 @@
+use std::ops::Range;
 use bytes::Buf;
 use custom_attrs::CustomAttrs;
 
@@ -31,6 +32,9 @@ impl FieldInfo {
 
     #[inline] pub fn size_bits(&self) -> usize { self.field_size_bits as usize }
     #[inline] pub fn size_bytes(&self) -> usize { (self.size_bits() + (self.offset_bits() % 8) + 7) / 8 }
+
+    #[inline] pub fn element_bytes(&self) -> usize { self.field_size as usize }
+    #[inline] pub fn element_bits(&self) -> usize { self.element_bytes() * 8 }
 
     pub fn new(mut field_info: &[u8], mut field_storage_info: &[u8]) -> FieldInfo {
         let size = (32 - field_info.get_i16_le() as u16) / 8;

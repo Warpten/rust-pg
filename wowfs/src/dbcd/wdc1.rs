@@ -9,6 +9,7 @@ use crate::dbcd::dbd::{ColumnDefinition, ColumnReference, ColumnType, Definition
 
 use crate::dbcd::structured::FieldCompressionType;
 use crate::dbcd::{raw::{Chunked, Raw}, structured::FieldInfo};
+use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait};
 use crate::dbcd::wdc1::chunks::Content;
 
 use super::dbd::StructureDefinition;
@@ -55,10 +56,10 @@ impl WDC1<'_> {
         let pallet_data_size = cursor.get_u32_le() as usize;
         let relationship_data_size = cursor.get_u32_le() as usize;
 
-        let (fields, cursor) = Chunked::from(cursor, 2 + 2, total_field_count);
+        let (fields, cursor) = Chunked::from_raw(cursor, 2 + 2, total_field_count);
 
         let (records, cursor) = if (flags & 0x01) == 0 {
-            let (records, cursor) = Chunked::from(cursor, record_size, record_count);
+            let (records, cursor) = Chunked::from_raw(cursor, record_size, record_count);
             let (string_block, cursor) = Raw::from(cursor, string_table_size);
 
             (Content::Regular { records, string_block }, cursor)
@@ -68,14 +69,14 @@ impl WDC1<'_> {
             };
 
             let (records, cursor) = Raw::from(cursor, offset_map_offset - distance);
-            let (offset_map, cursor) = Chunked::from(cursor, 4 + 2, max_id - min_id + 1);
+            let (offset_map, cursor) = Chunked::from_raw(cursor, 4 + 2, max_id - min_id + 1);
 
             (Content::OffsetMap { records, offset_map }, cursor)
         };
 
         let (id_list, cursor) = Raw::from(cursor, id_list_size);
         let (copy_table, cursor) = Chunked::optionally_from(copy_table_size > 0, cursor, 4 + 4, copy_table_size / 8);
-        let (field_info, cursor) = Chunked::from(cursor, 2 + 2 + 4 + 4 + 3 * 4, field_storage_info_size / (2 + 2 + 4 + 4 + 3 * 4));
+        let (field_info, cursor) = Chunked::from_raw(cursor, 2 + 2 + 4 + 4 + 3 * 4, field_storage_info_size / (2 + 2 + 4 + 4 + 3 * 4));
         let (pallet, cursor) = Raw::from(cursor, pallet_data_size);
         let (common, cursor) = Raw::from(cursor, common_data_size);
         let (relationship, cursor) = Raw::from(cursor, relationship_data_size);
@@ -193,6 +194,7 @@ impl shared::Parser for Parser<'_> {
     /// 
     /// TL;DR: Read with `result[column_index][record_index]`.
     fn parse(&self, definition: &Definition, structure: &StructureDefinition) -> Vec<Vec<RawValue>> {
+        // Collect record data.
         let records: Vec<_> = match &self.records {
             Content::Regular { records, .. } => {
                 // Effectively just an array of pointers over contiguous memory
@@ -212,6 +214,12 @@ impl shared::Parser for Parser<'_> {
                 }).collect()
             }
         };
+
+        let mut index_table = Vec::with_capacity(records.len());
+        for record_index in 0..records.len() {
+            let index_value = get_record_id(&records[record_index], definition, structure);
+            index_table.push(index_value);
+        }
 
         let mut values = Vec::with_capacity(structure.len());
 
@@ -271,6 +279,20 @@ impl shared::Parser for Parser<'_> {
         values.insert(0, ids);
         values.shrink_to_fit();
         values
+    }
+}
+
+// New implementation
+impl Parser<'_> {
+    pub fn get_record_id(&self, record: &[u8], record_index: usize, definition: &Definition, structure: StructureDefinition) -> Option<u32> {
+        structure.iter()
+            .find(|c| c.id)
+            .map(|column| {
+                if column.noninline {
+                    self.ids[record_index]
+                } else {
+                }
+            })
     }
 }
 
@@ -395,7 +417,7 @@ impl Parser<'_> {
         }
     }
 
-    fn read_bitpacked(values: &[u8], field_info: &FieldInfo,) -> Vec<u8> {
+    fn read_bitpacked(values: &[u8], field_info: &FieldInfo) -> Vec<u8> {
         // At most, 64 bits, aka 8 bytes
         let byte_width = field_info.size_bytes();
         let shift_offset = 64 - field_info.size_bits() - (field_info.offset_bits() % 8);
@@ -507,7 +529,7 @@ pub mod tests {
     macro_rules! validate_column {
         ($row:expr, $spec:expr, $col:literal, $pattern:path, $value:expr) => {
             match &$row[$spec[$col].index] {
-                $pattern(ref v) if v.iter().zip($value.iter()).filter(|(l, r)| l != r).count() == 0 => println!("Validated {:#?}", &$row[$spec[$col].index]),
+                $pattern(ref v) if v.iter().zip($value.iter()).filter(|(l, r)| l != r).count() == 0 => (),
                 _ => panic!("Invalid column type for {}: {:#?}", $col, $row)
             }
         }
@@ -525,6 +547,20 @@ pub mod tests {
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
 
+    }
+
+    #[test]
+    pub fn test_creature_display_info() {
+        let dbc_data = include_bytes!("../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
+        let dbd_data = include_bytes!("../../tests/CreatureDisplayInfo.dbd");
+
+        let dbd = Definition::new(dbd_data.lines(), "CreatureDisplayInfo.dbd".to_string()).unwrap();
+        let dbc = WDC1::new(&dbc_data[4..]);
+        let spec = dbd.select(Some(dbc.layout_hash), None).unwrap();
+
+        let now = std::time::Instant::now();
+        let rows = dbc.parse(&dbd);
+        println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
     }
 
     #[test]

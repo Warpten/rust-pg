@@ -3,5 +3,6 @@ pub mod dbd;
 pub mod raw;
 pub mod shared;
 pub mod structured;
+pub mod typed;
 
 pub mod wdc1;
