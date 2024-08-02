@@ -9,7 +9,7 @@ use crate::graph::attachment::{Attachment, AttachmentID, AttachmentOptions};
 use crate::graph::buffer::{Buffer, BufferID, BufferOptions};
 use crate::graph::manager::Manager;
 use crate::graph::pass::Pass;
-use crate::graph::resource::{Identifiable, PhysicalResourceID, Resource, ResourceID};
+use crate::graph::resource::{PhysicalResourceID, Resource, ResourceID};
 use crate::graph::texture::{Texture, TextureID, TextureOptions};
 use crate::vk::command_buffer::CommandBuffer;
 use crate::vk::command_pool::CommandPool;

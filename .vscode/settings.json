@@ -1,5 +1,6 @@
 {
     "yaml.schemas": {
         ".font.json": "font.schema",
-    }
+    },
+    "editor.fontSize": 16
 }
