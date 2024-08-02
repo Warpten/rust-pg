@@ -9,7 +9,7 @@ use crate::dbcd::dbd::{ColumnDefinition, ColumnReference, ColumnType, Definition
 
 use crate::dbcd::structured::FieldCompressionType;
 use crate::dbcd::{raw::{Chunked, Raw}, structured::FieldInfo};
-use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait};
+use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait, RawTrait};
 use crate::dbcd::wdc1::chunks::Content;
 
 use super::dbd::StructureDefinition;
@@ -59,8 +59,8 @@ impl WDC1<'_> {
         let (fields, cursor) = Chunked::from_raw(cursor, 2 + 2, total_field_count);
 
         let (records, cursor) = if (flags & 0x01) == 0 {
-            let (records, cursor) = Chunked::from_raw(cursor, record_size, record_count);
-            let (string_block, cursor) = Raw::from(cursor, string_table_size);
+            let (records, cursor) = ChunkedBuf::from_raw(cursor, record_size, record_count);
+            let (string_block, cursor) = Raw::from_raw(cursor, string_table_size);
 
             (Content::Regular { records, string_block }, cursor)
         } else {
@@ -68,18 +68,18 @@ impl WDC1<'_> {
                 cursor.as_ptr().offset_from(source.as_ptr()) as usize
             };
 
-            let (records, cursor) = Raw::from(cursor, offset_map_offset - distance);
+            let (records, cursor) = Raw::from_raw(cursor, offset_map_offset - distance);
             let (offset_map, cursor) = Chunked::from_raw(cursor, 4 + 2, max_id - min_id + 1);
 
             (Content::OffsetMap { records, offset_map }, cursor)
         };
 
-        let (id_list, cursor) = Raw::from(cursor, id_list_size);
+        let (id_list, cursor) = Raw::from_raw(cursor, id_list_size);
         let (copy_table, cursor) = Chunked::optionally_from(copy_table_size > 0, cursor, 4 + 4, copy_table_size / 8);
         let (field_info, cursor) = Chunked::from_raw(cursor, 2 + 2 + 4 + 4 + 3 * 4, field_storage_info_size / (2 + 2 + 4 + 4 + 3 * 4));
-        let (pallet, cursor) = Raw::from(cursor, pallet_data_size);
-        let (common, cursor) = Raw::from(cursor, common_data_size);
-        let (relationship, cursor) = Raw::from(cursor, relationship_data_size);
+        let (pallet, cursor) = Raw::from_raw(cursor, pallet_data_size);
+        let (common, cursor) = Raw::from_raw(cursor, common_data_size);
+        let (relationship, cursor) = Raw::from_raw(cursor, relationship_data_size);
 
         assert!(!cursor.has_remaining());
 
@@ -511,10 +511,10 @@ pub struct Table {
 }
 
 mod chunks {
-    use crate::dbcd::raw::{Chunked, Raw};
+    use crate::dbcd::raw::{Chunked, ChunkedBuf, Raw};
 
     pub enum Content<'a> {
-        Regular { records: Chunked<'a>, string_block : Raw<'a> },
+        Regular { records: ChunkedBuf, string_block : Raw<'a> },
         OffsetMap { records: Raw<'a>, offset_map: Chunked<'a> }
     }
 }

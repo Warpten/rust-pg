@@ -112,8 +112,9 @@ pub mod details {
     }
 }
 
-/// A chunked chunk effectively slices its content in subelements with the given `stride`. This is the
-/// owning counterpart to [`Chunked`].
+/// A chunked chunk effectively slices its content in subelements with the given `stride`.
+///
+/// This is the owning counterpart to [`Chunked`].
 pub type ChunkedBuf = details::Chunked<Vec<u8>>;
 
 /// A chunked chunk effectively slices its content in subelements with the given `stride`.
