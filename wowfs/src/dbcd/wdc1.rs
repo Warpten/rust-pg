@@ -505,9 +505,9 @@ pub mod tests {
     use super::WDC1;
 
     macro_rules! validate_column {
-        ($row:expr, $spec:expr, $col:literal, $pattern:pat $(if $guard:expr)? $(,)?) => {
+        ($row:expr, $spec:expr, $col:literal, $pattern:path, $value:expr) => {
             match &$row[$spec[$col].index] {
-                $pattern => (),
+                $pattern(ref v) if v.iter().zip($value.iter()).filter(|(l, r)| l != r).count() == 0 => println!("Validated {:#?}", &$row[$spec[$col].index]),
                 _ => panic!("Invalid column type for {}: {:#?}", $col, $row)
             }
         }
@@ -542,29 +542,29 @@ pub mod tests {
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
 
         let dun_morogh = &rows[0];
-        validate_column!(dun_morogh, spec, "ID",                 RawValue::U32(v)    if v == &[1]);
-        validate_column!(dun_morogh, spec, "ZoneName",           RawValue::String(v) if v == &["DunMorogh"]);
-        validate_column!(dun_morogh, spec, "AreaName_lang",      RawValue::String(v) if v == &["Dun Morogh"]);
-        validate_column!(dun_morogh, spec, "Flags",              RawValue::I32(v)    if v == &[0x4041, 0]);
-        validate_column!(dun_morogh, spec, "Ambient_multiplier", RawValue::F32(v)    if v == &[0.3]);
-        validate_column!(dun_morogh, spec, "ContinentID",        RawValue::U16(v)    if v == &[0]);
-        validate_column!(dun_morogh, spec, "ParentAreaID",       RawValue::U16(v)    if v == &[0]);
-        validate_column!(dun_morogh, spec, "AreaBit",            RawValue::I16(v)    if v == &[119]);
-        validate_column!(dun_morogh, spec, "AmbienceID",         RawValue::U16(v)    if v == &[598]);
-        validate_column!(dun_morogh, spec, "ZoneMusic",          RawValue::U16(v)    if v == &[759]);
-        validate_column!(dun_morogh, spec, "IntroSound",         RawValue::U16(v)    if v == &[0]);
-        validate_column!(dun_morogh, spec, "LiquidTypeID",       RawValue::U16(v)    if v == &[0, 0, 0, 0]);
-        validate_column!(dun_morogh, spec, "UwZoneMusic",        RawValue::U16(v)    if v == &[0]);
-        validate_column!(dun_morogh, spec, "UwAmbience",         RawValue::U16(v)    if v == &[675]);
-        validate_column!(dun_morogh, spec, "PvpCombatWorldStateID", RawValue::I16(v) if v == &[-1]);
-        validate_column!(dun_morogh, spec, "SoundProviderPref",  RawValue::U8(v)     if v == &[0]);
-        validate_column!(dun_morogh, spec, "SoundProviderPrefUnderwater", RawValue::U8(v) if v == &[11]);
-        validate_column!(dun_morogh, spec, "ExplorationLevel",   RawValue::I8(v)     if v == &[0]);
-        validate_column!(dun_morogh, spec, "FactionGroupMask",   RawValue::U8(v)     if v == &[2]);
-        validate_column!(dun_morogh, spec, "MountFlags",         RawValue::U8(v)     if v == &[15]);
-        validate_column!(dun_morogh, spec, "WildBattlePetLevelMin", RawValue::U8(v)  if v == &[1]);
-        validate_column!(dun_morogh, spec, "WildBattlePetLevelMax", RawValue::U8(v)  if v == &[2]);
-        validate_column!(dun_morogh, spec, "WindSettingsID",     RawValue::U8(v)     if v == &[0]);
-        validate_column!(dun_morogh, spec, "UwIntroSound",       RawValue::U32(v)    if v == &[1]);
+        validate_column!(dun_morogh, spec, "ID",                 RawValue::U32,    &[1]);
+        validate_column!(dun_morogh, spec, "ZoneName",           RawValue::String, &["DunMorogh"]);
+        validate_column!(dun_morogh, spec, "AreaName_lang",      RawValue::String, &["Dun Morogh"]);
+        validate_column!(dun_morogh, spec, "Flags",              RawValue::I32,    &[0x4041, 0]);
+        validate_column!(dun_morogh, spec, "Ambient_multiplier", RawValue::F32,    &[0.3]);
+        validate_column!(dun_morogh, spec, "ContinentID",        RawValue::U16,    &[0]);
+        validate_column!(dun_morogh, spec, "ParentAreaID",       RawValue::U16,    &[0]);
+        validate_column!(dun_morogh, spec, "AreaBit",            RawValue::I16,    &[119]);
+        validate_column!(dun_morogh, spec, "AmbienceID",         RawValue::U16,    &[598]);
+        validate_column!(dun_morogh, spec, "ZoneMusic",          RawValue::U16,    &[759]);
+        validate_column!(dun_morogh, spec, "IntroSound",         RawValue::U16,    &[0]);
+        validate_column!(dun_morogh, spec, "LiquidTypeID",       RawValue::U16,    &[0, 0, 0, 0]);
+        validate_column!(dun_morogh, spec, "UwZoneMusic",        RawValue::U16,    &[0]);
+        validate_column!(dun_morogh, spec, "UwAmbience",         RawValue::U16,    &[675]);
+        validate_column!(dun_morogh, spec, "PvpCombatWorldStateID", RawValue::I16, &[-1]);
+        validate_column!(dun_morogh, spec, "SoundProviderPref",  RawValue::U8,     &[0]);
+        validate_column!(dun_morogh, spec, "SoundProviderPrefUnderwater", RawValue::U8, &[11]);
+        validate_column!(dun_morogh, spec, "ExplorationLevel",   RawValue::I8,     &[0]);
+        validate_column!(dun_morogh, spec, "FactionGroupMask",   RawValue::U8,     &[2]);
+        validate_column!(dun_morogh, spec, "MountFlags",         RawValue::U8,     &[15]);
+        validate_column!(dun_morogh, spec, "WildBattlePetLevelMin", RawValue::U8,  &[1]);
+        validate_column!(dun_morogh, spec, "WildBattlePetLevelMax", RawValue::U8,  &[2]);
+        validate_column!(dun_morogh, spec, "WindSettingsID",     RawValue::U8,     &[0]);
+        validate_column!(dun_morogh, spec, "UwIntroSound",       RawValue::U32,    &[1]);
     }
 }
