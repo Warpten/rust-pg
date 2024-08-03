@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use bytemuck::{cast_slice, AnyBitPattern, NoUninit};
 use bytes::Buf;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
@@ -98,13 +98,15 @@ impl WDC1<'_> {
             layout_hash,
         }
     }
+}
 
-    pub fn parse(self, definition: &Definition) -> Vec<Vec<RawValue>> {
-        if let Some(spec) = definition.select(Some(self.layout_hash), None) {
-            Parser::new(self).parse(definition, spec)
-        } else {
-            vec![]
-        }
+impl<'a> shared::Parsable for WDC1<'a> {
+    fn parse_with(self, definition: &Definition, spec: &StructureDefinition) -> Vec<Vec<RawValue>> {
+        Parser::new(self).parse(definition, spec)
+    }
+
+    fn select_structure(&self, definition: &Definition) -> Option<&StructureDefinition> {
+        definition.select(Some(self.layout_hash), None)
     }
 }
 
@@ -541,6 +543,7 @@ pub mod tests {
     use std::io::BufRead;
 
     use crate::dbcd::{dbd::Definition, shared::RawValue};
+    use crate::dbcd::shared::Parsable;
     use super::WDC1;
 
     macro_rules! validate_column {
