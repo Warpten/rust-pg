@@ -2,6 +2,7 @@ use std::{collections::HashMap, io::{BufRead, Lines}, ops::Deref, slice::Iter};
 use std::ops::Index;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use crate::dbcd::structured::FieldCompressionCategory;
 
 /// A definition for various versions of a DBC/DB2 file.
 #[derive(Debug)]
@@ -66,7 +67,7 @@ impl Definition {
                             Err(_) => return None
                         };
                     },
-                    DefinitionParsingState::Structure { ref mut subjects, ref mut columns } => {
+                    DefinitionParsingState::Structure { ref mut subjects, ref mut columns, .. } => {
                         if line.starts_with("LAYOUT") {
                             // Skip "LAYOUT "
                             line[7..].split(&[' ', ','])

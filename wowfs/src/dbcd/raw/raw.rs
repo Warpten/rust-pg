@@ -13,7 +13,7 @@ pub trait RawTrait<'a> : Sized {
 }
 
 pub mod details {
-    use std::ops::{Deref, Index};
+    use std::ops::Deref;
     use bytemuck::{cast_slice, AnyBitPattern};
 
     use super::RawTrait;
@@ -74,14 +74,6 @@ pub mod details {
             } else {
                 cast_slice(data)
             }
-        }
-    }
-
-    impl<T, I> Index<I> for Raw<T> where T: Index<I> {
-        type Output = <T as Index<I>>::Output;
-
-        fn index(&self, index: I) -> &Self::Output {
-            &self.data[index]
         }
     }
 
