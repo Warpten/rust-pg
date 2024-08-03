@@ -221,7 +221,7 @@ impl shared::Parser for Parser<'_> {
 
                     let field_info = &self.field_info[0];
                     assert_ne!(field_info.field.storage_type.category(), FieldCompressionCategory::Common);
-                    
+
                     // ...For each record, read the column's values
                     let mut values = vec![];
                     for record in &records {
@@ -240,36 +240,84 @@ impl shared::Parser for Parser<'_> {
             })
             .unwrap();
 
-        let mut rows: Vec<_> = (0..records.len()).map(|record_index| {
-            let record = &records[record_index];
-            let id = ids[record_index];
+        #[cfg(not(feature = "horizontal_dbc"))]
+        {
+            let mut rows: Vec<_> = {
+                let columns: Vec<_> = structure.iter()
+                    .filter(|c| !c.noninline)
+                    .enumerate()
+                    .map(|(column_index, column_reference)| {
+                        // ...Find the specification
+                        let spec = unsafe {
+                            // SAFETY: this should never fail; the file is malformed otherwise.
+                            definition.spec(column_reference).unwrap_unchecked()
+                        };
 
-            let mut row: Vec<_> = structure.iter()
-                .filter(|c| !c.noninline)
-                .enumerate()
-                .map(|(column_index, column_reference)| {
-                    // ...Find the specification
-                    let spec = unsafe {
-                        // SAFETY: this should never fail; the file is malformed otherwise.
-                        definition.spec(column_reference).unwrap_unchecked()
-                    };
+                        let field_info = &self.field_info[column_index];
 
-                    let field_info = &self.field_info[column_index];
+                        (0..records.len()).map(|record_index| {
+                            let record = &records[record_index];
+                            let id = ids[record_index];
 
-                    self.parse_value(id, record, field_info, column_reference, spec, |bytes, item_width| {
-                        self.encapsulate_raw(bytes, item_width, column_reference, spec)
+                            self.parse_value(id, record, field_info, column_reference, spec, |bytes, item_width| {
+                                self.encapsulate_raw(bytes, item_width, column_reference, spec)
+                            })
+                        }).collect::<Vec<_>>()
+                    }).collect();
+
+                // Transpose now
+                let len = columns[0].len();
+                let mut iters: Vec<_> = columns.into_iter().map(|n| n.into_iter()).collect();
+                (0..len)
+                    .map(|_| {
+                        iters
+                            .iter_mut()
+                            .map(|n| n.next().unwrap())
+                            .collect::<Vec<_>>()
                     })
-                })
-                .collect();
-
+                    .collect()
+            };
             if inject >= 0 {
-                row.insert(inject as usize, RawValue::U32(smallvec![id]));
+                for i in 0..ids.len() {
+                    rows[i].insert(inject as usize, RawValue::U32(smallvec![ids[i]]));
+                }
             }
-            row
-        }).collect();
+            rows
+        }
 
-        rows.shrink_to_fit();
-        rows
+        #[cfg(feature = "horizontal_dbc")]
+        {
+            let mut rows: Vec<_> = (0..records.len()).map(|record_index| {
+                let record = &records[record_index];
+                let id = ids[record_index];
+
+                let mut row: Vec<_> = structure.iter()
+                    .filter(|c| !c.noninline)
+                    .enumerate()
+                    .map(|(column_index, column_reference)| {
+                        // ...Find the specification
+                        let spec = unsafe {
+                            // SAFETY: this should never fail; the file is malformed otherwise.
+                            definition.spec(column_reference).unwrap_unchecked()
+                        };
+
+                        let field_info = &self.field_info[column_index];
+
+                        self.parse_value(id, record, field_info, column_reference, spec, |bytes, item_width| {
+                            self.encapsulate_raw(bytes, item_width, column_reference, spec)
+                        })
+                    })
+                    .collect();
+
+                if inject >= 0 {
+                    row.insert(inject as usize, RawValue::U32(smallvec![id]));
+                }
+                row
+            }).collect();
+
+            rows.shrink_to_fit();
+            rows
+        }
     }
 }
 
@@ -499,7 +547,7 @@ pub mod tests {
         ($row:expr, $spec:expr, $col:literal, $pattern:path, $value:expr) => {
             match &$row[$spec[$col].index] {
                 $pattern(ref v) if v.iter().zip($value.iter()).filter(|(l, r)| l != r).count() == 0 => (),
-                _ => panic!("Invalid column type for {}: {:#?}", $col, $row)
+                actual => panic!("An error occured while parsing '{}': expected {:?}, found {:?}", $col, $value, actual)
             }
         }
     }
@@ -515,7 +563,6 @@ pub mod tests {
         let now = std::time::Instant::now();
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
-
     }
 
     #[test]
@@ -531,7 +578,30 @@ pub mod tests {
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
 
-        println!("{:#?}", rows[13]);
+        let entry = &rows[13];
+        validate_column!(entry, spec, "ID",                            RawValue::I32, &[30]);
+        validate_column!(entry, spec, "CreatureModelScale",            RawValue::F32, &[0.4]);
+        validate_column!(entry, spec, "ModelID",                       RawValue::U16, &[30]);
+        validate_column!(entry, spec, "NPCSoundID",                    RawValue::U16, &[0]);
+        validate_column!(entry, spec, "SizeClass",                     RawValue::I8,  &[1]);
+        validate_column!(entry, spec, "Flags",                         RawValue::U8,  &[0x0]);
+        validate_column!(entry, spec, "Gender",                        RawValue::I8,  &[2]);
+        validate_column!(entry, spec, "ExtendedDisplayInfoID",         RawValue::I32, &[0]);
+        validate_column!(entry, spec, "PortraitTextureFileDataID",     RawValue::I32, &[0]);
+        validate_column!(entry, spec, "CreatureModelAlpha",            RawValue::U8,  &[255]);
+        validate_column!(entry, spec, "SoundID",                       RawValue::U16, &[0]);
+        validate_column!(entry, spec, "PlayerOverrideScale",           RawValue::F32, &[0.0]);
+        validate_column!(entry, spec, "PortraitCreatureDisplayInfoID", RawValue::I32, &[0]);
+        validate_column!(entry, spec, "BloodID",                       RawValue::U8,  &[0]);
+        validate_column!(entry, spec, "ParticleColorID",               RawValue::U16, &[0]);
+        validate_column!(entry, spec, "CreatureGeosetData",            RawValue::I32, &[0]);
+        validate_column!(entry, spec, "ObjectEffectPackageID",         RawValue::U16, &[0]);
+        validate_column!(entry, spec, "AnimReplacementSetID",          RawValue::U16, &[0]);
+        validate_column!(entry, spec, "UnarmedWeaponType",             RawValue::I8,  &[-1]);
+        validate_column!(entry, spec, "StateSpellVisualKitID",         RawValue::I32, &[0]);
+        validate_column!(entry, spec, "PetInstanceScale",              RawValue::F32, &[1.0]);
+        validate_column!(entry, spec, "MountPoofSpellVisualKitID",     RawValue::I32, &[0]);
+        validate_column!(entry, spec, "TextureVariationFileDataID",    RawValue::I32, &[124911, 0, 0]);
     }
 
     #[test]
