@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
+use std::os::raw;
 
-use bytemuck::{cast_slice, PodCastError, try_cast_slice};
+use bytemuck::{AnyBitPattern, cast_slice, PodCastError, try_cast_slice};
 use bytes::Buf;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 
@@ -13,13 +14,14 @@ use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait, RawTrait};
 use crate::dbcd::wdc1::chunks::Content;
 
 use super::dbd::StructureDefinition;
+use super::raw::RawBuf;
 use super::shared::{self, Parser as ParserTrait, RawValue};
-use super::structured::{Common, FieldCompressionCategory};
+use super::structured::{Common, ExtendedFieldInfo, FieldCompressionCategory};
 
 pub struct WDC1<'a> {
     fields: Chunked<'a>,
     records: Content<'a>,
-    id_list: Raw<'a>,
+    id_list: RawBuf,
     copy_table: Chunked<'a>,
     field_info : Chunked<'a>,
     pallet: Raw<'a>,
@@ -74,7 +76,7 @@ impl WDC1<'_> {
             (Content::OffsetMap { records, offset_map }, cursor)
         };
 
-        let (id_list, cursor) = Raw::from_raw(cursor, id_list_size);
+        let (id_list, cursor) = RawBuf::from_raw(cursor, id_list_size);
         let (copy_table, cursor) = Chunked::optionally_from(copy_table_size > 0, cursor, 4 + 4, copy_table_size / 8);
         let (field_info, cursor) = Chunked::from_raw(cursor, 2 + 2 + 4 + 4 + 3 * 4, field_storage_info_size / (2 + 2 + 4 + 4 + 3 * 4));
         let (pallet, cursor) = Raw::from_raw(cursor, pallet_data_size);
@@ -122,7 +124,7 @@ impl WDC1<'_> {
 }
 
 pub struct Parser<'a> {
-    field_info: Vec<(FieldInfo, Range<usize> /* additional data range */, usize /* category index */)>,
+    field_info: Vec<ExtendedFieldInfo>,
     pallet: Vec<u8>,
     common: Common,
     ids: Vec<u32>,
@@ -167,19 +169,22 @@ impl Parser<'_> {
         // Zip fields and their additional data ranges
         let field_info: Vec<_> = field_info.into_iter()
             .zip(additional_data_ranges.into_iter())
-            .map(|(f, (r, i))| (f, r, i))
+            .map(|(f, (r, i))| {
+                ExtendedFieldInfo {
+                    field: f,
+                    additional_data_range: r,
+                    category_index: i
+                }
+            })
             .collect();
 
         // Parse the common block
-        let common = Common::new(data.common.data(), true);
-
-        // Jumping through some hoops to make sure the id list is aligned properly.
-        let aligned_id_list = data.id_list.data().to_vec();
+        let common = Common::new(data.common.data(), &field_info);
 
         Parser {
             field_info,
             pallet: data.pallet.data().to_vec(),
-            ids: cast_slice::<_, u32>(&aligned_id_list).to_vec(),
+            ids: data.id_list.cast::<u32>().to_vec(),
             common,
 
             records: data.records,
@@ -215,12 +220,6 @@ impl shared::Parser for Parser<'_> {
             }
         };
 
-        let mut index_table = Vec::with_capacity(records.len());
-        for record_index in 0..records.len() {
-            let index_value = get_record_id(&records[record_index], definition, structure);
-            index_table.push(index_value);
-        }
-
         let mut values = Vec::with_capacity(structure.len());
 
         // Collect the ID column first
@@ -239,22 +238,22 @@ impl shared::Parser for Parser<'_> {
                         definition.spec(column).unwrap_unchecked()
                     };
 
-                    let (ref field_info, ref additional_data_range, category_index) = self.field_info[0];
-                    assert!(field_info.storage_type.category() != FieldCompressionCategory::Common);
+                    let field_info = &self.field_info[0];
+                    assert_ne!(field_info.field.storage_type.category(), FieldCompressionCategory::Common);
                     
                     // ...For each record, read the column's values
-                    records.iter()
-                        .map(|record| {
-                            // ID is nonsensical here
-                            self.parse_value(0, record, field_info, category_index, column, spec, additional_data_range)
-                        })
-                        .collect()
+                    let mut values = vec![];
+                    for record in &records {
+                        values.push(self.parse_value(0, record, field_info, column, spec));
+                    }
+                    values.shrink_to_fit();
+                    values
                 }
             })
             .unwrap();
 
         structure.iter()
-            .filter(|column| !column.noninline)
+            .filter(|column| !column.noninline && !column.id)
             .enumerate()
             .map(|(column_index, column_reference)| {
                 // ...Find the specification
@@ -263,14 +262,22 @@ impl shared::Parser for Parser<'_> {
                     definition.spec(column_reference).unwrap_unchecked()
                 };
 
-                let (ref field_info, ref additional_data_range, category_index) = self.field_info[column_index];
+                let field_info = &self.field_info[column_index];
                 
                 // ...For each record, read the column's values
                 records.iter()
                     .zip(ids.iter())
                     .map(|(record, id)| {
-                        let RawValue::U32(id) = id else { unreachable!("Impossible non-u32 index") };
-                        self.parse_value(id[0], record, field_info, category_index, column_reference, spec, additional_data_range)
+                        let id: u32 = match id {
+                            RawValue::U32(data) => data[0] as u32,
+                            RawValue::I32(data) => data[0] as u32,
+                            RawValue::U16(data) => data[0] as u32,
+                            RawValue::I16(data) => data[0] as u32,
+                            RawValue::U8(data) => data[0] as u32,
+                            RawValue::I8(data) => data[0] as u32,
+                            _ => unreachable!("Impossible non-integer index: {:#?}", id)
+                        };
+                        self.parse_value(id, record, field_info, column_reference, spec)
                     })
                     .collect()
             })
@@ -279,20 +286,6 @@ impl shared::Parser for Parser<'_> {
         values.insert(0, ids);
         values.shrink_to_fit();
         values
-    }
-}
-
-// New implementation
-impl Parser<'_> {
-    pub fn get_record_id(&self, record: &[u8], record_index: usize, definition: &Definition, structure: StructureDefinition) -> Option<u32> {
-        structure.iter()
-            .find(|c| c.id)
-            .map(|column| {
-                if column.noninline {
-                    self.ids[record_index]
-                } else {
-                }
-            })
     }
 }
 
@@ -308,17 +301,15 @@ impl Parser<'_> {
     pub fn parse_value(&self,
         id: u32,
         record: &[u8],
-        field_info: &FieldInfo,
-        category_index: usize,
+        field_info: &ExtendedFieldInfo,
         column: &ColumnReference,
         spec: &ColumnDefinition,
-        additional_data_range: &Range<usize>,
     ) -> RawValue {
-        assert_eq!(field_info.arity(), column.arity, "{:#?}", (column, field_info, spec));
+        assert_eq!(field_info.field.arity(), column.arity, "{:#?}", (column, field_info, spec));
 
-        let byte_offset = field_info.offset_bytes();
-        let byte_width = field_info.size_bytes();
-        assert!(byte_width != 0, "Impossible field width {:#?}", field_info);
+        let byte_offset = field_info.field.offset_bytes();
+        let byte_width = field_info.field.size_bytes();
+        assert_ne!(byte_width, 0, "Impossible field width {:#?}", field_info);
 
         let range = Range {
             start: byte_offset,
@@ -326,7 +317,7 @@ impl Parser<'_> {
         };
 
         let raw_bytes = &record[range];
-        self.transform_values_raw(id, raw_bytes, field_info, category_index, column, spec, additional_data_range)
+        self.transform_values_raw(id, raw_bytes, field_info, column, spec)
     }
 
     fn encapsulate_raw(&self, values: &[u8], column: &ColumnReference, spec: &ColumnDefinition) -> RawValue {
@@ -417,11 +408,11 @@ impl Parser<'_> {
         }
     }
 
-    fn read_bitpacked(values: &[u8], field_info: &FieldInfo) -> Vec<u8> {
+    fn read_bitpacked(values: &[u8], field_info: &ExtendedFieldInfo) -> Vec<u8> {
         // At most, 64 bits, aka 8 bytes
-        let byte_width = field_info.size_bytes();
-        let shift_offset = 64 - field_info.size_bits() - (field_info.offset_bits() % 8);
-        let mask_offset = 64 - field_info.size_bits();
+        let byte_width = field_info.field.size_bytes();
+        let shift_offset = 64 - field_info.field.size_bits() - (field_info.field.offset_bits() % 8);
+        let mask_offset = 64 - field_info.field.size_bits();
 
         let mut cursor = values;
 
@@ -440,13 +431,11 @@ impl Parser<'_> {
     fn transform_values_raw(&self,
         id: u32,
         values: &[u8],
-        field_info: &FieldInfo,
-        category_index: usize,
+        field_info: &ExtendedFieldInfo,
         column: &ColumnReference,
-        spec: &ColumnDefinition,
-        additional_data_range: &Range<usize>,
+        spec: &ColumnDefinition
     ) -> RawValue {
-        match field_info.storage_type {
+        match field_info.field.storage_type {
             FieldCompressionType::None { .. } => {
                 self.encapsulate_raw(values, column, spec)
             }
@@ -457,21 +446,20 @@ impl Parser<'_> {
             }
             FieldCompressionType::Common { default, .. } => {
                 assert!(matches!(spec.column_type, ColumnType::Integer | ColumnType::Float),
-                    "Unexpected compression type for non-arithmetic field {:#?}", field_info.storage_type);
+                    "Unexpected compression type for non-arithmetic field {:#?}", field_info.field.storage_type);
                 
-                let default_data = &[default];
-                let default_slice: &[u8] = cast_slice(default_data);
-                let data = self.common.read(category_index, id, default_slice);
+                let value = &[self.common.read(field_info.category_index, id, default)];
+                let raw_value: &[u8] = cast_slice(value);
 
-                self.encapsulate_raw(&data, column, spec)
+                self.encapsulate_raw(raw_value, column, spec)
             }
             FieldCompressionType::BitpackedIndexed { .. } => {
-                let raw_offsets = Self::read_bitpacked(values, field_info);
-                let offsets: &[u32] = cast_slice(&raw_offsets);
+                let mut raw_offsets = Self::read_bitpacked(values, field_info);
+                let offsets: &[u32] = extend_cast_slice(&mut raw_offsets);
 
                 // Shift the pallet data to the range related to this column and
                 // cast the pallet data to u32s.
-                let pallet_data: &[u32] = cast_slice(&self.pallet[additional_data_range.start .. additional_data_range.end]);
+                let pallet_data: &[u32] = cast_slice(&self.pallet[field_info.additional_data_range.clone()]);
 
                 // For each value in the input slice
                 let values : Vec<_> = offsets.iter()
@@ -482,13 +470,13 @@ impl Parser<'_> {
                 self.encapsulate_raw(byte_slice, column, spec)
             }
             FieldCompressionType::BitpackedIndexedArray { arity, .. } => {
-                let raw_offsets = Self::read_bitpacked(values, field_info);
-                let offsets: &[u32] = cast_slice(&raw_offsets);
+                let mut raw_offsets = Self::read_bitpacked(values, field_info);
+                let offsets: &[u32] = extend_cast_slice(&mut raw_offsets);
                 assert_eq!(offsets.len(), 1, "Probably bad expectations for bitpacked indexed pallet array: {:#?}", field_info);
 
                 // Shift the pallet data to the range related to this column and
                 // cast the pallet data to u32s.
-                let pallet_data: &[u32] = cast_slice(&self.pallet[additional_data_range.start .. additional_data_range.end]);
+                let pallet_data: &[u32] = cast_slice(&self.pallet[field_info.additional_data_range.clone()]);
 
                 let range = Range {
                     start: offsets[0] as usize,
@@ -502,6 +490,10 @@ impl Parser<'_> {
             }
         }
     }
+}
+
+fn extend_cast_slice<'a, T : AnyBitPattern, U>(data: &'a mut Vec<U>) -> &'a [T] {
+    todo!("The naive alignment extension works but causes invalid array arities in the output")
 }
 
 /// A table stores all values for all columns of all rows.
@@ -561,6 +553,8 @@ pub mod tests {
         let now = std::time::Instant::now();
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
+
+        println!("{:#?}", rows[0]);
     }
 
     #[test]

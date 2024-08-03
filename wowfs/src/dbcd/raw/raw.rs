@@ -14,7 +14,9 @@ pub trait RawTrait<'a> : Sized {
 
 pub mod details {
     use std::ops::{Deref, Index};
-    use super::{RawTrait};
+    use bytemuck::{cast_slice, AnyBitPattern};
+
+    use super::RawTrait;
 
     pub struct Raw<T> {
         data: T
@@ -63,6 +65,15 @@ pub mod details {
     impl<T> Raw<T> where T : Deref<Target = [u8]> {
         pub fn data(&self) -> &[u8] {
             &self.data
+        }
+
+        pub fn cast<U>(&self) -> &[U] where U : AnyBitPattern {
+            let data = self.data();
+            if data.is_empty() {
+                &[]
+            } else {
+                cast_slice(data)
+            }
         }
     }
 

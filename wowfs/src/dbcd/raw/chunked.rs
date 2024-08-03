@@ -1,6 +1,6 @@
 use std::{iter::Map, ops::Range, slice::Chunks};
 
-pub trait ChunkedTrait : Sized {
+pub trait ChunkedTrait<'a> : Sized {
     /// Constructs a new instance of this type and returns the remainder of the input data.
     ///
     /// # Arguments
@@ -12,7 +12,7 @@ pub trait ChunkedTrait : Sized {
     /// # Panics
     ///
     /// Panics if `stride * count > input.len()` or `stride == 0`.
-    fn from_raw(input: &[u8], stride: usize, count: usize) -> (Self, &[u8]);
+    fn from_raw(input: &'a [u8], stride: usize, count: usize) -> (Self, &'a [u8]);
 }
 
 pub mod details {
@@ -26,21 +26,21 @@ pub mod details {
         stride: usize,
     }
 
-    impl ChunkedTrait for Chunked<Vec<u8>> {
-        fn from_raw(input: &[u8], stride: usize, count: usize) -> (Self, &[u8]) {
+    impl<'a> ChunkedTrait<'a> for Chunked<Vec<u8>> {
+        fn from_raw(input: &'a [u8], stride: usize, count: usize) -> (Self, &'a [u8]) {
             let (data, remainder) = input.split_at(stride * count);
             (Self { data: data.to_vec(), stride }, remainder)
         }
     }
 
-    impl<'a> ChunkedTrait for Chunked<&'a [u8]> {
-        fn from_raw(input: &[u8], stride: usize, count: usize) -> (Self, &[u8]) {
+    impl<'a> ChunkedTrait<'a> for Chunked<&'a [u8]> {
+        fn from_raw(input: &'a [u8], stride: usize, count: usize) -> (Self, &'a [u8]) {
             let (data, remainder) = input.split_at(stride * count);
             (Self { data, stride }, remainder)
         }
     }
 
-    impl<T> Chunked<T> where T : Deref<Target = [u8]> + Default, Chunked<T> : ChunkedTrait {
+    impl<'a, T> Chunked<T> where T : Deref<Target = [u8]> + Default, Chunked<T> : ChunkedTrait<'a> {
         /// Optionally constructs a new instance of this type if the given flag is `true`.
         ///
         /// # Arguments
@@ -58,7 +58,7 @@ pub mod details {
         ///
         /// Panics if `stride * count > input.len()` or `stride == 0`.
         #[inline]
-        pub fn optionally_from(flag: bool, input: &[u8], stride: usize, count: usize) -> (Self, &[u8]) {
+        pub fn optionally_from(flag: bool, input: &'a [u8], stride: usize, count: usize) -> (Self, &'a [u8]) {
             if flag {
                 ChunkedTrait::from_raw(input, stride, count)
             } else {

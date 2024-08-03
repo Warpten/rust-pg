@@ -104,6 +104,13 @@ impl FieldInfo {
     }
 }
 
+#[derive(Debug)]
+pub struct ExtendedFieldInfo {
+    pub field: FieldInfo,
+    pub additional_data_range: Range<usize>,
+    pub category_index: usize,
+}
+
 #[derive(Debug, CustomAttrs)]
 #[attr(
     #[function = "category"]
