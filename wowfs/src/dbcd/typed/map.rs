@@ -33,8 +33,8 @@ impl Table {
     pub fn get(&self, id: u32) -> Option<Record> {
         if let Some(index) = self.index_map.get(&id) {
             let range = Range {
-                start: index * self.columns.len(),
-                end: (index + 1) * self.columns.len(),
+                start: *index,
+                end: *index + self.columns.len(),
             };
 
             if range.start > self.records.len() && range.end > self.records.len() {
@@ -67,6 +67,10 @@ impl Table {
     pub fn len(&self) -> usize {
         self.records.len() / self.columns.len()
     }
+
+    #[inline] pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
 }
 
 /// A DBC record providing accessors over columns based on their name.
@@ -86,6 +90,23 @@ impl Deref for Record<'_> {
 
     fn deref(&self) -> &Self::Target {
         &self.values
+    }
+}
+
+impl Index<&str> for Record<'_> {
+    type Output = RawValue;
+
+    fn index(&self, index: &str) -> &Self::Output {
+        let column_index = self.table.columns[index];
+        &self.values[column_index]
+    }
+}
+
+impl Index<usize> for Record<'_> {
+    type Output = RawValue;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
     }
 }
 
@@ -121,13 +142,4 @@ impl Record<'_> {
 
     #[inline]
     pub fn len(&self) -> usize { self.values.len() }
-}
-
-impl<'a, S> Index<S> for Record<'a> where String : Borrow<S>, S: Hash + Eq  {
-    type Output = RawValue;
-
-    fn index(&self, index: S) -> &Self::Output {
-        let column_index = self.table.columns[&index];
-        &self.values[column_index]
-    }
 }

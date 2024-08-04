@@ -565,8 +565,32 @@ pub mod tests {
 
         let now = std::time::Instant::now();
         let table = dbc.parse_table(&dbd).unwrap();
-        println!("{} rows parsed in {:.3?}", table.len(), now.elapsed());
-        println!("{:#?}", table.get(30).unwrap());
+        println!("{} rows parsed in {:.3?} ({} columns)", table.len(), now.elapsed(), table.column_count());
+        
+        let entry = table.get(30).unwrap();
+        validate_column!(entry, spec, "ID",                            RawValue::I32, &[30]);
+        validate_column!(entry, spec, "CreatureModelScale",            RawValue::F32, &[0.4]);
+        validate_column!(entry, spec, "ModelID",                       RawValue::U16, &[30]);
+        validate_column!(entry, spec, "NPCSoundID",                    RawValue::U16, &[0]);
+        validate_column!(entry, spec, "SizeClass",                     RawValue::I8,  &[1]);
+        validate_column!(entry, spec, "Flags",                         RawValue::U8,  &[0x0]);
+        validate_column!(entry, spec, "Gender",                        RawValue::I8,  &[2]);
+        validate_column!(entry, spec, "ExtendedDisplayInfoID",         RawValue::I32, &[0]);
+        validate_column!(entry, spec, "PortraitTextureFileDataID",     RawValue::I32, &[0]);
+        validate_column!(entry, spec, "CreatureModelAlpha",            RawValue::U8,  &[255]);
+        validate_column!(entry, spec, "SoundID",                       RawValue::U16, &[0]);
+        validate_column!(entry, spec, "PlayerOverrideScale",           RawValue::F32, &[0.0]);
+        validate_column!(entry, spec, "PortraitCreatureDisplayInfoID", RawValue::I32, &[0]);
+        validate_column!(entry, spec, "BloodID",                       RawValue::U8,  &[0]);
+        validate_column!(entry, spec, "ParticleColorID",               RawValue::U16, &[0]);
+        validate_column!(entry, spec, "CreatureGeosetData",            RawValue::I32, &[0]);
+        validate_column!(entry, spec, "ObjectEffectPackageID",         RawValue::U16, &[0]);
+        validate_column!(entry, spec, "AnimReplacementSetID",          RawValue::U16, &[0]);
+        validate_column!(entry, spec, "UnarmedWeaponType",             RawValue::I8,  &[-1]);
+        validate_column!(entry, spec, "StateSpellVisualKitID",         RawValue::I32, &[0]);
+        validate_column!(entry, spec, "PetInstanceScale",              RawValue::F32, &[1.0]);
+        validate_column!(entry, spec, "MountPoofSpellVisualKitID",     RawValue::I32, &[0]);
+        validate_column!(entry, spec, "TextureVariationFileDataID",    RawValue::I32, &[124911, 0, 0]);
     }
 
     #[test]
