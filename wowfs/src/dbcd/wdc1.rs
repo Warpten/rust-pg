@@ -1,20 +1,20 @@
-use std::io::Read;
-use std::ops::{Deref, Range};
-use bytemuck::{cast_slice, AnyBitPattern, NoUninit};
+use std::ops::Range;
+use bytemuck::cast_slice;
 use bytes::Buf;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 
 use crate::dbcd::dbd::{ColumnDefinition, ColumnReference, ColumnType, Definition};
 
-use crate::dbcd::structured::FieldCompressionType;
+use crate::dbcd::structured::{FieldCompressionType, Relation};
 use crate::dbcd::{raw::{Chunked, Raw}, structured::FieldInfo};
 use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait, RawTrait};
 use crate::dbcd::wdc1::chunks::Content;
 
-use super::dbd::StructureDefinition;
+use super::dbd::{ColumnCategory, StructureDefinition};
 use super::raw::RawBuf;
-use super::shared::{self, Parser as ParserTrait, RawValue};
+use super::shared::{self, RawValue};
 use super::structured::{Common, ExtendedFieldInfo, FieldCompressionCategory};
+use super::typed::map::Table;
 
 pub struct WDC1<'a> {
     fields: Chunked<'a>,
@@ -45,7 +45,7 @@ impl WDC1<'_> {
         let _locale = cursor.get_u32_le() as usize;
         let copy_table_size = cursor.get_u32_le() as usize;
         let flags = cursor.get_u16_le() as usize;
-        let id_index = cursor.get_u16_le() as usize;
+        let _id_index = cursor.get_u16_le() as usize;
         let total_field_count = cursor.get_u32_le() as usize;
         let _bitpacked_data_offset = cursor.get_u32_le() as usize;
         let _lookup_column_count = cursor.get_u32_le() as usize;
@@ -101,21 +101,34 @@ impl WDC1<'_> {
 }
 
 impl<'a> shared::Parsable for WDC1<'a> {
-    fn parse_with(self, definition: &Definition, spec: &StructureDefinition) -> Vec<Vec<RawValue>> {
-        Parser::new(self).parse(definition, spec)
+    fn parse_table(self, definition: &Definition) -> Option<Table> {
+        if let Some(spec) = definition.select(Some(self.layout_hash), None) {
+            let (records, ids) = Parser::new(self).parse(definition, spec);
+
+            Some(Table::new(spec, records, ids))
+        } else {
+            None
+        }
     }
 
-    fn select_structure(&self, definition: &Definition) -> Option<&StructureDefinition> {
-        definition.select(Some(self.layout_hash), None)
+    fn parse(self, definition: &Definition) -> Vec<Vec<RawValue>> {
+        if let Some(spec) = definition.select(Some(self.layout_hash), None) {
+            let (records, _) = Parser::new(self).parse(definition, spec);
+            records
+        } else {
+            vec![]
+        }
     }
 }
 
 pub struct Parser<'a> {
     field_info: Vec<ExtendedFieldInfo>,
-    pallet: Vec<u8>,
-    common: Common,
-    ids: Vec<u8>,
 
+    pallet_data: Vec<u8>,
+    common_data: Common,
+    relation_data: Relation,
+
+    noninline_record_ids: Vec<u8>,
     records: Content<'a>,
 }
 impl Parser<'_> {
@@ -170,27 +183,31 @@ impl Parser<'_> {
 
         Parser {
             field_info,
-            pallet: data.pallet.to_vec(),
-            ids: data.id_list.to_vec(),
-            common,
+            pallet_data: data.pallet.to_vec(),
+            common_data: common,
+            relation_data: Relation::new(data.relationship.data()),
 
+            noninline_record_ids: data.id_list.to_vec(),
             records: data.records,
         }
     }
-}
 
-impl shared::Parser for Parser<'_> {
     /// Returns all values for all columns of all rows.
     /// The buffer returned has double indexing based on row index and column index.
     /// The first index is the column index; the second index is the row index.
     /// 
     /// TL;DR: Read with `result[column_index][record_index]`.
-    fn parse(&self, definition: &Definition, structure: &StructureDefinition) -> Vec<Vec<RawValue>> {
+    fn parse(&self, definition: &Definition, structure: &StructureDefinition) -> (Vec<Vec<RawValue>>, Vec<u32>) {
         // Collect record data.
-        let records: Vec<_> = match &self.records {
+        let records: Vec<(&[u8], usize)> = match &self.records {
             Content::Regular { records, .. } => {
                 // Effectively just an array of pointers over contiguous memory
-                records.iter().collect()
+                records.iter()
+                    .enumerate()
+                    .map(|(index, record)| {
+                        (record, index * records.stride())
+                    })
+                    .collect()
             },
             Content::OffsetMap { records, offset_map } => {
                 offset_map.materialize(|mut chunk| {
@@ -202,124 +219,90 @@ impl shared::Parser for Parser<'_> {
                         end: size + offset
                     };
 
-                    &records[range]
-                }).collect()
+                    (&records[range], offset)
+                }).collect::<Vec<_>>()
             }
         };
 
-        // Collect the ID column first
-        let (ids, inject) = structure.iter()
-            .find(|column| column.id)
-            .map(|column| {
-                // Fast path if non-inline
-                if column.noninline {
-                    (cast_slice::<_, u32>(&self.ids).to_vec(), column.index as isize)
-                } else {
-                    // ...Find the specification
+        let mut column_categories: [Vec<_>; ColumnCategory::MAX as usize] = std::array::from_fn(|_| Vec::new());
+        for column in structure.iter() {
+            column_categories[column.category as usize].push(column);
+        }
+
+        // Look for the ID column
+        // Technically we can just look for an id_list and assume the column is non-inline
+        //   but treat DBD as source or truth and follow through it.
+        //   Nothing stops Blizzard from doing stupid things and including a noninline ID
+        //   list while at the same time having the real ID inline.
+        let (ids, injection_point) = column_categories[ColumnCategory::Inlined as usize]
+            .iter()
+            .position(|c| c.id)
+            .map(|idx| {
+                let col = &structure[idx];
+                let spec = unsafe {
+                    // SAFETY: this should never fail; the file is malformed otherwise.
+                    definition.spec(col).unwrap_unchecked()
+                };
+                let efi = &self.field_info[idx];
+
+                let ids: Vec<_> = records.iter().map(|&(rec, _)| {
+                    self.parse_value(0, rec, efi, col, spec, |mut bytes, item_width| {
+                        assert_eq!(item_width, 4);
+
+                        bytes.get_u32_le()
+                    })
+                }).collect();
+
+                (ids, usize::MAX)
+            })
+            .unwrap_or_else(|| {
+                assert_eq!(column_categories[ColumnCategory::ID as usize].len(), 1);
+
+                let ids = cast_slice(&self.noninline_record_ids).to_vec();
+
+                (ids, column_categories[ColumnCategory::ID as usize][0].index)
+            });
+
+        let mut rows: Vec<_> = (0..records.len()).map(|rec_idx| {
+            let (rec, rec_ofs) = &records[rec_idx];
+            let rec_id = ids[rec_idx];
+
+            let mut values: Vec<_> = column_categories[ColumnCategory::Inlined as usize]
+                .iter()
+                .enumerate()
+                .map(|(col_idx, &col)| {
                     let spec = unsafe {
                         // SAFETY: this should never fail; the file is malformed otherwise.
-                        definition.spec(column).unwrap_unchecked()
+                        definition.spec(col).unwrap_unchecked()
                     };
+                    let efi = &self.field_info[col_idx];
 
-                    let field_info = &self.field_info[0];
-                    assert_ne!(field_info.field.storage_type.category(), FieldCompressionCategory::Common);
-
-                    // ...For each record, read the column's values
-                    let mut values = vec![];
-                    for record in &records {
-                        // Ignore the ID passed as argument here - it's only used for common values, which this
-                        // field cannot be
-                        values.push(self.parse_value(0, record, field_info, column, spec, |bytes, item_width| {
-                            assert_eq!(item_width, 4);
-
-                            let mut cursor = bytes;
-                            cursor.get_u32_le()
-                        }));
-                    }
-                    values.shrink_to_fit();
-                    (values, -1)
-                }
-            })
-            .unwrap();
-
-        #[cfg(not(feature = "horizontal_dbc"))]
-        {
-            let mut rows: Vec<_> = {
-                let columns: Vec<_> = structure.iter()
-                    .filter(|c| !c.noninline)
-                    .enumerate()
-                    .map(|(column_index, column_reference)| {
-                        // ...Find the specification
-                        let spec = unsafe {
-                            // SAFETY: this should never fail; the file is malformed otherwise.
-                            definition.spec(column_reference).unwrap_unchecked()
-                        };
-
-                        let field_info = &self.field_info[column_index];
-
-                        (0..records.len()).map(|record_index| {
-                            let record = &records[record_index];
-                            let id = ids[record_index];
-
-                            self.parse_value(id, record, field_info, column_reference, spec, |bytes, item_width| {
-                                self.encapsulate_raw(bytes, item_width, column_reference, spec)
-                            })
-                        }).collect::<Vec<_>>()
-                    }).collect();
-
-                // Transpose now
-                let len = columns[0].len();
-                let mut iters: Vec<_> = columns.into_iter().map(|n| n.into_iter()).collect();
-                (0..len)
-                    .map(|_| {
-                        iters
-                            .iter_mut()
-                            .map(|n| n.next().unwrap())
-                            .collect::<Vec<_>>()
+                    self.parse_value(rec_id, &rec, efi, col, spec, |bytes, item_width| {
+                        self.encapsulate_raw(bytes, item_width, col, spec)
                     })
-                    .collect()
-            };
-            if inject >= 0 {
-                for i in 0..ids.len() {
-                    rows[i].insert(inject as usize, RawValue::U32(smallvec![ids[i]]));
-                }
+                })
+                .collect();
+
+            if let Some(relation) = self.relation_data.get(rec_ofs) {
+                values.push(RawValue::ForeignKey(*relation));
             }
-            rows
+
+            values
+        }).collect();
+
+        if injection_point != usize::MAX {
+            let id_count = ids.len();
+            assert_eq!(id_count, records.len());
+
+            rows.iter_mut()
+                .enumerate()
+                .for_each(|(row_idx, row)| {
+                    // Deviate from DBD spec: not all IDs are u32; treat everything as U32.
+                    row.insert(injection_point, RawValue::U32(smallvec![ids[row_idx]]));
+                });
         }
 
-        #[cfg(feature = "horizontal_dbc")]
-        {
-            let mut rows: Vec<_> = (0..records.len()).map(|record_index| {
-                let record = &records[record_index];
-                let id = ids[record_index];
-
-                let mut row: Vec<_> = structure.iter()
-                    .filter(|c| !c.noninline)
-                    .enumerate()
-                    .map(|(column_index, column_reference)| {
-                        // ...Find the specification
-                        let spec = unsafe {
-                            // SAFETY: this should never fail; the file is malformed otherwise.
-                            definition.spec(column_reference).unwrap_unchecked()
-                        };
-
-                        let field_info = &self.field_info[column_index];
-
-                        self.parse_value(id, record, field_info, column_reference, spec, |bytes, item_width| {
-                            self.encapsulate_raw(bytes, item_width, column_reference, spec)
-                        })
-                    })
-                    .collect();
-
-                if inject >= 0 {
-                    row.insert(inject as usize, RawValue::U32(smallvec![id]));
-                }
-                row
-            }).collect();
-
-            rows.shrink_to_fit();
-            rows
-        }
+        (rows, ids)
     }
 }
 
@@ -384,54 +367,55 @@ impl Parser<'_> {
                     },
                     Content::OffsetMap { .. } => {
                         // Strings are inlined...
-                        let slices : Vec<_> = values.split(|&c| c == 0)
+                        let slices = values.split(|&c| c == 0)
                             .map(|slice| unsafe {
                                 String::from_utf8_unchecked(slice.to_vec())
-                            })
-                            .collect();
+                            });
 
-                        RawValue::String(SmallVec::from_vec(slices))
+                        RawValue::String(SmallVec::from_iter(slices))
                     },
                 }
             },
             ColumnType::Integer => {
                 let step = column.bits.unwrap_or(32);
                 match (step, column.unsigned) {
-                    (0..=8,  false) => RawValue::I8 (SmallVec::from_iter(values.into_iter().map(|&i| i as i8).take(column.arity as _))),
+                    (0..=8,  false) => RawValue::I8 (SmallVec::from_slice(
+                        cast_slice::<_, i8>(&values[..column.arity])
+                    )),
                     (9..=16, false) => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as i16
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::I16(SmallVec::from_iter(expanded))
                     },
                     (0..=32, false) => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as i32
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::I32(SmallVec::from_iter(expanded))
                     },
                     (0..=64, false) => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as i64
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::I64(SmallVec::from_iter(expanded))
                     },
-                    (0..=8,  true)  => RawValue::U8 (SmallVec::from_iter(values.into_iter().copied().take(column.arity as _))),
+                    (0..=8,  true)  => RawValue::U8 (SmallVec::from_slice(&values[..column.arity])),
                     (9..=16, true)  => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as u16
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::U16(SmallVec::from_iter(expanded))
                     },
                     (0..=32, true)  => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as u32
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::U32(SmallVec::from_iter(expanded))
                     },
                     (0..=64, true)  => {
-                        let expanded = values.chunks(item_width).take(column.arity as _).map(|mut data| {
-                            data.get_uint_le(item_width) as u64
+                        let expanded = values[..column.arity * item_width].chunks(item_width).map(|mut c| {
+                            c.get_uint_le(item_width) as _
                         });
                         RawValue::U64(SmallVec::from_iter(expanded))
                     },
@@ -439,6 +423,8 @@ impl Parser<'_> {
                 }
             },
             ColumnType::Float => {
+                assert_eq!(item_width, std::mem::size_of::<f32>());
+
                 RawValue::F32(cast_slice(values).to_smallvec())
             },
         }
@@ -488,7 +474,7 @@ impl Parser<'_> {
 
                 // Common data is aligned to 4 bytes in WDC1 meaning we can just pretend the values read were from
                 // 4 bytes and casts will handle the rest.
-                let value = &[self.common.read(field_info.category_index, id, default)];
+                let value = &[self.common_data.read(field_info.category_index, id, default)];
                 let raw_bytes: &[u8] = cast_slice(value);
 
                 consumer(raw_bytes, 4)
@@ -498,7 +484,7 @@ impl Parser<'_> {
 
                 // Shift the pallet data to the range related to this column and
                 // cast the pallet data to u32s.
-                let pallet_data: &[u32] = cast_slice(&self.pallet[field_info.additional_data_range.clone()]);
+                let pallet_data: &[u32] = cast_slice(&self.pallet_data[field_info.additional_data_range.clone()]);
 
                 // For each value in the input slice
                 let values : Vec<_> = bitpacked_data.iter()
@@ -520,7 +506,7 @@ impl Parser<'_> {
 
                 // Shift the pallet data to the range related to this column and
                 // cast the pallet data to u32s.
-                let values: &[u32] = cast_slice(&self.pallet[range]);
+                let values: &[u32] = cast_slice(&self.pallet_data[range]);
                 let byte_slice: &[u8] = cast_slice(&values);
 
                 consumer(byte_slice, 4)
@@ -566,6 +552,21 @@ pub mod tests {
         let now = std::time::Instant::now();
         let rows = dbc.parse(&dbd);
         println!("{} rows parsed in {:.3?}", rows.len(), now.elapsed());
+    }
+
+    #[test]
+    pub fn test_table() {
+        let dbc_data = include_bytes!("../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
+        let dbd_data = include_bytes!("../../tests/CreatureDisplayInfo.dbd");
+
+        let dbd = Definition::new(dbd_data.lines(), "CreatureDisplayInfo.dbd".to_string()).unwrap();
+        let dbc = WDC1::new(&dbc_data[4..]);
+        let spec = dbd.select(Some(dbc.layout_hash), None).unwrap();
+
+        let now = std::time::Instant::now();
+        let table = dbc.parse_table(&dbd).unwrap();
+        println!("{} rows parsed in {:.3?}", table.len(), now.elapsed());
+        println!("{:#?}", table.get(30).unwrap());
     }
 
     #[test]

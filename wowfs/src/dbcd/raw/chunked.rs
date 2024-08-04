@@ -65,6 +65,8 @@ pub mod details {
                 (Self { data: Default::default(), stride }, input)
             }
         }
+
+        pub fn stride(&self) -> usize { self.stride }
     }
 
     impl<T> Chunked<T> where T : Deref<Target = [u8]> {
@@ -74,8 +76,8 @@ pub mod details {
         /// # Arguments
         ///
         /// * `transform` - A lambda that transforms a slice of bytes.
-        pub fn materialize<F>(&self, transform : F) -> Map<Chunks<'_, u8>, F>
-            where F : FnMut(&[u8]) -> T
+        pub fn materialize<U, F>(&self, transform : F) -> Map<Chunks<'_, u8>, F>
+            where F : FnMut(&[u8]) -> U
         {
             self.data.chunks(self.stride).map(transform)
         }

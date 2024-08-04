@@ -269,18 +269,24 @@ impl Deref for StructureDefinition {
 #[derive(Debug)]
 pub struct ColumnReference {
     pub name: String,
-    pub arity: u32,
+    pub arity: usize,
     pub bits: Option<u32>,
+    pub unsigned: bool,
 
     // These are computed late
     pub index: usize,
 
-    pub unsigned: bool,
+    pub category: ColumnCategory,
     pub id: bool,
-    pub noninline: bool,
-    pub relation: bool,
 }
-impl ColumnReference {
+
+#[repr(u8)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
+pub enum ColumnCategory {
+    ID        = 0,
+    Inlined   = 1,
+    Relation  = 2,
+    MAX
 }
 
 impl TryFrom<&str> for ColumnReference {
@@ -301,7 +307,7 @@ impl TryFrom<&str> for ColumnReference {
                 u32::from_str_radix(capture.as_str(), 10).ok()
             });
             let arity = captures.name("arity").and_then(|capture| {
-                u32::from_str_radix(capture.as_str(), 10).ok()
+                usize::from_str_radix(capture.as_str(), 10).ok()
             }).unwrap_or(1);
 
             let id = attributes.contains(&"id");
@@ -309,17 +315,27 @@ impl TryFrom<&str> for ColumnReference {
             let relation = attributes.contains(&"relation");
             let unsigned = captures.name("unsigned").is_some();
 
+            let category = if !noninline {
+                ColumnCategory::Inlined
+            } else if relation {
+                ColumnCategory::Relation
+            } else if id && noninline {
+                ColumnCategory::ID
+            } else {
+                unreachable!()
+            };
+
             Ok(Self {
                 arity,
                 name,
                 bits,
+                unsigned,
 
                 index: 0,
 
-                unsigned,
+
+                category,
                 id,
-                noninline,
-                relation,
             })
         } else {
             Err(())

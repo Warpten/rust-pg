@@ -14,14 +14,14 @@ pub struct FieldInfo {
     pub storage_type: FieldCompressionType,
 }
 impl FieldInfo {
-    pub fn arity(&self) -> u32 {
+    pub fn arity(&self) -> usize {
         match self.storage_type {
-            FieldCompressionType::BitpackedIndexedArray { arity, .. } => arity,
+            FieldCompressionType::BitpackedIndexedArray { arity, .. } => arity as usize,
             _ => {
                 if self.field_size == 0 {
                     1
                 } else {
-                    (self.field_size_bits / (self.field_size * 8)) as u32
+                    (self.field_size_bits / (self.field_size * 8)) as usize
                 }
             }
         }
