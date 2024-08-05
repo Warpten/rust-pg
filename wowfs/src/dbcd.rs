@@ -1,8 +1,10 @@
 /// This module contains supporting code to parse and process DBD files as well as DBC and DB2 files.
 pub mod dbd;
+pub mod dbc;
 pub mod raw;
 pub mod shared;
 pub mod structured;
 pub mod typed;
 
 pub mod wdc1;
+pub mod wdc5;

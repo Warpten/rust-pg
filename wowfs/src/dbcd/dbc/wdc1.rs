@@ -1,20 +1,19 @@
 use std::ops::Range;
 use bytemuck::cast_slice;
 use bytes::Buf;
+use chunks::Content;
 use smallvec::{smallvec, SmallVec, ToSmallVec};
 
 use crate::dbcd::dbd::{ColumnDefinition, ColumnReference, ColumnType, Definition};
-
 use crate::dbcd::structured::{FieldCompressionType, Relation};
 use crate::dbcd::{raw::{Chunked, Raw}, structured::FieldInfo};
 use crate::dbcd::raw::{ChunkedBuf, ChunkedTrait, RawTrait};
-use crate::dbcd::wdc1::chunks::Content;
+use crate::dbcd::dbd::{ColumnCategory, StructureDefinition};
+use crate::dbcd::raw::RawBuf;
+use crate::dbcd::structured::{Common, ExtendedFieldInfo, FieldCompressionCategory};
+use crate::dbcd::typed::table::Table;
 
-use super::dbd::{ColumnCategory, StructureDefinition};
-use super::raw::RawBuf;
-use super::shared::{self, RawValue};
-use super::structured::{Common, ExtendedFieldInfo, FieldCompressionCategory};
-use super::typed::map::Table;
+use super::shared::{RawValue, DBC};
 
 pub struct WDC1<'a> {
     fields: Chunked<'a>,
@@ -100,7 +99,7 @@ impl WDC1<'_> {
     }
 }
 
-impl<'a> shared::Parsable for WDC1<'a> {
+impl<'a> DBC for WDC1<'a> {
     fn parse_table(self, definition: &Definition) -> Option<Table> {
         if let Some(spec) = definition.select(Some(self.layout_hash), None) {
             let (records, ids) = Parser::new(self).parse(definition, spec);
@@ -131,6 +130,7 @@ pub struct Parser<'a> {
     noninline_record_ids: Vec<u8>,
     records: Content<'a>,
 }
+
 impl Parser<'_> {
     pub fn new(data: WDC1) -> Parser {
         // Collect field info
@@ -528,8 +528,7 @@ mod chunks {
 pub mod tests {
     use std::io::BufRead;
 
-    use crate::dbcd::{dbd::Definition, shared::RawValue};
-    use crate::dbcd::shared::Parsable;
+    use crate::dbcd::{dbc::shared::{RawValue, DBC}, dbd::Definition};
     use super::WDC1;
 
     macro_rules! validate_column {
@@ -543,8 +542,8 @@ pub mod tests {
 
     #[test]
     pub fn test_map() {
-        let dbc_data = include_bytes!("../../tests/wdc1/map.db2.wdc1");
-        let dbd_data = include_bytes!("../../tests/map.dbd.sample");
+        let dbc_data = include_bytes!("../../../tests/wdc1/map.db2.wdc1");
+        let dbd_data = include_bytes!("../../../tests/map.dbd.sample");
 
         let dbd = Definition::new(dbd_data.lines(), "Map.dbd".to_string()).unwrap();
         let dbc = WDC1::new(&dbc_data[4..]);
@@ -556,8 +555,8 @@ pub mod tests {
 
     #[test]
     pub fn test_table() {
-        let dbc_data = include_bytes!("../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
-        let dbd_data = include_bytes!("../../tests/CreatureDisplayInfo.dbd");
+        let dbc_data = include_bytes!("../../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
+        let dbd_data = include_bytes!("../../../tests/CreatureDisplayInfo.dbd");
 
         let dbd = Definition::new(dbd_data.lines(), "CreatureDisplayInfo.dbd".to_string()).unwrap();
         let dbc = WDC1::new(&dbc_data[4..]);
@@ -595,8 +594,8 @@ pub mod tests {
 
     #[test]
     pub fn test_creature_display_info() {
-        let dbc_data = include_bytes!("../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
-        let dbd_data = include_bytes!("../../tests/CreatureDisplayInfo.dbd");
+        let dbc_data = include_bytes!("../../../tests/wdc1/CreatureDisplayInfo.db2.406268DF");
+        let dbd_data = include_bytes!("../../../tests/CreatureDisplayInfo.dbd");
 
         let dbd = Definition::new(dbd_data.lines(), "CreatureDisplayInfo.dbd".to_string()).unwrap();
         let dbc = WDC1::new(&dbc_data[4..]);
@@ -635,8 +634,8 @@ pub mod tests {
     #[test]
     pub fn test_area_table() {
         // Note: in my data set this dbc has been modified so that the last column of DunMorogh is set to 1
-        let dbc_data = include_bytes!("../../tests/wdc1/AreaTable.db2.0CA01129");
-        let dbd_data = include_bytes!("../../tests/AreaTable.dbd");
+        let dbc_data = include_bytes!("../../../tests/wdc1/AreaTable.db2.0CA01129");
+        let dbd_data = include_bytes!("../../../tests/AreaTable.dbd");
 
         let dbd = Definition::new(dbd_data.lines(), "AreaTable.dbd".to_string()).unwrap();
         let dbc = WDC1::new(&dbc_data[4..]);
