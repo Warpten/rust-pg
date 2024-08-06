@@ -5,15 +5,15 @@ use flate2::read::ZlibDecoder;
 
 use super::errors::Error;
 
-struct ChunkInfo {
+pub struct ChunkInfo {
     compressed_size : u32,
     decompressed_size : u32,
     checksum : u128,
 }
 
 pub struct Spec {
-    flags : u8,
-    chunks : Vec<ChunkInfo>,
+    pub flags : u8,
+    pub chunks : Vec<ChunkInfo>,
 }
 
 pub struct BLTE(Vec<u8>, Spec);
